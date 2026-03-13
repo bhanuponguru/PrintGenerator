@@ -5,8 +5,33 @@ import { Template, TemplateInput, ApiResponse } from '@/types/template';
 const COLLECTION_NAME = 'templates';
 
 /**
- * GET /api/templates
- * List all templates, sorted by updated_on descending
+ * @swagger
+ * /api/templates:
+ *   get:
+ *     summary: List all templates
+ *     description: Retrieve all templates sorted by updated_on in descending order
+ *     tags: [Templates]
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved templates
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Template'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export async function GET() {
   try {
@@ -34,8 +59,43 @@ export async function GET() {
 }
 
 /**
- * POST /api/templates
- * Create a new template
+ * @swagger
+ * /api/templates:
+ *   post:
+ *     summary: Create a new template
+ *     description: Create a new template with name, version, and template configuration
+ *     tags: [Templates]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/TemplateInput'
+ *     responses:
+ *       201:
+ *         description: Template created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Template'
+ *       400:
+ *         description: Invalid input data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export async function POST(request: NextRequest) {
   try {

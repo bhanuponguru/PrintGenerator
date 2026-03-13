@@ -6,8 +6,51 @@ import { Template, TemplateUpdate, ApiResponse } from '@/types/template';
 const COLLECTION_NAME = 'templates';
 
 /**
- * GET /api/templates/[id]
- * Get a single template by ID
+ * @swagger
+ * /api/templates/{id}:
+ *   get:
+ *     summary: Get a template by ID
+ *     description: Retrieve a single template by its MongoDB ObjectId
+ *     tags: [Templates]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MongoDB ObjectId of the template
+ *         example: 507f1f77bcf86cd799439011
+ *     responses:
+ *       200:
+ *         description: Template retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Template'
+ *       400:
+ *         description: Invalid template ID format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Template not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export async function GET(
   request: NextRequest,
@@ -55,8 +98,57 @@ export async function GET(
 }
 
 /**
- * PUT /api/templates/[id]
- * Update a template by ID
+ * @swagger
+ * /api/templates/{id}:
+ *   put:
+ *     summary: Update a template
+ *     description: Update an existing template's name, version, or configuration
+ *     tags: [Templates]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MongoDB ObjectId of the template
+ *         example: 507f1f77bcf86cd799439011
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/TemplateUpdate'
+ *     responses:
+ *       200:
+ *         description: Template updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Template'
+ *       400:
+ *         description: Invalid template ID format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Template not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export async function PUT(
   request: NextRequest,
@@ -125,8 +217,55 @@ export async function PUT(
 }
 
 /**
- * DELETE /api/templates/[id]
- * Delete a template by ID (hard delete)
+ * @swagger
+ * /api/templates/{id}:
+ *   delete:
+ *     summary: Delete a template
+ *     description: Permanently delete a template by its ID (hard delete)
+ *     tags: [Templates]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: MongoDB ObjectId of the template
+ *         example: 507f1f77bcf86cd799439011
+ *     responses:
+ *       200:
+ *         description: Template deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                       example: Template deleted successfully
+ *       400:
+ *         description: Invalid template ID format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Template not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 export async function DELETE(
   request: NextRequest,
