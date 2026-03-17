@@ -30,12 +30,30 @@ export async function connectToDatabase(): Promise<MongoConnection> {
   }
 
   // Create new connection
-  const client = new MongoClient(uri);
-  await client.connect();
-  const db = client.db(dbName);
-
-  cachedConnection = { client, db };
-  return cachedConnection;
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 2000 });
+  
+  try {
+    // Attempt to connect with a short timeout to seamlessly fallback to memory-server
+    await client.connect();
+    const db = client.db(dbName);
+    cachedConnection = { client, db };
+    return cachedConnection;
+  } catch (err: any) {
+    if (uri.includes('localhost') || uri.includes('127.0.0.1')) {
+      console.warn('⚠️ Local MongoDB connection failed. Falling back to mongodb-memory-server...');
+      // Dynamically import to avoid stuffing the prod bundle
+      const { MongoMemoryServer } = await import('mongodb-memory-server');
+      const mongoServer = await MongoMemoryServer.create();
+      const memUri = mongoServer.getUri();
+      
+      const memClient = new MongoClient(memUri);
+      await memClient.connect();
+      const db = memClient.db(dbName);
+      cachedConnection = { client: memClient, db };
+      return cachedConnection;
+    }
+    throw err;
+  }
 }
 
 /**

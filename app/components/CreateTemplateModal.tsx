@@ -15,7 +15,7 @@ export default function CreateTemplateModal({
   onError,
 }: CreateTemplateModalProps) {
   const [name,         setName]         = useState('');
-  const [version,      setVersion]      = useState('1.0.0');
+  const [version,      setVersion]      = useState('');
   const [templateJson, setTemplateJson] = useState<Record<string, any> | null>(null);
   const [errors,       setErrors]       = useState<Record<string, string>>({});
   const [loading,      setLoading]      = useState(false);
@@ -24,7 +24,7 @@ export default function CreateTemplateModal({
     const errs: Record<string, string> = {};
     if (!name.trim())    errs.name     = 'Name is required';
     if (!version.trim()) errs.version  = 'Version is required';
-    if (!templateJson)   errs.template = 'Write some content in the editor above';
+    if (!templateJson)   errs.template = 'Document content is required';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -74,7 +74,7 @@ export default function CreateTemplateModal({
             <p className="pg-modal-subtitle">
               Compose your document and insert{' '}
               <span style={{ color: 'var(--pg-accent)', fontFamily: 'var(--pg-font-mono)' }}>
-                {'{ }'}
+                {'{}{}'}
               </span>{' '}
               placeholders where dynamic values will be filled at generation time
             </p>

@@ -123,7 +123,8 @@ export default function Home() {
           </div>
         ) : fetchError ? (
           <div className="pg-error-banner">
-            ⚠ {fetchError}
+            <span>⚠ {fetchError}</span>
+            <button className="pg-btn-primary" onClick={fetchTemplates} style={{ padding: '6px 12px', fontSize: '11px' }}>Retry</button>
           </div>
         ) : templates.length === 0 ? (
           <div className="pg-empty">

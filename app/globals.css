@@ -416,6 +416,11 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+@media (max-width: 600px) {
+  .pg-row {
+    grid-template-columns: 1fr;
+  }
+}
 
 .pg-field {
   display: flex;
@@ -617,6 +622,7 @@ body {
 .pg-tiptap-toolbar {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   padding: 6px 10px;
   background: var(--pg-surface-raise);
@@ -628,8 +634,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  height: 28px;
+  min-width: 32px;
+  height: 32px;
   padding: 0 6px;
   background: transparent;
   border: 1px solid transparent;
@@ -651,7 +657,7 @@ body {
 }
 
 .pg-tb-btn:disabled {
-  opacity: 0.3;
+  opacity: 0.15;
   cursor: not-allowed;
 }
 
@@ -724,6 +730,7 @@ body {
   background: var(--pg-accent-dim);
   padding: 1px 5px;
   border-radius: 3px;
+  white-space: nowrap;
 }
 
 /* ─── ProseMirror editor canvas ──────────────────────────── */
@@ -830,9 +837,7 @@ body {
 }
 
 .pg-tiptap-footer-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--pg-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   white-space: nowrap;
 }

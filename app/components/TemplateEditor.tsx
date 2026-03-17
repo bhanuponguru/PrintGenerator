@@ -4,6 +4,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Placeholder } from '@/lib/tiptap/placeholder';
+import { Bold, Italic, Strikethrough, Heading1, Heading2, List, ListOrdered, Undo, Redo, Braces } from 'lucide-react';
 
 interface TemplateEditorProps {
   /** Initial TipTap JSON content (from editor.getJSON()). Pass undefined for a blank doc. */
@@ -119,7 +120,7 @@ export default function TemplateEditor({
           title="Bold (Ctrl+B)"
           aria-pressed={editor?.isActive('bold')}
         >
-          <strong>B</strong>
+          <Bold size={16} />
         </button>
 
         <button
@@ -129,7 +130,7 @@ export default function TemplateEditor({
           title="Italic (Ctrl+I)"
           aria-pressed={editor?.isActive('italic')}
         >
-          <em>I</em>
+          <Italic size={16} />
         </button>
 
         <button
@@ -139,7 +140,7 @@ export default function TemplateEditor({
           title="Strikethrough"
           aria-pressed={editor?.isActive('strike')}
         >
-          <s>S</s>
+          <Strikethrough size={16} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
@@ -150,14 +151,14 @@ export default function TemplateEditor({
           className={`pg-tb-btn${active('heading', { level: 1 })}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())}
           title="Heading 1"
-        >H1</button>
+        ><Heading1 size={16} /></button>
 
         <button
           type="button"
           className={`pg-tb-btn${active('heading', { level: 2 })}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())}
           title="Heading 2"
-        >H2</button>
+        ><Heading2 size={16} /></button>
 
         <button
           type="button"
@@ -165,15 +166,7 @@ export default function TemplateEditor({
           onMouseDown={cmd(() => editor?.chain().focus().toggleBulletList().run())}
           title="Bullet list"
         >
-          {/* Bullet list icon */}
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <circle cx="2" cy="3.5" r="1.2" fill="currentColor"/>
-            <rect x="5" y="2.7" width="8" height="1.6" rx="0.8" fill="currentColor"/>
-            <circle cx="2" cy="7" r="1.2" fill="currentColor"/>
-            <rect x="5" y="6.2" width="8" height="1.6" rx="0.8" fill="currentColor"/>
-            <circle cx="2" cy="10.5" r="1.2" fill="currentColor"/>
-            <rect x="5" y="9.7" width="8" height="1.6" rx="0.8" fill="currentColor"/>
-          </svg>
+          <List size={16} />
         </button>
 
         <button
@@ -181,7 +174,7 @@ export default function TemplateEditor({
           className={`pg-tb-btn${active('orderedList')}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())}
           title="Ordered list"
-        >1·</button>
+        ><ListOrdered size={16} /></button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
@@ -192,7 +185,7 @@ export default function TemplateEditor({
           onMouseDown={cmd(() => editor?.chain().focus().undo().run())}
           title="Undo (Ctrl+Z)"
           disabled={!editor?.can().undo()}
-        >↩</button>
+        ><Undo size={16} /></button>
 
         <button
           type="button"
@@ -200,7 +193,7 @@ export default function TemplateEditor({
           onMouseDown={cmd(() => editor?.chain().focus().redo().run())}
           title="Redo (Ctrl+Shift+Z)"
           disabled={!editor?.can().redo()}
-        >↪</button>
+        ><Redo size={16} /></button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
@@ -214,9 +207,9 @@ export default function TemplateEditor({
               setKeyDraft('');
               setKeyError('');
             })}
-            title="Insert placeholder  { { key } }"
+            title="Insert placeholder {{key}}"
           >
-            {'{ }'}
+            <Braces size={16} />
           </button>
 
           {showKeyPopover && (
