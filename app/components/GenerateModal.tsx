@@ -9,40 +9,74 @@ interface GenerateModalProps {
   onError:  (msg: string) => void;
 }
 
-/** Recursively extract all {{placeholder}} keys from a template object */
-function extractPlaceholders(obj: unknown, keys = new Set<string>()): Set<string> {
-  if (typeof obj === 'string') {
-    const matches = obj.match(/\{\{(\w+)\}\}/g);
-    if (matches) {
-      matches.forEach((m) => keys.add(m.replace(/\{\{|\}\}/g, '')));
-    }
-  } else if (typeof obj === 'object' && obj !== null) {
-    Object.values(obj).forEach((v) => extractPlaceholders(v, keys));
+/* ─── Placeholder extraction ─────────────────────────────
+ * Handles two formats:
+ *   1. TipTap JSON  — nodes with type:'placeholder' and attrs.key
+ *   2. Legacy JSON  — any string values containing {{key}} patterns
+ * ──────────────────────────────────────────────────────── */
+function extractPlaceholderKeys(template: Record<string, any>): string[] {
+  const keys = new Set<string>();
+
+  // Format 1: TipTap doc
+  if (template?.type === 'doc') {
+    walkTiptapJson(template, (node) => {
+      if (node.type === 'placeholder' && typeof node.attrs?.key === 'string' && node.attrs.key) {
+        keys.add(node.attrs.key);
+      }
+    });
+    return Array.from(keys);
   }
-  return keys;
+
+  // Format 2: Legacy flat JSON — scan all string values for {{key}}
+  walkValues(template, (val: string) => {
+    const matches = val.match(/\{\{(\w+)\}\}/g);
+    if (matches) {
+      matches.forEach((m) => keys.add(m.replace(/^\{\{|\}\}$/g, '')));
+    }
+  });
+
+  return Array.from(keys);
 }
 
+function walkTiptapJson(
+  node: Record<string, any>,
+  visit: (n: Record<string, any>) => void
+) {
+  visit(node);
+  if (Array.isArray(node.content)) {
+    node.content.forEach((child: Record<string, any>) => walkTiptapJson(child, visit));
+  }
+}
+
+function walkValues(obj: unknown, visit: (val: string) => void) {
+  if (typeof obj === 'string') { visit(obj); return; }
+  if (typeof obj === 'object' && obj !== null) {
+    Object.values(obj).forEach((v) => walkValues(v, visit));
+  }
+}
+
+/* ─── Skeleton builder ───────────────────────────────────── */
 function buildDefaultDatapoints(keys: string[]): string {
   const obj: Record<string, string> = {};
   keys.forEach((k) => { obj[k] = ''; });
-  // Two example datapoints so the user sees the array pattern
-  return JSON.stringify([obj, { ...obj }], null, 2);
+  return JSON.stringify(keys.length > 0 ? [obj, { ...obj }] : [{}], null, 2);
 }
 
+/* ─── Component ──────────────────────────────────────────── */
 export default function GenerateModal({ template, onClose, onError }: GenerateModalProps) {
   const placeholderKeys = useMemo(
-    () => Array.from(extractPlaceholders(template.template)),
+    () => extractPlaceholderKeys(template.template),
     [template.template]
   );
 
   const [dataPointsJson, setDataPointsJson] = useState(
     buildDefaultDatapoints(placeholderKeys)
   );
-  const [jsonError, setJsonError] = useState('');
-  const [loading,   setLoading]   = useState(false);
+  const [jsonError,  setJsonError]  = useState('');
+  const [loading,    setLoading]    = useState(false);
   const [downloaded, setDownloaded] = useState(false);
 
-  /** Parse JSON and return count, or null on error */
+  /** Live parse count */
   const parsedCount = useMemo(() => {
     try {
       const arr = JSON.parse(dataPointsJson);
@@ -57,8 +91,8 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
 
     try {
       const parsed = JSON.parse(dataPointsJson);
-      if (!Array.isArray(parsed)) throw new Error('Must be a JSON array');
-      if (parsed.length === 0)    throw new Error('Array must contain at least one data point');
+      if (!Array.isArray(parsed))  throw new Error('Must be a JSON array of objects');
+      if (parsed.length === 0)     throw new Error('Provide at least one data point object');
       dataPoints = parsed;
       setJsonError('');
     } catch (e: any) {
@@ -77,17 +111,15 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
       });
 
       if (!res.ok) {
-        // Try to parse error JSON
         let errMsg = `Server error (${res.status})`;
         try {
           const data = await res.json();
           errMsg = data.error ?? errMsg;
-          // Show missing-key detail if present
           if (data.data?.invalidDataPoints) {
-            const details = data.data.invalidDataPoints
-              .map((p: { index: number; missing: string[] }) =>
-                `Row ${p.index + 1}: missing ${p.missing.join(', ')}`
-              )
+            const details = (
+              data.data.invalidDataPoints as { index: number; missing: string[] }[]
+            )
+              .map((p) => `Row ${p.index + 1}: missing ${p.missing.join(', ')}`)
               .join(' · ');
             errMsg = `${errMsg} — ${details}`;
           }
@@ -114,11 +146,11 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     }
   };
 
-  const generateLabel = (() => {
-    if (loading) return 'Generating…';
-    if (parsedCount === null) return 'Generate ↓';
-    return `Generate ${parsedCount} PDF${parsedCount !== 1 ? 's' : ''} ↓`;
-  })();
+  const btnLabel = loading
+    ? 'Generating…'
+    : parsedCount !== null
+    ? `Generate ${parsedCount} PDF${parsedCount !== 1 ? 's' : ''} ↓`
+    : 'Generate ↓';
 
   return (
     <div
@@ -143,36 +175,31 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
               {template.name}&nbsp;·&nbsp;v{template.version}
             </p>
           </div>
-          <button className="pg-modal-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <button className="pg-modal-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         <div className="pg-modal-body">
-          {/* Detected placeholders */}
+          {/* Detected placeholder chips */}
           {placeholderKeys.length > 0 ? (
             <div className="pg-field">
-              <label className="pg-label">Required Placeholders</label>
+              <label className="pg-label">Detected Placeholders</label>
               <div className="pg-keys-list">
                 {placeholderKeys.map((k) => (
-                  <span key={k} className="pg-key-chip">
-                    {`{{${k}}}`}
-                  </span>
+                  <span key={k} className="pg-key-chip">{`{{${k}}}`}</span>
                 ))}
               </div>
             </div>
           ) : (
             <div className="pg-field">
               <span className="pg-field-hint">
-                No <code style={{ color: 'var(--pg-accent)' }}>{'{{placeholders}}'}</code> detected —
-                the generated PDF will be identical for every data point.
+                No placeholders detected — every generated PDF will be identical.
               </span>
             </div>
           )}
 
-          {/* DataPoints editor */}
+          {/* Data-points JSON editor */}
           <div className="pg-field">
-            <label className="pg-label" htmlFor="g-datapoints">
+            <label className="pg-label" htmlFor="g-dp">
               Data Points
               <span
                 style={{
@@ -181,14 +208,13 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
                   letterSpacing: 0,
                   marginLeft: 6,
                   fontSize: '10px',
-                  fontWeight: 'normal',
                 }}
               >
                 — one object = one PDF in the ZIP
               </span>
             </label>
             <textarea
-              id="g-datapoints"
+              id="g-dp"
               className={`pg-textarea${jsonError ? ' error' : ''}`}
               value={dataPointsJson}
               onChange={(e) => {
@@ -198,18 +224,18 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
               }}
               rows={10}
               spellCheck={false}
-              style={{ minHeight: '240px' }}
+              style={{ minHeight: '230px' }}
             />
             {jsonError ? (
               <span className="pg-field-error">{jsonError}</span>
             ) : (
               <span className="pg-field-hint">
-                JSON array of objects. Each object must supply values for all required placeholders.
+                JSON array of objects. Each object must supply a value for every detected placeholder.
               </span>
             )}
           </div>
 
-          {/* Success indicator */}
+          {/* Download success */}
           {downloaded && (
             <div className="pg-download-ok">
               ✓ ZIP downloaded — check your downloads folder
@@ -226,7 +252,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
             onClick={handleGenerate}
             disabled={loading || parsedCount === null || parsedCount === 0}
           >
-            {generateLabel}
+            {btnLabel}
           </button>
         </div>
       </div>

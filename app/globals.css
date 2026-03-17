@@ -592,3 +592,247 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--pg-border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--pg-text-muted); }
+
+/* ─── Modal XL (for editor) ──────────────────────────────── */
+.pg-modal-xl { max-width: 780px; }
+
+/* ─── TipTap Wrapper ─────────────────────────────────────── */
+.pg-tiptap-wrapper {
+  border: 1px solid var(--pg-border);
+  border-radius: var(--pg-radius);
+  overflow: hidden;
+  transition: border-color var(--pg-ease), box-shadow var(--pg-ease);
+}
+
+.pg-tiptap-wrapper:focus-within {
+  border-color: var(--pg-accent);
+  box-shadow: 0 0 0 2px var(--pg-accent-dim);
+}
+
+.pg-tiptap-wrapper.pg-tiptap-error {
+  border-color: var(--pg-danger);
+}
+
+/* ─── Toolbar ────────────────────────────────────────────── */
+.pg-tiptap-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: var(--pg-surface-raise);
+  border-bottom: 1px solid var(--pg-border);
+  flex-wrap: wrap;
+}
+
+.pg-tb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--pg-text-muted);
+  font-family: var(--pg-font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--pg-ease);
+  white-space: nowrap;
+  line-height: 1;
+  user-select: none;
+}
+
+.pg-tb-btn:hover:not(:disabled) {
+  color: var(--pg-text);
+  background: var(--pg-surface);
+  border-color: var(--pg-border);
+}
+
+.pg-tb-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pg-tb-active {
+  color: var(--pg-accent) !important;
+  background: var(--pg-accent-dim) !important;
+  border-color: rgba(232, 184, 75, 0.25) !important;
+}
+
+.pg-tb-btn--accent {
+  color: var(--pg-accent);
+  border-color: rgba(232, 184, 75, 0.25);
+  background: var(--pg-accent-dim);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.pg-tb-btn--accent:hover:not(:disabled) {
+  background: rgba(232, 184, 75, 0.2) !important;
+  border-color: rgba(232, 184, 75, 0.45) !important;
+  color: var(--pg-accent) !important;
+}
+
+.pg-tb-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--pg-border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* ─── Insert-placeholder popover ─────────────────────────── */
+.pg-tb-placeholder-host {
+  position: relative;
+}
+
+.pg-key-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 300;
+  background: var(--pg-surface-raise);
+  border: 1px solid var(--pg-border);
+  border-radius: var(--pg-radius);
+  padding: 14px 16px;
+  width: 310px;
+  box-shadow: var(--pg-shadow);
+  animation: pgSlideUp 0.16s ease;
+}
+
+.pg-key-popover-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--pg-text-muted);
+  margin-bottom: 2px;
+}
+
+.pg-key-popover-hint {
+  font-size: 11px;
+  color: var(--pg-text-muted);
+  margin-bottom: 0;
+  line-height: 1.5;
+}
+
+.pg-key-popover-code {
+  font-family: var(--pg-font-mono);
+  color: var(--pg-accent);
+  font-size: 11px;
+  background: var(--pg-accent-dim);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ─── ProseMirror editor canvas ──────────────────────────── */
+.pg-tiptap-content {
+  background: var(--pg-code-bg);
+}
+
+.pg-prosemirror {
+  min-height: 200px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 16px 18px;
+  color: var(--pg-text);
+  font-family: var(--pg-font-mono);
+  font-size: 13px;
+  line-height: 1.9;
+  outline: none;
+}
+
+/* Typography inside editor */
+.pg-prosemirror h1 {
+  font-family: var(--pg-font-serif);
+  font-size: 22px;
+  font-style: italic;
+  margin-bottom: 8px;
+  color: var(--pg-text);
+}
+.pg-prosemirror h2 {
+  font-family: var(--pg-font-serif);
+  font-size: 17px;
+  font-style: italic;
+  margin-bottom: 6px;
+  color: var(--pg-text);
+}
+.pg-prosemirror p   { margin-bottom: 4px; }
+.pg-prosemirror ul,
+.pg-prosemirror ol  { padding-left: 22px; margin-bottom: 6px; }
+.pg-prosemirror li  { margin-bottom: 2px; }
+
+.pg-prosemirror strong { color: var(--pg-text); }
+.pg-prosemirror em     { color: var(--pg-text-muted); }
+
+/* Placeholder cursor caret indicator */
+.pg-prosemirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--pg-text-muted);
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+  font-size: 13px;
+}
+
+/* ─── Inline Placeholder node chip (rendered in ProseMirror) */
+.pg-prosemirror span[data-placeholder='true'] {
+  display: inline-flex;
+  align-items: center;
+  background: var(--pg-accent-dim);
+  color: var(--pg-accent);
+  border: 1px solid rgba(232, 184, 75, 0.28);
+  border-radius: 4px;
+  padding: 0px 7px 1px;
+  font-family: var(--pg-font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.7;
+  cursor: default;
+  user-select: none;
+  vertical-align: baseline;
+  position: relative;
+  top: -1px;
+  /* Add {{ }} wrapper visually via pseudo-elements */
+}
+
+.pg-prosemirror span[data-placeholder='true']::before {
+  content: '{{';
+  margin-right: 1px;
+  opacity: 0.55;
+  font-size: 10px;
+}
+
+.pg-prosemirror span[data-placeholder='true']::after {
+  content: '}}';
+  margin-left: 1px;
+  opacity: 0.55;
+  font-size: 10px;
+}
+
+/* Selection style for placeholder chips */
+.pg-prosemirror span[data-placeholder='true'].ProseMirror-selectednode {
+  border-color: var(--pg-accent);
+  box-shadow: 0 0 0 2px var(--pg-accent-dim);
+}
+
+/* ─── Editor footer (detected keys) ─────────────────────── */
+.pg-tiptap-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--pg-surface-raise);
+  border-top: 1px solid var(--pg-border);
+}
+
+.pg-tiptap-footer-label {
+  font-size: 10px;
+  color: var(--pg-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}

@@ -1,18 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import TemplateEditor from './TemplateEditor';
 
 interface CreateTemplateModalProps {
   onClose:   () => void;
   onSuccess: () => void;
   onError:   (msg: string) => void;
 }
-
-const DEFAULT_TEMPLATE_JSON = `{
-  "title": "{{title}}",
-  "recipient": "{{recipient}}",
-  "body": "{{body}}"
-}`;
 
 export default function CreateTemplateModal({
   onClose,
@@ -21,22 +16,15 @@ export default function CreateTemplateModal({
 }: CreateTemplateModalProps) {
   const [name,         setName]         = useState('');
   const [version,      setVersion]      = useState('1.0.0');
-  const [templateJson, setTemplateJson] = useState(DEFAULT_TEMPLATE_JSON);
+  const [templateJson, setTemplateJson] = useState<Record<string, any> | null>(null);
   const [errors,       setErrors]       = useState<Record<string, string>>({});
   const [loading,      setLoading]      = useState(false);
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (!name.trim())    errs.name    = 'Name is required';
-    if (!version.trim()) errs.version = 'Version is required';
-    try {
-      const parsed = JSON.parse(templateJson);
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-        errs.template = 'Template must be a JSON object';
-      }
-    } catch {
-      errs.template = 'Invalid JSON — check your syntax';
-    }
+    if (!name.trim())    errs.name     = 'Name is required';
+    if (!version.trim()) errs.version  = 'Version is required';
+    if (!templateJson)   errs.template = 'Write some content in the editor above';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -51,7 +39,7 @@ export default function CreateTemplateModal({
         body: JSON.stringify({
           name:     name.trim(),
           version:  version.trim(),
-          template: JSON.parse(templateJson),
+          template: templateJson,
         }),
       });
       const data = await res.json();
@@ -72,19 +60,26 @@ export default function CreateTemplateModal({
       className="pg-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="pg-modal" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
+      <div
+        className="pg-modal pg-modal-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-modal-title"
+      >
         <div className="pg-modal-header">
           <div>
             <h2 className="pg-modal-title" id="create-modal-title">
               New Template
             </h2>
             <p className="pg-modal-subtitle">
-              Define a reusable document template with placeholders
+              Compose your document and insert{' '}
+              <span style={{ color: 'var(--pg-accent)', fontFamily: 'var(--pg-font-mono)' }}>
+                {'{ }'}
+              </span>{' '}
+              placeholders where dynamic values will be filled at generation time
             </p>
           </div>
-          <button className="pg-modal-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <button className="pg-modal-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         <div className="pg-modal-body">
@@ -116,28 +111,18 @@ export default function CreateTemplateModal({
             </div>
           </div>
 
-          {/* Template JSON editor */}
+          {/* TipTap Editor */}
           <div className="pg-field">
-            <label className="pg-label" htmlFor="c-template">Template JSON</label>
-            <textarea
-              id="c-template"
-              className={`pg-textarea${errors.template ? ' error' : ''}`}
-              value={templateJson}
-              onChange={(e) => setTemplateJson(e.target.value)}
-              rows={9}
-              spellCheck={false}
-              style={{ minHeight: '220px' }}
+            <label className="pg-label">Document Content</label>
+            <TemplateEditor
+              onChange={(json) => {
+                setTemplateJson(json);
+                if (errors.template) setErrors((e) => ({ ...e, template: '' }));
+              }}
+              hasError={!!errors.template}
             />
-            {errors.template ? (
+            {errors.template && (
               <span className="pg-field-error">{errors.template}</span>
-            ) : (
-              <span className="pg-field-hint">
-                Use{' '}
-                <span style={{ color: 'var(--pg-accent)', fontFamily: 'var(--pg-font-mono)' }}>
-                  {'{{placeholder}}'}
-                </span>{' '}
-                syntax for dynamic values that will be filled at generation time
-              </span>
             )}
           </div>
         </div>

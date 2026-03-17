@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import TemplateEditor from './TemplateEditor';
 import type { Template } from '../page';
 
 interface EditTemplateModalProps {
@@ -8,6 +9,11 @@ interface EditTemplateModalProps {
   onClose:   () => void;
   onSuccess: () => void;
   onError:   (msg: string) => void;
+}
+
+/** Return true if the value looks like a TipTap JSON doc */
+function isTiptapDoc(value: Record<string, any>): boolean {
+  return value?.type === 'doc' && Array.isArray(value?.content);
 }
 
 export default function EditTemplateModal({
@@ -18,24 +24,26 @@ export default function EditTemplateModal({
 }: EditTemplateModalProps) {
   const [name,         setName]         = useState(template.name);
   const [version,      setVersion]      = useState(template.version);
-  const [templateJson, setTemplateJson] = useState(
-    JSON.stringify(template.template, null, 2)
-  );
-  const [errors,  setErrors]  = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
+  const [templateJson, setTemplateJson] = useState<Record<string, any>>(template.template);
+  const [errors,       setErrors]       = useState<Record<string, string>>({});
+  const [loading,      setLoading]      = useState(false);
+
+  /**
+   * If the stored template is already a TipTap doc, initialise the editor with it.
+   * If it's legacy JSON (created via raw API), show a notice and start with a blank doc
+   * so the user can re-author it visually.
+   */
+  const { initialEditorContent, isLegacy } = useMemo(() => {
+    if (isTiptapDoc(template.template)) {
+      return { initialEditorContent: template.template, isLegacy: false };
+    }
+    return { initialEditorContent: undefined, isLegacy: true };
+  }, [template.template]);
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!name.trim())    errs.name    = 'Name is required';
     if (!version.trim()) errs.version = 'Version is required';
-    try {
-      const parsed = JSON.parse(templateJson);
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-        errs.template = 'Template must be a JSON object';
-      }
-    } catch {
-      errs.template = 'Invalid JSON — check your syntax';
-    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -50,7 +58,7 @@ export default function EditTemplateModal({
         body: JSON.stringify({
           name:     name.trim(),
           version:  version.trim(),
-          template: JSON.parse(templateJson),
+          template: templateJson,
         }),
       });
       const data = await res.json();
@@ -71,22 +79,48 @@ export default function EditTemplateModal({
       className="pg-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="pg-modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+      <div
+        className="pg-modal pg-modal-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-modal-title"
+      >
         <div className="pg-modal-header">
           <div>
             <h2 className="pg-modal-title" id="edit-modal-title">
               Edit Template
             </h2>
-            <p className="pg-modal-subtitle" style={{ fontFamily: 'var(--pg-font-serif)', fontStyle: 'italic' }}>
-              {template.name}
+            <p
+              className="pg-modal-subtitle"
+              style={{ fontFamily: 'var(--pg-font-serif)', fontStyle: 'italic' }}
+            >
+              {template.name}&nbsp;·&nbsp;v{template.version}
             </p>
           </div>
-          <button className="pg-modal-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <button className="pg-modal-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         <div className="pg-modal-body">
+          {/* Legacy template notice */}
+          {isLegacy && (
+            <div
+              style={{
+                background: 'rgba(232,184,75,0.06)',
+                border: '1px solid rgba(232,184,75,0.2)',
+                borderRadius: 'var(--pg-radius)',
+                padding: '10px 14px',
+                fontSize: 12,
+                color: 'var(--pg-accent)',
+                lineHeight: 1.6,
+              }}
+            >
+              ℹ This template was created with raw JSON (via API or an older version of the UI).
+              The editor is starting blank — save to migrate it to the rich-text format, or leave
+              it unchanged by clicking Cancel.
+            </div>
+          )}
+
+          {/* Name + Version */}
           <div className="pg-row">
             <div className="pg-field">
               <label className="pg-label" htmlFor="e-name">Template Name</label>
@@ -112,24 +146,13 @@ export default function EditTemplateModal({
             </div>
           </div>
 
+          {/* TipTap editor */}
           <div className="pg-field">
-            <label className="pg-label" htmlFor="e-template">Template JSON</label>
-            <textarea
-              id="e-template"
-              className={`pg-textarea${errors.template ? ' error' : ''}`}
-              value={templateJson}
-              onChange={(e) => setTemplateJson(e.target.value)}
-              rows={9}
-              spellCheck={false}
-              style={{ minHeight: '220px' }}
+            <label className="pg-label">Document Content</label>
+            <TemplateEditor
+              initialContent={initialEditorContent}
+              onChange={(json) => setTemplateJson(json)}
             />
-            {errors.template ? (
-              <span className="pg-field-error">{errors.template}</span>
-            ) : (
-              <span className="pg-field-hint">
-                Modify the JSON structure or placeholders. Changes take effect on next generation.
-              </span>
-            )}
           </div>
         </div>
 
