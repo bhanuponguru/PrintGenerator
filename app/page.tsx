@@ -1,65 +1,201 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import TemplateCard from './components/TemplateCard';
+import CreateTemplateModal from './components/CreateTemplateModal';
+import EditTemplateModal from './components/EditTemplateModal';
+import GenerateModal from './components/GenerateModal';
+
+export interface Template {
+  _id: string;
+  name: string;
+  version: string;
+  template: Record<string, any>;
+  created_on: string;
+  updated_on: string;
+}
+
+type ToastState = { message: string; type: 'success' | 'error' } | null;
 
 export default function Home() {
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Modal states
+  const [showCreate, setShowCreate]         = useState(false);
+  const [editTemplate, setEditTemplate]     = useState<Template | null>(null);
+  const [generateTemplate, setGenerateTemplate] = useState<Template | null>(null);
+
+  // Toast
+  const [toast, setToast] = useState<ToastState>(null);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const fetchTemplates = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
+    try {
+      const res  = await fetch('/api/templates');
+      const data = await res.json();
+      if (data.success) {
+        setTemplates(data.data ?? []);
+      } else {
+        setFetchError(data.error ?? 'Failed to load templates');
+      }
+    } catch {
+      setFetchError('Unable to connect to server');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res  = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Template deleted', 'success');
+        fetchTemplates();
+      } else {
+        showToast(data.error ?? 'Delete failed', 'error');
+      }
+    } catch {
+      showToast('Network error', 'error');
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="pg-root">
+      {/* ── Header ── */}
+      <header className="pg-header">
+        <div className="pg-header-inner">
+          <div className="pg-brand">
+            {/* Print-lines icon */}
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+              <rect width="28" height="28" rx="5" fill="var(--pg-accent)" opacity="0.13" />
+              <rect x="6"  y="7"  width="16" height="2" rx="1" fill="var(--pg-accent)" />
+              <rect x="6"  y="12" width="11" height="2" rx="1" fill="var(--pg-accent)" opacity="0.65" />
+              <rect x="6"  y="17" width="13" height="2" rx="1" fill="var(--pg-accent)" opacity="0.45" />
+              <rect x="6"  y="22" width="8"  height="2" rx="1" fill="var(--pg-accent)" opacity="0.28" />
+            </svg>
+            <div>
+              <h1 className="pg-title">PrintGenerator</h1>
+              <p className="pg-subtitle">Template Management</p>
+            </div>
+          </div>
+
+          <button className="pg-btn-primary" onClick={() => setShowCreate(true)}>
+            + New Template
+          </button>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      {/* ── Main ── */}
+      <main className="pg-main">
+        <div className="pg-section-header">
+          <div>
+            <p className="pg-section-title">All Templates</p>
+            {!loading && !fetchError && (
+              <p className="pg-section-count">
+                {templates.length} template{templates.length !== 1 ? 's' : ''}
+              </p>
+            )}
+          </div>
+          {!loading && !fetchError && templates.length > 0 && (
+            <button className="pg-btn-ghost" onClick={fetchTemplates} style={{ fontSize: '11px' }}>
+              ↻ Refresh
+            </button>
+          )}
         </div>
+
+        {loading ? (
+          <div className="pg-loading">
+            <span className="pg-spinner" />
+            Loading templates
+          </div>
+        ) : fetchError ? (
+          <div className="pg-error-banner">
+            ⚠ {fetchError}
+          </div>
+        ) : templates.length === 0 ? (
+          <div className="pg-empty">
+            <div className="pg-empty-icon">□</div>
+            <p style={{ color: 'var(--pg-text)', fontSize: '15px', fontFamily: 'var(--pg-font-serif)', fontStyle: 'italic' }}>
+              No templates yet
+            </p>
+            <p style={{ color: 'var(--pg-text-muted)', fontSize: '12px', maxWidth: '260px', lineHeight: 1.7 }}>
+              Create your first template to start generating filled PDF documents.
+            </p>
+            <button className="pg-btn-primary" onClick={() => setShowCreate(true)}>
+              Create Template
+            </button>
+          </div>
+        ) : (
+          <div className="pg-grid">
+            {templates.map((t) => (
+              <TemplateCard
+                key={t._id}
+                template={t}
+                onEdit={() => setEditTemplate(t)}
+                onDelete={() => handleDelete(t._id)}
+                onGenerate={() => setGenerateTemplate(t)}
+              />
+            ))}
+          </div>
+        )}
       </main>
+
+      {/* ── Modals ── */}
+      {showCreate && (
+        <CreateTemplateModal
+          onClose={() => setShowCreate(false)}
+          onSuccess={() => {
+            setShowCreate(false);
+            fetchTemplates();
+            showToast('Template created!', 'success');
+          }}
+          onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
+
+      {editTemplate && (
+        <EditTemplateModal
+          template={editTemplate}
+          onClose={() => setEditTemplate(null)}
+          onSuccess={() => {
+            setEditTemplate(null);
+            fetchTemplates();
+            showToast('Template updated!', 'success');
+          }}
+          onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
+
+      {generateTemplate && (
+        <GenerateModal
+          template={generateTemplate}
+          onClose={() => setGenerateTemplate(null)}
+          onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
+
+      {/* ── Toast ── */}
+      {toast && (
+        <div
+          key={toast.message + Date.now()}
+          className={`pg-toast pg-toast--${toast.type}`}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
