@@ -1,6 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { generateHTML } from '@tiptap/html';
+import StarterKit from '@tiptap/starter-kit';
+import { Placeholder } from '@/lib/tiptap/placeholder';
 import type { Template } from '../page';
 
 interface TemplateCardProps {
@@ -25,13 +28,18 @@ function formatDate(dateStr: string): string {
 export default function TemplateCard({ template, onEdit, onDelete, onGenerate }: TemplateCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const previewText = (() => {
+  /** Render TipTap JSON → HTML; fall back to a text summary for legacy/non-TipTap data */
+  const previewHtml = useMemo(() => {
     try {
-      return JSON.stringify(template.template, null, 2).slice(0, 200);
+      if (template.template?.type === 'doc') {
+        return generateHTML(template.template, [StarterKit, Placeholder]);
+      }
+      // Legacy / non-TipTap template — show a simple text representation
+      return `<p style="opacity:.5;font-style:italic">${JSON.stringify(template.template, null, 2).slice(0, 200)}…</p>`;
     } catch {
-      return '{ ... }';
+      return '<p style="opacity:.5;font-style:italic">Unable to render preview</p>';
     }
-  })();
+  }, [template.template]);
 
   return (
     <div className={`pg-card${confirmDelete ? ' pg-card-deleting' : ''}`}>
@@ -51,8 +59,11 @@ export default function TemplateCard({ template, onEdit, onDelete, onGenerate }:
         </div>
       </div>
 
-      <div className="pg-card-preview" aria-label="Template JSON preview">
-        {previewText}{previewText.length >= 200 ? '\n…' : ''}
+      <div className="pg-card-preview" aria-label="Template preview">
+        <div
+          className="pg-card-preview-inner"
+          dangerouslySetInnerHTML={{ __html: previewHtml }}
+        />
       </div>
 
       {confirmDelete ? (

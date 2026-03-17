@@ -211,18 +211,75 @@ body {
 }
 
 .pg-card-preview {
-  background: var(--pg-code-bg);
+  background: #ffffff;
   border: 1px solid var(--pg-border);
   border-radius: 4px;
-  padding: 10px 12px;
-  font-size: 11px;
-  color: rgba(232, 184, 75, 0.5);
-  font-family: var(--pg-font-mono);
-  white-space: pre;
-  overflow: hidden;
-  max-height: 70px;
+  padding: 0;
   margin-bottom: 16px;
-  line-height: 1.6;
+  max-height: 120px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Fade-out at the bottom to hint at more content */
+.pg-card-preview::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: linear-gradient(to bottom, rgba(255,255,255,0) 0%, #ffffff 100%);
+  pointer-events: none;
+}
+
+/* Inner container — mimics the DOCUMENT_CSS used for real PDF generation */
+.pg-card-preview-inner {
+  padding: 12px 14px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 8px;
+  line-height: 1.5;
+  color: #111111;
+}
+
+.pg-card-preview-inner h1,
+.pg-card-preview-inner h2,
+.pg-card-preview-inner h3 {
+  margin: 0 0 4px;
+  line-height: 1.25;
+  color: #111111;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.pg-card-preview-inner h1 { font-size: 14px; }
+.pg-card-preview-inner h2 { font-size: 11px; }
+.pg-card-preview-inner h3 { font-size: 9px; }
+
+.pg-card-preview-inner p {
+  margin: 0 0 4px;
+  color: #111111;
+}
+
+.pg-card-preview-inner ul,
+.pg-card-preview-inner ol {
+  margin: 0 0 4px 14px;
+  padding: 0;
+}
+
+.pg-card-preview-inner li {
+  margin: 0 0 2px;
+}
+
+/* Placeholder chips inside preview */
+.pg-card-preview-inner span[data-placeholder='true'] {
+  display: inline;
+  background: rgba(232, 184, 75, 0.18);
+  color: #b38a2e;
+  border: 1px solid rgba(232, 184, 75, 0.35);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 7.5px;
+  font-weight: 600;
 }
 
 .pg-card-actions {
