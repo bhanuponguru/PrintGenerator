@@ -4,9 +4,9 @@ import { useState } from 'react';
 import TemplateEditor from './TemplateEditor';
 
 interface CreateTemplateModalProps {
-  onClose:   () => void;
+  onClose: () => void;
   onSuccess: () => void;
-  onError:   (msg: string) => void;
+  onError: (msg: string) => void;
 }
 
 export default function CreateTemplateModal({
@@ -14,17 +14,17 @@ export default function CreateTemplateModal({
   onSuccess,
   onError,
 }: CreateTemplateModalProps) {
-  const [name,         setName]         = useState('');
-  const [version,      setVersion]      = useState('');
+  const [name, setName] = useState('');
+  const [version, setVersion] = useState('');
   const [templateJson, setTemplateJson] = useState<Record<string, any> | null>(null);
-  const [errors,       setErrors]       = useState<Record<string, string>>({});
-  const [loading,      setLoading]      = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
-    if (!name.trim())    errs.name     = 'Name is required';
-    if (!version.trim()) errs.version  = 'Version is required';
-    if (!templateJson)   errs.template = 'Document content is required';
+    if (!name.trim()) errs.name = 'Name is required';
+    if (!version.trim()) errs.version = 'Version is required';
+    if (!templateJson) errs.template = 'Document content is required';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -34,11 +34,11 @@ export default function CreateTemplateModal({
     setLoading(true);
     try {
       const res = await fetch('/api/templates', {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name:     name.trim(),
-          version:  version.trim(),
+          name: name.trim(),
+          version: version.trim(),
           template: templateJson,
         }),
       });
@@ -72,11 +72,10 @@ export default function CreateTemplateModal({
               New Template
             </h2>
             <p className="pg-modal-subtitle">
-              Compose your document and insert{' '}
+              Compose your document and insert placeholders through the {' '}
               <span style={{ color: 'var(--pg-accent)', fontFamily: 'var(--pg-font-mono)' }}>
-                {'{}{}'}
-              </span>{' '}
-              placeholders where dynamic values will be filled at generation time
+                {'{}'}
+              </span>{' '} option below, where dynamic values will be filled at generation time
             </p>
           </div>
           <button className="pg-modal-close" onClick={onClose} aria-label="Close">✕</button>

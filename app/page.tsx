@@ -19,12 +19,12 @@ type ToastState = { message: string; type: 'success' | 'error' } | null;
 
 export default function Home() {
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [loading, setLoading]     = useState(true);
+  const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Modal states
-  const [showCreate, setShowCreate]         = useState(false);
-  const [editTemplate, setEditTemplate]     = useState<Template | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editTemplate, setEditTemplate] = useState<Template | null>(null);
   const [generateTemplate, setGenerateTemplate] = useState<Template | null>(null);
 
   // Toast
@@ -39,7 +39,7 @@ export default function Home() {
     setLoading(true);
     setFetchError(null);
     try {
-      const res  = await fetch('/api/templates');
+      const res = await fetch('/api/templates');
       const data = await res.json();
       if (data.success) {
         setTemplates(data.data ?? []);
@@ -59,7 +59,7 @@ export default function Home() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res  = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         showToast('Template deleted', 'success');
