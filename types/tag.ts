@@ -26,3 +26,13 @@ export interface TagUpdateInput {
   old_name: string;
   new_name: string;
 }
+
+/**
+ * API Response format for a Tag sent to the client
+ */
+export interface TagResponse {
+  _id: string;
+  name: string;
+  template_ids: string[];
+  created_on: string;
+}

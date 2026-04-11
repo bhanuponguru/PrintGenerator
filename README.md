@@ -85,6 +85,10 @@ Next.js utilizes "App Routing", translating folders inside `app/` directly into 
 - **`app/components/GenerateModal.tsx`**: Pipeline interface consuming standard JSON to interface directly with batch endpoint PDF creations.
 - **`app/components/TemplateCard.tsx`**: Displays simplified summary versions and timestamps cleanly organizing visual hierarchies into a grid loop.
 - **`app/components/TemplateEditor.tsx`**: Rich-Text WYSIWYG formatting powerhouse integrating Tiptap rendering allowing programmatic target insertion.
+- **`app/components/TagManagementSection.tsx`**: Renders the complete table interface summarizing all tags, usages, and providing quick access interaction buttons.
+- **`app/components/CreateTagModal.tsx` & `EditTagModal.tsx`**: Dedicated simple dialog prompts capturing strictly-validated tag name configurations.
+- **`app/components/DeleteConfirmModal.tsx`**: Generic warning confirmation interceptor blocking immediate destructive API actions directly.
+- **`app/components/TagTemplatesModal.tsx`**: Dynamic modal re-rendering isolated grids explicitly rendering only template components referencing the currently selected Tag ID.
 
 ### Underlying Utilities (`lib/`)
 - **`lib/document-generation.ts`**: The primary compilation engine deeply substituting JSON combinations through layout ASTs mounting headless Chrome environments creating PDFs.

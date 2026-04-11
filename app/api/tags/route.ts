@@ -1,27 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { ApiResponse } from '@/types/template';
-import { Tag, TagCreateInput, TagUpdateInput } from '@/types/tag';
+import { Tag, TagCreateInput, TagUpdateInput, TagResponse } from '@/types/tag';
 
 const COLLECTION_NAME = 'tags';
 
 /**
- * Handle GET requests to retrieve all tag names.
+ * Handle GET requests to retrieve all tag details.
  */
 export async function GET() {
   try {
     const db = await getDb();
     const tags = await db
       .collection<Tag>(COLLECTION_NAME)
-      .find({}, { projection: { name: 1, _id: 0 } })
+      .find({})
       .sort({ name: 1 })
       .toArray();
 
-    const tagNames = tags.map(tag => tag.name);
+    const tagResponses: TagResponse[] = tags.map(tag => ({
+      _id: tag._id.toString(),
+      name: tag.name,
+      template_ids: (tag.template_ids || []).map(id => id.toString()),
+      created_on: tag._id.getTimestamp().toISOString(),
+    }));
 
-    const response: ApiResponse<string[]> = {
+    const response: ApiResponse<TagResponse[]> = {
       success: true,
-      data: tagNames,
+      data: tagResponses,
     };
 
     return NextResponse.json(response, { status: 200 });

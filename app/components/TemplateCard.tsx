@@ -6,8 +6,11 @@ import StarterKit from '@tiptap/starter-kit';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import type { Template } from '../page';
 
+import { TagResponse } from '@/types/tag';
+
 interface TemplateCardProps {
   template: Template;
+  tags: TagResponse[];
   onEdit:     () => void;
   onDelete:   () => void;
   onGenerate: () => void;
@@ -40,7 +43,7 @@ function formatDate(dateStr: string): string {
  * @param onDelete Triggered event sequence managing safe template dataset removal.
  * @param onGenerate Triggered event initializing the bulk template document output flow.
  */
-export default function TemplateCard({ template, onEdit, onDelete, onGenerate }: TemplateCardProps) {
+export default function TemplateCard({ template, tags, onEdit, onDelete, onGenerate }: TemplateCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   /** Render TipTap JSON → HTML; fall back to a text summary for legacy/non-TipTap data */
@@ -73,6 +76,20 @@ export default function TemplateCard({ template, onEdit, onDelete, onGenerate }:
           <span>{formatDate(template.updated_on)}</span>
         </div>
       </div>
+
+      {template.tag_ids && template.tag_ids.length > 0 && (
+        <div className="pg-keys-list" style={{ marginBottom: '14px' }}>
+          {template.tag_ids.map(tagId => {
+            const tagMatch = tags.find(t => t._id === tagId);
+            if (!tagMatch) return null;
+            return (
+              <span key={tagId} className="pg-key-chip">
+                {tagMatch.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       <div className="pg-card-preview" aria-label="Template preview">
         <div
