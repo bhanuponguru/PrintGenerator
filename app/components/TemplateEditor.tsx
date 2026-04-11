@@ -17,6 +17,14 @@ interface TemplateEditorProps {
 /** Validate placeholder key: letters, digits, underscores, must start with letter/underscore */
 const KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
+/**
+ * Comprehensive Rich Text visual document styling wrapper using the TipTap framework.
+ * Specializes in facilitating the insertion of programmatic placeholders enabling parameter
+ * replacement during static PDF export phases later. Emits consistent parsed JSON representations.
+ * @param initialContent The pre-hydrated map of editor operations and node configurations (if any).
+ * @param onChange Subscribed callback firing actively whenever editor mutation occurs returning state.
+ * @param hasError Prop flagging invalid structural editor states for exterior visual styling shifts.
+ */
 export default function TemplateEditor({
   initialContent,
   onChange,
@@ -28,20 +36,25 @@ export default function TemplateEditor({
   const keyInputRef = useRef<HTMLInputElement>(null);
 
   /* ── Tiptap editor ───────────────────────────────────── */
+  // Initialize the core TipTap editing context using a standardized StarterKit configuration
+  // We disable unsupported complex web-only layout blocks to ensure clean PDF conversions later
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        // Disable features that don't make sense for document templates
+        // Disable features that don't make sense for strict standard A4 document templates
         codeBlock: false,
         blockquote: false,
         horizontalRule: false,
       }),
+      // Inject our custom TipTap Node parser which converts {{keys}} into syntax-highlighted chips
       Placeholder,
     ],
+    // Hydrate the editor with either a stored layout graph, or default to an empty text tree
     content: initialContent ?? {
       type: 'doc',
       content: [{ type: 'paragraph' }],
     },
+    // Bind change listener firing backwards into parent state on every modification stroke
     onUpdate({ editor: ed }) {
       onChange(ed.getJSON());
     },
@@ -66,9 +79,11 @@ export default function TemplateEditor({
   }, [showKeyPopover]);
 
   /* ── Insert placeholder node at cursor ───────────────── */
+  // Generates and inserts a custom variable chip representation directly into the document AST
   const insertPlaceholder = useCallback(() => {
     const key = keyDraft.trim().replace(/\s+/g, '_');
 
+    // Input sanitization guarding against malformed JSON keys breaking the backend mapping
     if (!key) {
       setKeyError('Key cannot be empty');
       return;
@@ -78,16 +93,18 @@ export default function TemplateEditor({
       return;
     }
 
+    // Programmatically fire an insertion command injecting a configured 'placeholder' Node
     editor
       ?.chain()
       .focus()
       .insertContent({
-        type: 'placeholder',
-        attrs: { key },
-        content: [{ type: 'text', text: key }],
+        type: 'placeholder', // Specialized custom extension identifier
+        attrs: { key }, // The raw data tracking parameter variable
+        content: [{ type: 'text', text: key }], // Renderable visual label mapping inside editor
       })
       .run();
 
+    // Reset localized internal UI states
     setKeyDraft('');
     setKeyError('');
     setShowKeyPopover(false);
@@ -260,25 +277,35 @@ export default function TemplateEditor({
   );
 }
 
-/* ─── Footer: live-detected placeholder chips ────────────── */
+/**
+ * A sub-component dedicated purely to displaying detected operational dynamic target templates
+ * embedded directly within the overarching document body through traversal.
+ * @param editor The bound TipTap editor scope defining the primary mutation tree state space.
+ */
 function EditorPlaceholderFooter({ editor }: { editor: ReturnType<typeof useEditor> | null }) {
   const [keys, setKeys] = useState<string[]>([]);
 
   useEffect(() => {
     if (!editor) return;
 
+    // Core event handler attached to TipTap lifecycle querying active document layout state
     const update = () => {
+      // Local accumulator filtering off duplicate nodes tracking identical data targets
       const found = new Set<string>();
       const json  = editor.getJSON();
+      
+      // Perform a full AST traversal inspecting all sub-elements for our placeholder type
       walkTiptapJson(json, (node) => {
         if (node.type === 'placeholder' && node.attrs?.key) {
           found.add(node.attrs.key as string);
         }
       });
+      // Synchronize isolated component scope
       setKeys(Array.from(found));
     };
 
     update();
+    // Subscribe and strictly manage memory bounds through unmounting cleanup callbacks
     editor.on('update', update);
     return () => { editor.off('update', update); };
   }, [editor]);
@@ -295,7 +322,12 @@ function EditorPlaceholderFooter({ editor }: { editor: ReturnType<typeof useEdit
   );
 }
 
-/** Shallow recursive walk of TipTap JSON nodes */
+/**
+ * Progressively recursive helper loop iterating exclusively onto compatible mapped JSON child
+ * elements extracting properties targeting deeply nested layouts seamlessly within Tiptap.
+ * @param node Actively reviewed single Document Element mapped node properties map.
+ * @param visit Supplied functionality trigger execution evaluating found valid node scopes.
+ */
 function walkTiptapJson(
   node: Record<string, any>,
   visit: (n: Record<string, any>) => void

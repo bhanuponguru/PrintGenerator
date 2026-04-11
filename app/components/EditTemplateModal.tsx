@@ -11,11 +11,25 @@ interface EditTemplateModalProps {
   onError:   (msg: string) => void;
 }
 
-/** Return true if the value looks like a TipTap JSON doc */
+/**
+ * Performs a sanity check on a provided document map to establish if it properly
+ * conforms to the structural expectations of an editable TipTap object.
+ * @param value The arbitrary document layout sequence being validated.
+ * @returns Boolean representing TipTap parsing viability.
+ */
 function isTiptapDoc(value: Record<string, any>): boolean {
   return value?.type === 'doc' && Array.isArray(value?.content);
 }
 
+/**
+ * Interactive Dialog overlay primarily purposed to load and mutate existing data arrays
+ * reflecting document templates. Incorporates backwards compatibility handlers to manage
+ * older raw JSON configurations safely gracefully adapting structures for rich text editing.
+ * @param template A populated Template profile representing the existing saved item properties.
+ * @param onClose Callback trigger designed to close this element scope without saving.
+ * @param onSuccess Execution pipeline signalling the completion of dataset transformations.
+ * @param onError Extricated handling pipe signalling application execution failures.
+ */
 export default function EditTemplateModal({
   template,
   onClose,

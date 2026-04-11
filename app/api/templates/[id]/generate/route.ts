@@ -74,6 +74,8 @@ export async function POST(
   try {
     const { id } = await params;
 
+    // Validate the incoming URL parameter to ensure it is a structurally valid BSON ObjectId
+    // Prevent malformed queries directly hitting the MongoDB driver
     if (!ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid template ID format' },
@@ -81,6 +83,8 @@ export async function POST(
       );
     }
 
+    // Extract the JSON body payload containing the template variables
+    // Safely support both "dataPoints" and "datapoints" object keys for legacy robustness
     const body = (await request.json()) as GenerateDocumentsRequest;
     const dataPoints = body.dataPoints ?? body.datapoints;
 
@@ -91,6 +95,8 @@ export async function POST(
       );
     }
 
+    // Iterate through every mapped object item ensuring they are properly formatted dictionaries
+    // We cannot render arrays or primitive strings/numbers at the top level
     const hasInvalidDataPoint = dataPoints.some(
       (dataPoint) => !dataPoint || typeof dataPoint !== 'object' || Array.isArray(dataPoint)
     );
@@ -102,6 +108,7 @@ export async function POST(
       );
     }
 
+    // Instantiate a connection and pull the master Template record defining our visual structure
     const db = await getDb();
     const templateDoc = await db
       .collection<Template>(COLLECTION_NAME)
@@ -118,7 +125,10 @@ export async function POST(
       );
     }
 
+    // Deep traverse the TipTap configuration retrieving every unique placeholder key we demand from the client
     const requiredPlaceholderKeys = collectRequiredPlaceholderKeys(templateDoc.template);
+    
+    // Accumulator array tracking data array indexes that miss critical placeholders
     const invalidDataPoints: Array<{ index: number; missing: string[] }> = [];
 
     for (let i = 0; i < dataPoints.length; i += 1) {
@@ -131,6 +141,8 @@ export async function POST(
       }
     }
 
+    // Fail early if any provided sequence item is missing required variables.
+    // This prevents partial ZIP generation failures or broken visual PDFs.
     if (invalidDataPoints.length > 0) {
       return NextResponse.json(
         {
@@ -144,22 +156,30 @@ export async function POST(
       );
     }
 
+    // Initialize the asynchronous ZIP archive wrapper
     const zip = new JSZip();
 
+    // Primary Generation Loop: Iterate sequentially across the supplied variable combinations
     for (let i = 0; i < dataPoints.length; i += 1) {
+      // 1. Swap placeholders in the JSON AST with the specific dictionary mappings
       const filledDocument = applyTemplateDataPoint(templateDoc.template, dataPoints[i]);
+      // 2. Synthesize complete browser-ready HTML from the AST
       const html = renderDocumentHtml(filledDocument);
+      // 3. Mount a headless Chrome instance to snapshot the DOM as an A4 formatted PDF
       const pdfBytes = await createPdfFromDocumentHtml(html);
 
+      // Immediately buffer the completed file representation into the active ZIP directory
       zip.file(`document-${i + 1}.pdf`, pdfBytes);
     }
 
+    // Crunch the buffered files compiling a unified byte array via DEFLATE compression
     const zipBytes = await zip.generateAsync({
       type: 'uint8array',
       compression: 'DEFLATE',
       compressionOptions: { level: 6 },
     });
 
+    // Encapsulate the result into a Web ReadableStream for optimized HTTP transfer chunking
     const zipStream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(zipBytes);

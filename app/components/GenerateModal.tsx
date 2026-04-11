@@ -14,6 +14,12 @@ interface GenerateModalProps {
  *   1. TipTap JSON  — nodes with type:'placeholder' and attrs.key
  *   2. Legacy JSON  — any string values containing {{key}} patterns
  * ──────────────────────────────────────────────────────── */
+/**
+ * Recursively scans a template definition extracting all dynamic placeholder target keys.
+ * Handles both rich-text Tiptap JSON layouts as well as fallback flat JSON string objects.
+ * @param template The structured document template to traverse for placeholders.
+ * @returns An array of unique string keys corresponding to discovered interpolation names.
+ */
 function extractPlaceholderKeys(template: Record<string, any>): string[] {
   const keys = new Set<string>();
 
@@ -38,6 +44,11 @@ function extractPlaceholderKeys(template: Record<string, any>): string[] {
   return Array.from(keys);
 }
 
+/**
+ * Specifically traverses a complex TipTap node tree deeply executing a visitor sequence.
+ * @param node The current document JSON node element under traversal check.
+ * @param visit The callback function executing operations on matching node instances.
+ */
 function walkTiptapJson(
   node: Record<string, any>,
   visit: (n: Record<string, any>) => void
@@ -48,6 +59,12 @@ function walkTiptapJson(
   }
 }
 
+/**
+ * Progressively recurses through generic JSON structures mapping string elements.
+ * Extracted explicitly to handle legacy plain JSON template definitions.
+ * @param obj The structured object or raw value being evaluated.
+ * @param visit A localized callback taking a string, checking it for placeholder text.
+ */
 function walkValues(obj: unknown, visit: (val: string) => void) {
   if (typeof obj === 'string') { visit(obj); return; }
   if (typeof obj === 'object' && obj !== null) {
@@ -56,6 +73,12 @@ function walkValues(obj: unknown, visit: (val: string) => void) {
 }
 
 /* ─── Skeleton builder ───────────────────────────────────── */
+/**
+ * Iterates through a provided array of required template placeholder strings to create
+ * an empty initialization dataset mapping structure ready for user populating.
+ * @param keys A flat array list specifying all tracked and necessary value keys.
+ * @returns A JSON stringified array containing a base empty datapoint template structure.
+ */
 function buildDefaultDatapoints(keys: string[]): string {
   const obj: Record<string, string> = {};
   keys.forEach((k) => { obj[k] = ''; });
@@ -63,6 +86,14 @@ function buildDefaultDatapoints(keys: string[]): string {
 }
 
 /* ─── Component ──────────────────────────────────────────── */
+/**
+ * Presentational and operational Modal Dialog handling batch PDF creation jobs.
+ * Permits users to supply data points via a JSON text field which are then mapped
+ * out to a zip file full of distinctly mapped PDF iterations of the parent Template.
+ * @param template The driving Template data object specifying layouts and structure.
+ * @param onClose Control callback dismissing this modal window manually.
+ * @param onError Exception piping mechanism reporting failure states outwards.
+ */
 export default function GenerateModal({ template, onClose, onError }: GenerateModalProps) {
   const placeholderKeys = useMemo(
     () => extractPlaceholderKeys(template.template),
@@ -87,15 +118,19 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
   }, [dataPointsJson]);
 
   const handleGenerate = async () => {
+    // Array holding parsed submission inputs mapped to template requirements
     let dataPoints: unknown[];
 
     try {
+      // Try to parse the user's manual string JSON payload
       const parsed = JSON.parse(dataPointsJson);
+      // Validate the high-level struct conforming to array collections exclusively
       if (!Array.isArray(parsed))  throw new Error('Must be a JSON array of objects');
       if (parsed.length === 0)     throw new Error('Provide at least one data point object');
       dataPoints = parsed;
       setJsonError('');
     } catch (e: any) {
+      // Isolate malformed JSON block syntax strings returning user friendly feedback
       setJsonError(e.message ?? 'Invalid JSON');
       return;
     }
@@ -104,6 +139,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     setDownloaded(false);
 
     try {
+      // Fire raw generation request to backend microservice 
       const res = await fetch(`/api/templates/${template._id}/generate`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,10 +147,13 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
       });
 
       if (!res.ok) {
+        // Fallback generic HTTP error text wrapper
         let errMsg = `Server error (${res.status})`;
         try {
+          // Unpack custom API payload responses specifically isolating validation issues
           const data = await res.json();
           errMsg = data.error ?? errMsg;
+          // Dynamically map exact unsupplied variables to help users debug their own queries
           if (data.data?.invalidDataPoints) {
             const details = (
               data.data.invalidDataPoints as { index: number; missing: string[] }[]
@@ -128,13 +167,20 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
         return;
       }
 
+      // Convert backend streaming ZIP archive blob into isolated object string
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
+      
+      // Implement an invisible DOM anchor technique simulating direct local user downloads
       const a    = document.createElement('a');
       a.href     = url;
+      // Sanitize standard file string name configurations formatting a safe zip property
       a.download = `${template.name.toLowerCase().replace(/\s+/g, '-')}-documents.zip`;
+      
       document.body.appendChild(a);
       a.click();
+      
+      // Immediately garbage collect the object string representation
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 

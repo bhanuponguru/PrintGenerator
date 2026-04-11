@@ -17,6 +17,12 @@ export interface Template {
 
 type ToastState = { message: string; type: 'success' | 'error' } | null;
 
+/**
+ * Top-level primary dashboard entry point orchestrating the entire front-end user experience.
+ * Manages the canonical collection of templates while facilitating triggers for creating,
+ * editing, generating, and deleting entities via integrated nested module dialog views.
+ * Controls centralized error handling loops and success messaging feedback toasts.
+ */
 export default function Home() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,38 +42,51 @@ export default function Home() {
   };
 
   const fetchTemplates = useCallback(async () => {
+    // Reset visual loading and error states preparing for data fetch
     setLoading(true);
     setFetchError(null);
+    
     try {
+      // Execute the primary GET request querying the total templates collection
       const res = await fetch('/api/templates');
       const data = await res.json();
+      
+      // Unpack response gracefully bypassing null/undefined results
       if (data.success) {
         setTemplates(data.data ?? []);
       } else {
         setFetchError(data.error ?? 'Failed to load templates');
       }
     } catch {
+      // Catch network-level systemic failures cleanly without crashing
       setFetchError('Unable to connect to server');
     } finally {
+      // Unconditionally terminate the loading state locking the view
       setLoading(false);
     }
   }, []);
 
+  // Guarantee UI sync with the database purely on initial mount phases
   useEffect(() => {
     fetchTemplates();
   }, [fetchTemplates]);
 
   const handleDelete = async (id: string) => {
     try {
+      // Issue a hard DELETE destructive operation for the specific target
       const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
       const data = await res.json();
+      
       if (data.success) {
+        // Sequentially queue user feedback and independently trigger a visual refresh
         showToast('Template deleted', 'success');
         fetchTemplates();
       } else {
+        // Expose underlying database constraints or deletion failures
         showToast(data.error ?? 'Delete failed', 'error');
       }
     } catch {
+      // Gracefully capture disconnected environment failures
       showToast('Network error', 'error');
     }
   };

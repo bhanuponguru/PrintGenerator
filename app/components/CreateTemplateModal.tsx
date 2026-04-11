@@ -9,6 +9,14 @@ interface CreateTemplateModalProps {
   onError: (msg: string) => void;
 }
 
+/**
+ * Standalone application dialog dedicated entirely to the instantiation of new
+ * Document Templates using a WYSIWYG TipTap wrapper structure handling layout and formatting.
+ * Manages state persistence, validation pipelines, and initial submission controls.
+ * @param onClose Callback to hide the overlay instance externally.
+ * @param onSuccess Emitted function signalling a complete API posting operation.
+ * @param onError Triggers parent exception catching mechanisms returning error states.
+ */
 export default function CreateTemplateModal({
   onClose,
   onSuccess,

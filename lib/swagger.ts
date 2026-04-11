@@ -1,5 +1,10 @@
 import { createSwaggerSpec } from 'next-swagger-doc';
 
+/**
+ * Generates and returns a complete OpenAPI / Swagger configuration specification
+ * describing the routes, metadata, servers, and component schemas of the project API.
+ * @returns The built specification document for rendering API documentation.
+ */
 export const getApiDocs = () => {
   const spec = createSwaggerSpec({
     apiFolder: 'app/api',

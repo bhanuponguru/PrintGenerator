@@ -13,6 +13,12 @@ interface TemplateCardProps {
   onGenerate: () => void;
 }
 
+/**
+ * Standardizes raw date strings into human-readable shorthand regional US formatted text.
+ * Falls back safely to emitting the raw input if the parsing operation fails formatting.
+ * @param dateStr The datetime value string to process visually.
+ * @returns A formatted user-friendly text representation of the Date.
+ */
 function formatDate(dateStr: string): string {
   try {
     return new Date(dateStr).toLocaleDateString('en-US', {
@@ -25,6 +31,15 @@ function formatDate(dateStr: string): string {
   }
 }
 
+/**
+ * Reusable visual card element depicting a summary breakdown of a single unified Template.
+ * Manages action triggers for previewing, document generation flows, editing, and deletion, 
+ * offering an un-editable visual summary component for collection listings.
+ * @param template The master template data model tracking properties of this entity.
+ * @param onEdit Triggered event function initializing the update property workflow.
+ * @param onDelete Triggered event sequence managing safe template dataset removal.
+ * @param onGenerate Triggered event initializing the bulk template document output flow.
+ */
 export default function TemplateCard({ template, onEdit, onDelete, onGenerate }: TemplateCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
