@@ -41,30 +41,30 @@ export default function TagManagementSection({
                 {templateCount} {templateCount === 1 ? 'template' : 'templates'}
               </span>
             </div>
-            
+
             <p style={{ fontSize: '13px', color: 'var(--pg-text-muted)', marginBottom: '20px' }}>
               Created on {date}
             </p>
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button 
-                className="pg-btn-ghost" 
+              <button
+                className="pg-btn-ghost"
                 onClick={() => onViewTemplatesClick(tag)}
                 style={{ flex: 1, padding: '6px 12px', fontSize: '13px' }}
               >
                 View Templates
               </button>
-              <button 
-                className="pg-btn-ghost" 
+              <button
+                className="pg-btn-ghost"
                 onClick={() => onEditClick(tag)}
                 style={{ padding: '6px 12px', fontSize: '13px' }}
               >
                 Edit
               </button>
-              <button 
-                className="pg-btn-ghost" 
+              <button
+                className="pg-btn-ghost"
                 onClick={() => onDeleteClick(tag)}
-                style={{ padding: '6px 12px', fontSize: '13px', color: 'var(--pg-error)' }}
+                style={{ padding: '6px 12px', fontSize: '13px', color: 'var(--pg-danger)' }}
               >
                 Delete
               </button>

@@ -28,7 +28,7 @@ export default function DeleteConfirmModal({
       >
         <div className="pg-modal-header">
           <div>
-            <h2 className="pg-modal-title" id="delete-confirm-title" style={{ color: 'var(--pg-error)' }}>
+            <h2 className="pg-modal-title" id="delete-confirm-title" style={{ color: 'var(--pg-danger)' }}>
               {title}
             </h2>
           </div>
@@ -45,11 +45,10 @@ export default function DeleteConfirmModal({
           <button className="pg-btn-ghost" onClick={onClose} disabled={loading}>
             Cancel
           </button>
-          <button 
-            className="pg-btn-primary" 
-            onClick={onConfirm} 
+          <button
+            className="pg-btn-danger"
+            onClick={onConfirm}
             disabled={loading}
-            style={{ backgroundColor: 'var(--pg-error)', borderColor: 'var(--pg-error)' }}
           >
             {loading ? 'Deleting…' : 'Delete'}
           </button>
