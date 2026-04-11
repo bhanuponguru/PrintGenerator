@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
-import { getDb } from '@/lib/mongodb';
+import { getDb, getClient, executeTransaction } from '@/lib/mongodb';
 import { Template, TemplateUpdate, ApiResponse } from '@/types/template';
 
 const COLLECTION_NAME = 'templates';
@@ -192,65 +192,73 @@ export async function PUT(
         : [];
     }
 
-    const db = await getDb();
-    
-    // Read the original document state FIRST to derive accurate association diffs 
-    const originalTemplate = await db.collection<Template>(COLLECTION_NAME).findOne({ _id: new ObjectId(id) });
-    if (!originalTemplate) {
-      return NextResponse.json(
-        { success: false, error: 'Template not found' },
-        { status: 404 }
-      );
-    }
-    
-    const result = await db
-      .collection<Template>(COLLECTION_NAME)
-      .findOneAndUpdate(
-        { _id: new ObjectId(id) },
-        { $set: updateFields },
-        { returnDocument: 'after' }
-      );
+    const client = await getClient();
 
-    // Apply strict differential tagging updating if tag definitions actually changed
-    if (updateFields.tag_ids !== undefined) {
-      const oldTagIds = originalTemplate.tag_ids || [];
-      const newTagIds = updateFields.tag_ids;
+    try {
+      const resultObj = await executeTransaction(client, async (session) => {
+        const db = client.db(process.env.MONGODB_DB);
+        
+        // Read the original document state FIRST to derive accurate association diffs 
+        const originalTemplate = await db.collection<Template>(COLLECTION_NAME).findOne({ _id: new ObjectId(id) }, { session });
+        if (!originalTemplate) {
+          throw new Error('Template not found');
+        }
+        
+        const finalResult = await db
+          .collection<Template>(COLLECTION_NAME)
+          .findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            { $set: updateFields },
+            { returnDocument: 'after', session }
+          );
 
-      const oldSet = new Set(oldTagIds.map(t => t.toString()));
-      const newSet = new Set(newTagIds.map(t => t.toString()));
+        // Apply strict differential tagging updating if tag definitions actually changed
+        if (updateFields.tag_ids !== undefined) {
+          const oldTagIds = originalTemplate.tag_ids || [];
+          const newTagIds = updateFields.tag_ids;
 
-      // Identify strict additions and removals without blowing out entire arrays
-      const tagsToRemoveFrom = oldTagIds.filter(t => !newSet.has(t.toString()));
-      const tagsToAddTo = newTagIds.filter(t => !oldSet.has(t.toString()));
+          const oldSet = new Set(oldTagIds.map((t: any) => t.toString()));
+          const newSet = new Set(newTagIds.map((t: any) => t.toString()));
 
-      if (tagsToRemoveFrom.length > 0) {
-        await db.collection('tags').updateMany(
-          { _id: { $in: tagsToRemoveFrom } },
-          { $pull: { template_ids: new ObjectId(id) } as any }
-        );
-      }
-      if (tagsToAddTo.length > 0) {
-        await db.collection('tags').updateMany(
-          { _id: { $in: tagsToAddTo } },
-          { $push: { template_ids: new ObjectId(id) } as any }
-        );
-      }
-    }
+          // Identify strict additions and removals without blowing out entire arrays
+          const tagsToRemoveFrom = oldTagIds.filter((t: any) => !newSet.has(t.toString()));
+          const tagsToAddTo = newTagIds.filter((t: any) => !oldSet.has(t.toString()));
 
-    if (!result) {
-      const response: ApiResponse = {
-        success: false,
-        error: 'Template not found',
+          if (tagsToRemoveFrom.length > 0) {
+            await db.collection('tags').updateMany(
+              { _id: { $in: tagsToRemoveFrom } },
+              { $pull: { template_ids: new ObjectId(id) } as any },
+              { session }
+            );
+          }
+          if (tagsToAddTo.length > 0) {
+            await db.collection('tags').updateMany(
+              { _id: { $in: tagsToAddTo } },
+              { $push: { template_ids: new ObjectId(id) } as any },
+              { session }
+            );
+          }
+        }
+        
+        return finalResult;
+      });
+
+      const response: ApiResponse<Template> = {
+        success: true,
+        data: resultObj as Template,
       };
-      return NextResponse.json(response, { status: 404 });
+
+      return NextResponse.json(response, { status: 200 });
+    } catch (err: any) {
+      if (err.message === 'Template not found') {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Template not found',
+        };
+        return NextResponse.json(response, { status: 404 });
+      }
+      throw err;
     }
-
-    const response: ApiResponse<Template> = {
-      success: true,
-      data: result,
-    };
-
-    return NextResponse.json(response, { status: 200 });
   } catch (error) {
     console.error('Error updating template:', error);
     const response: ApiResponse = {
@@ -328,44 +336,49 @@ export async function DELETE(
       return NextResponse.json(response, { status: 400 });
     }
 
-    const db = await getDb();
-    
-    // Attempt lookup caching tag lists prior directly mutating templates destructively
-    const template = await db.collection<Template>(COLLECTION_NAME).findOne({ _id: new ObjectId(id) });
-    if (!template) {
-      return NextResponse.json(
-        { success: false, error: 'Template not found' },
-        { status: 404 }
-      );
+    const client = await getClient();
+
+    try {
+      await executeTransaction(client, async (session) => {
+        const db = client.db(process.env.MONGODB_DB);
+        
+        // Attempt lookup caching tag lists prior directly mutating templates destructively
+        const template = await db.collection<Template>(COLLECTION_NAME).findOne({ _id: new ObjectId(id) }, { session });
+        if (!template) {
+          throw new Error('Template not found');
+        }
+
+        // Execute the primary Template deletion 
+        await db
+          .collection(COLLECTION_NAME)
+          .deleteOne({ _id: new ObjectId(id) }, { session });
+
+        // Unwind all associated references bound on the isolated tags records
+        const tagIds = template.tag_ids || [];
+        if (tagIds.length > 0) {
+          await db.collection('tags').updateMany(
+            { _id: { $in: tagIds } },
+            { $pull: { template_ids: new ObjectId(id) } as any },
+            { session }
+          );
+        }
+      });
+
+      const response: ApiResponse = {
+        success: true,
+        data: { message: 'Template deleted successfully' },
+      };
+
+      return NextResponse.json(response, { status: 200 });
+    } catch (error: any) {
+      if (error.message === 'Template not found') {
+        return NextResponse.json(
+          { success: false, error: 'Template not found' },
+          { status: 404 }
+        );
+      }
+      throw error;
     }
-
-    // Execute the primary Template deletion 
-    const result = await db
-      .collection(COLLECTION_NAME)
-      .deleteOne({ _id: new ObjectId(id) });
-
-    if (result.deletedCount === 0) {
-      return NextResponse.json(
-        { success: false, error: 'Template not found' },
-        { status: 404 }
-      );
-    }
-
-    // Unwind all associated references bound on the isolated tags records
-    const tagIds = template.tag_ids || [];
-    if (tagIds.length > 0) {
-      await db.collection('tags').updateMany(
-        { _id: { $in: tagIds } },
-        { $pull: { template_ids: new ObjectId(id) } as any }
-      );
-    }
-
-    const response: ApiResponse = {
-      success: true,
-      data: { message: 'Template deleted successfully' },
-    };
-
-    return NextResponse.json(response, { status: 200 });
   } catch (error) {
     console.error('Error deleting template:', error);
     const response: ApiResponse = {

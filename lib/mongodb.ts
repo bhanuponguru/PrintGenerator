@@ -1,4 +1,4 @@
-import { MongoClient, Db } from 'mongodb';
+import { MongoClient, Db, ClientSession } from 'mongodb';
 
 interface MongoConnection {
   client: MongoClient;
@@ -42,8 +42,9 @@ export async function connectToDatabase(): Promise<MongoConnection> {
     if (uri.includes('localhost') || uri.includes('127.0.0.1')) {
       console.warn('⚠️ Local MongoDB connection failed. Falling back to mongodb-memory-server...');
       // Dynamically import to avoid stuffing the prod bundle
-      const { MongoMemoryServer } = await import('mongodb-memory-server');
-      const mongoServer = await MongoMemoryServer.create();
+      // Transactions absolutely require a Replica Set topology; standard memory servers fail.
+      const { MongoMemoryReplSet } = await import('mongodb-memory-server');
+      const mongoServer = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
       const memUri = mongoServer.getUri();
       
       const memClient = new MongoClient(memUri);
@@ -62,6 +63,53 @@ export async function connectToDatabase(): Promise<MongoConnection> {
 export async function getDb(): Promise<Db> {
   const { db } = await connectToDatabase();
   return db;
+}
+
+/**
+ * Get the raw MongoClient instance (required for managing ClientSession Transactions)
+ */
+export async function getClient(): Promise<MongoClient> {
+  const { client } = await connectToDatabase();
+  return client;
+}
+
+/**
+ * Executes a callback within a database transaction safely mapping to the exact cluster capabilities. 
+ * If the current topology does not support transactions (e.g. standalone test DBs lacking Replica Sets),
+ * it elegantly falls back to running the operations serially without throwing MongoDB Server Errors.
+ */
+export async function executeTransaction<T>(
+  client: MongoClient,
+  callback: (session?: ClientSession) => Promise<T>
+): Promise<T> {
+  const session = client.startSession();
+  try {
+    let result: T | undefined;
+    let fallbackRequired = false;
+
+    try {
+      await session.withTransaction(async () => {
+        result = await callback(session);
+      });
+      return result as T;
+    } catch (err: any) {
+      if (err.code === 20 || (err.message && err.message.toLowerCase().includes('replica set'))) {
+        console.warn('⚠️ MongoDB Transactions not supported on this topology. Executing callback non-transactionally as fallback.');
+        fallbackRequired = true;
+      } else {
+        throw err;
+      }
+    }
+
+    if (fallbackRequired) {
+      result = await callback(undefined);
+      return result as T;
+    }
+    
+    return result as T;
+  } finally {
+    await session.endSession();
+  }
 }
 
 /**

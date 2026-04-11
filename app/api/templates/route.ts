@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
-import { getDb } from '@/lib/mongodb';
+import { getDb, getClient, executeTransaction } from '@/lib/mongodb';
 import { Template, TemplateInput, ApiResponse } from '@/types/template';
 
 const COLLECTION_NAME = 'templates';
@@ -146,29 +146,45 @@ export async function POST(request: NextRequest) {
       updated_on: now,
     };
 
-    const db = await getDb();
-    const result = await db.collection(COLLECTION_NAME).insertOne(newTemplate);
+    const client = await getClient();
 
-    // After successful template insertion, asynchronously hook up the backwards mappings onto tags
-    if (tagObjectIds.length > 0) {
-      // Execute batch updates enforcing dual associations concurrently
-      await db.collection('tags').updateMany(
-        { _id: { $in: tagObjectIds } },
-        { $push: { template_ids: result.insertedId } as any }
-      );
+    try {
+      // Safely process mutations either inside Transactions dynamically or via standard sequential operations respectively 
+      const createdTemplate = await executeTransaction(client, async (session) => {
+        const db = client.db(process.env.MONGODB_DB);
+        
+        // Pass session (can be safely undefined) gracefully mapping options directly avoiding errors 
+        const result = await db.collection(COLLECTION_NAME).insertOne(newTemplate, { session });
+
+        // After successful template insertion, reliably hook up the backwards mappings onto tags
+        if (tagObjectIds.length > 0) {
+          await db.collection('tags').updateMany(
+            { _id: { $in: tagObjectIds } },
+            { $push: { template_ids: result.insertedId } as any },
+            { session }
+          );
+        }
+
+        return {
+          _id: result.insertedId,
+          ...newTemplate,
+        };
+      });
+
+      const response: ApiResponse<Template> = {
+        success: true,
+        data: createdTemplate as Template,
+      };
+
+      return NextResponse.json(response, { status: 201 });
+    } catch (error) {
+      console.error('Error creating template within transaction:', error);
+      const response: ApiResponse = {
+        success: false,
+        error: 'Failed to create template',
+      };
+      return NextResponse.json(response, { status: 500 });
     }
-
-    const createdTemplate = {
-      _id: result.insertedId,
-      ...newTemplate,
-    };
-
-    const response: ApiResponse<Template> = {
-      success: true,
-      data: createdTemplate as Template,
-    };
-
-    return NextResponse.json(response, { status: 201 });
   } catch (error) {
     console.error('Error creating template:', error);
     const response: ApiResponse = {
