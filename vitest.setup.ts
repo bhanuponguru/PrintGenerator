@@ -1,11 +1,11 @@
-import { MongoMemoryReplSet } from 'mongodb-memory-server';
+import { MongoMemoryServer } from 'mongodb-memory-server';
 import { beforeAll, afterAll, afterEach } from 'vitest';
 
-let mongoServer: MongoMemoryReplSet;
+let mongoServer: MongoMemoryServer;
 
 // Start MongoDB Memory Server before all tests
 beforeAll(async () => {
-  mongoServer = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  mongoServer = await MongoMemoryServer.create();
   const uri = mongoServer.getUri();
   
   // Set environment variables for testing

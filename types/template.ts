@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 
 export type TableMode = 'row_data' | 'column_data';
+export type ListStyle = 'bulleted' | 'numbered' | 'plain';
 
 export interface BaseTypeSchema {
   kind: string;
@@ -27,6 +28,7 @@ export interface HyperlinkTypeSchema extends BaseTypeSchema {
 export interface ListTypeSchema extends BaseTypeSchema {
   kind: 'list';
   item_type: ComponentTypeSchema;
+  style?: ListStyle;
 }
 
 export interface ContainerTypeSchema extends BaseTypeSchema {
@@ -87,6 +89,7 @@ export interface ContainerValue {
 export interface ListValue {
   in_placeholder: boolean;
   items: ComponentValue[];
+  style?: ListStyle;
 }
 
 export type PrimitiveComponentValue = string | number;

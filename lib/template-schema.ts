@@ -1,4 +1,12 @@
 import { ComponentTypeSchema } from '@/types/template';
+import {
+  validateContainerAttrs,
+  validateHyperlinkAttrs,
+  validateImageAttrs,
+  validateListAttrs,
+  validatePlaceholderAttrs,
+  validateTableAttrs,
+} from '@/lib/tiptap/extensions';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -19,7 +27,7 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
     return `${path}.in_placeholder must be a boolean`;
   }
 
-  const typed = schema as ComponentTypeSchema;
+  const typed = schema as Record<string, unknown> & { kind: string; in_placeholder: boolean };
 
   switch (typed.kind) {
     case 'string':
@@ -32,11 +40,15 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
       if (!('item_type' in typed)) {
         return `${path}.item_type is required`;
       }
-      return validateComponentTypeSchema((typed as any).item_type, `${path}.item_type`);
+      const style = typed.style;
+      if (style !== undefined && style !== 'bulleted' && style !== 'numbered' && style !== 'plain') {
+        return `${path}.style must be 'bulleted', 'numbered', or 'plain'`;
+      }
+      return validateComponentTypeSchema(typed.item_type, `${path}.item_type`);
     }
 
     case 'container': {
-      const componentTypes = (typed as any).component_types;
+      const componentTypes = typed.component_types;
       if (!Array.isArray(componentTypes)) {
         return `${path}.component_types must be an array`;
       }
@@ -52,12 +64,12 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
     }
 
     case 'table': {
-      const mode = (typed as any).mode;
+      const mode = typed.mode;
       if (mode !== 'row_data' && mode !== 'column_data') {
         return `${path}.mode must be 'row_data' or 'column_data'`;
       }
 
-      const headers = (typed as any).headers;
+      const headers = typed.headers;
       if (!Array.isArray(headers)) {
         return `${path}.headers must be an array`;
       }
@@ -66,7 +78,7 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
         return `${path}.headers must contain non-empty strings`;
       }
 
-      const caption = (typed as any).caption;
+      const caption = typed.caption;
       if (caption !== undefined) {
         const captionError = validateComponentTypeSchema(caption, `${path}.caption`);
         if (captionError) {
@@ -121,6 +133,30 @@ function walk(node: unknown, visit: (n: Record<string, unknown>) => string | nul
 
 export function validateTemplatePlaceholderSchemas(template: Record<string, unknown>): { valid: true } | { valid: false; error: string } {
   const err = walk(template, (node) => {
+    if (typeof node.type === 'string') {
+      const attrs = isRecord(node.attrs) ? node.attrs : {};
+
+      if (node.type === 'imageComponent') {
+        return validateImageAttrs(attrs);
+      }
+
+      if (node.type === 'hyperlinkComponent') {
+        return validateHyperlinkAttrs(attrs);
+      }
+
+      if (node.type === 'listComponent') {
+        return validateListAttrs(attrs);
+      }
+
+      if (node.type === 'containerComponent') {
+        return validateContainerAttrs(attrs);
+      }
+
+      if (node.type === 'tableComponent') {
+        return validateTableAttrs(attrs);
+      }
+    }
+
     if (node.type !== 'placeholder') {
       return null;
     }
@@ -130,29 +166,18 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
       return 'Placeholder attrs must be an object';
     }
 
-    if ('key' in attrs) {
-      return "Placeholder 'key' is unsupported. Use 'keys' map";
+    const placeholderError = validatePlaceholderAttrs(attrs);
+    if (placeholderError) {
+      return placeholderError;
     }
 
-    const keys = attrs.keys;
-    if (!isRecord(keys)) {
-      return "Placeholder attrs.keys must be an object map of key name to key type";
+    if (!PLACEHOLDER_KEY_RE.test(String(attrs.key))) {
+      return `Placeholder key '${String(attrs.key)}' is invalid`;
     }
 
-    const entries = Object.entries(keys);
-    if (entries.length === 0) {
-      return 'Placeholder attrs.keys cannot be empty';
-    }
-
-    for (const [keyName, keyType] of entries) {
-      if (!PLACEHOLDER_KEY_RE.test(keyName)) {
-        return `Placeholder key '${keyName}' is invalid`;
-      }
-
-      const schemaError = validateComponentTypeSchema(keyType, `Placeholder key '${keyName}' type`);
-      if (schemaError) {
-        return schemaError;
-      }
+    const schemaError = validateComponentTypeSchema(attrs.value_schema, `Placeholder key '${String(attrs.key)}' type`);
+    if (schemaError) {
+      return schemaError;
     }
 
     return null;

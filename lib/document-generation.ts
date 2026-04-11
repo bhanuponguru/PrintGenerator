@@ -3,6 +3,9 @@ import StarterKit from '@tiptap/starter-kit';
 import puppeteer, { Browser } from 'puppeteer';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
+  ComponentExtensions,
+} from '@/lib/tiptap/extensions';
+import {
   ComponentTypeSchema,
   ComponentValue,
   ContainerTypeSchema,
@@ -14,6 +17,7 @@ import {
   ListTypeSchema,
   ListValue,
   PlaceholderKeyTypeMap,
+  ListStyle,
   StringTypeSchema,
   TableColumnDataValue,
   TableMode,
@@ -96,20 +100,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function defaultStringSchema(inPlaceholder = true): StringTypeSchema {
   return {
     kind: 'string',
     in_placeholder: inPlaceholder,
   };
+}
+
+function normalizeListStyle(style: unknown): ListStyle {
+  return style === 'numbered' || style === 'plain' ? style : 'bulleted';
 }
 
 function normalizeTypeSchema(rawSchema: unknown, inPlaceholder = true): ComponentTypeSchema {
@@ -132,6 +131,7 @@ function normalizeTypeSchema(rawSchema: unknown, inPlaceholder = true): Componen
       const listSchema = schema as ListTypeSchema;
       return {
         ...listSchema,
+        style: normalizeListStyle(listSchema.style),
         item_type: normalizeTypeSchema(listSchema.item_type, true),
       };
     }
@@ -160,20 +160,14 @@ function normalizeTypeSchema(rawSchema: unknown, inPlaceholder = true): Componen
   }
 }
 
-function getPlaceholderSchemas(attrs: Record<string, unknown>): PlaceholderKeyTypeMap {
-  const keys = attrs.keys;
-  if (!isRecord(keys)) {
-    return {};
+function getPlaceholderKeyAndSchema(attrs: Record<string, unknown>): { key: string; schema: ComponentTypeSchema } | null {
+  const key = typeof attrs.key === 'string' ? attrs.key.trim() : '';
+  if (!key) {
+    return null;
   }
 
-  const normalized: PlaceholderKeyTypeMap = {};
-  for (const [key, value] of Object.entries(keys)) {
-    const cleaned = key.trim();
-    if (!cleaned) continue;
-    normalized[cleaned] = normalizeTypeSchema(value, true);
-  }
-
-  return normalized;
+  const schema = normalizeTypeSchema(attrs.value_schema, true);
+  return { key, schema };
 }
 
 function replaceTextTokens(value: string, dataPoint: DataPoint): string {
@@ -222,19 +216,17 @@ function replacePlaceholdersInNode(node: unknown, dataPoint: DataPoint): unknown
   // Core execution trigger isolating placeholder definitions mapped heavily previously
   if (clonedNode.type === 'placeholder') {
     const attrs = (clonedNode.attrs as Record<string, unknown> | undefined) || {};
-    const keyTypeMap = getPlaceholderSchemas(attrs);
+    const keyAndSchema = getPlaceholderKeyAndSchema(attrs);
 
-    if (Object.keys(keyTypeMap).length > 0) {
-      const resolvedValues: Record<string, unknown> = {};
-
-      for (const key of Object.keys(keyTypeMap)) {
-        resolvedValues[key] = dataPoint[key];
-      }
+    if (keyAndSchema) {
+      const replacement = dataPoint[keyAndSchema.key];
+      const selectedValue = replacement === undefined ? attrs.value : replacement;
 
       clonedNode.attrs = {
         ...attrs,
-        keys: keyTypeMap,
-        resolved_values: resolvedValues,
+        key: keyAndSchema.key,
+        value_schema: keyAndSchema.schema,
+        value: selectedValue,
       };
 
       if (Array.isArray(clonedNode.content)) {
@@ -242,38 +234,16 @@ function replacePlaceholdersInNode(node: unknown, dataPoint: DataPoint): unknown
           if (isRecord(child) && child.type === 'text' && typeof child.text === 'string') {
             return {
               ...child,
-              text: replaceTextTokens(child.text, resolvedValues),
+              text: replaceTextTokens(child.text, dataPoint),
             };
           }
-
-          return replacePlaceholdersInNode(child, resolvedValues);
+          return child;
         });
       }
 
-      if (!clonedNode.content || (Array.isArray(clonedNode.content) && clonedNode.content.length === 0)) {
-        const [firstKey] = Object.keys(keyTypeMap);
-        const firstSchema = keyTypeMap[firstKey];
-        if (firstSchema && (firstSchema.kind === 'string' || firstSchema.kind === 'integer')) {
-          const raw = resolvedValues[firstKey];
-          clonedNode.content = [{ type: 'text', text: raw === undefined || raw === null ? '' : String(raw) }];
-        }
-      }
-    } else {
-      const placeholderKey = getPlaceholderKey(attrs);
-      if (placeholderKey) {
-        const replacement = dataPoint[placeholderKey];
-        const replacementText = replacement === undefined || replacement === null ? '' : String(replacement);
-
-        clonedNode.attrs = {
-          ...attrs,
-          keys: {
-            [placeholderKey]: defaultStringSchema(true),
-          },
-          resolved_values: {
-            [placeholderKey]: replacementText,
-          },
-        };
-
+      if ((!clonedNode.content || (Array.isArray(clonedNode.content) && clonedNode.content.length === 0))
+        && (keyAndSchema.schema.kind === 'string' || keyAndSchema.schema.kind === 'integer')) {
+        const replacementText = selectedValue === undefined || selectedValue === null ? '' : String(selectedValue);
         clonedNode.content = [{ type: 'text', text: replacementText }];
       }
     }
@@ -312,10 +282,9 @@ export function collectPlaceholderKeyTypeMap(templateJson: Record<string, unknow
     }
 
     const attrs = (typedNode.attrs as Record<string, unknown> | undefined) || {};
-    const schemas = getPlaceholderSchemas(attrs);
-
-    for (const [key, schema] of Object.entries(schemas)) {
-      keyTypeMap[key] = schema;
+    const entry = getPlaceholderKeyAndSchema(attrs);
+    if (entry) {
+      keyTypeMap[entry.key] = entry.schema;
     }
   });
 
@@ -489,22 +458,27 @@ function validateAndNormalizeValue(
     }
 
     case 'list': {
-      if (!isRecord(value) || !Array.isArray(value.items)) {
-        return { ok: false, error: `${path} must be a list object with items[]` };
+      const rawValue = isRecord(value) ? value : {};
+      const rawItems = Array.isArray(value) ? value : Array.isArray(rawValue.items) ? rawValue.items : undefined;
+      if (!Array.isArray(rawItems)) {
+        return { ok: false, error: `${path} must be an array or a list object with items[]` };
       }
 
       const normalizedItems: ComponentValue[] = [];
-      for (let i = 0; i < value.items.length; i += 1) {
-        const itemResult = validateAndNormalizeValue(value.items[i], schema.item_type, `${path}.items[${i}]`);
+      for (let i = 0; i < rawItems.length; i += 1) {
+        const itemResult = validateAndNormalizeValue(rawItems[i], schema.item_type, `${path}[${i}]`);
         if (!itemResult.ok) {
           return itemResult;
         }
         normalizedItems.push(itemResult.value);
       }
 
+      const style = isRecord(value) ? normalizeListStyle(rawValue.style) : normalizeListStyle(schema.style);
+
       const normalized: ListValue = {
-        in_placeholder: typeof value.in_placeholder === 'boolean' ? value.in_placeholder : schema.in_placeholder,
+        in_placeholder: isRecord(value) && typeof rawValue.in_placeholder === 'boolean' ? rawValue.in_placeholder : schema.in_placeholder,
         items: normalizedItems,
+        style,
       };
 
       return { ok: true, value: normalized };
@@ -619,7 +593,7 @@ function validateAndNormalizeValue(
         in_placeholder: typeof value.in_placeholder === 'boolean' ? value.in_placeholder : schema.in_placeholder,
         mode: 'column_data',
         caption: captionValue,
-        columns: value.columns,
+        columns: value.columns as Record<string, Record<string, unknown>>,
       };
 
       return { ok: true, value: normalized };
@@ -663,133 +637,6 @@ export function validateDataPointAgainstKeyTypeMap(
   };
 }
 
-function renderComponentValue(value: ComponentValue, schema: ComponentTypeSchema): string {
-  switch (schema.kind) {
-    case 'string':
-    case 'integer':
-      return escapeHtml(String(value));
-
-    case 'image': {
-      const typed = value as ImageValue;
-      return `<figure><img src="${escapeHtml(typed.src)}" alt="${escapeHtml(typed.alt)}" style="max-width:100%;height:auto;" /></figure>`;
-    }
-
-    case 'hyperlink': {
-      const typed = value as HyperlinkValue;
-      return `<a href="${escapeHtml(typed.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(typed.alias)}</a>`;
-    }
-
-    case 'list': {
-      const typed = value as ListValue;
-      const items = typed.items
-        .map((item) => `<li>${renderComponentValue(item, schema.item_type)}</li>`)
-        .join('');
-      return `<ul>${items}</ul>`;
-    }
-
-    case 'container': {
-      const typed = value as { components: ComponentValue[] };
-      return typed.components
-        .map((component, index) => {
-          const childSchema = schema.component_types[index] || defaultStringSchema(true);
-          return `<div>${renderComponentValue(component, childSchema)}</div>`;
-        })
-        .join('');
-    }
-
-    case 'table': {
-      const captionHtml = value && (value as TableRowDataValue | TableColumnDataValue).caption && schema.caption
-        ? `<caption>${renderComponentValue((value as TableRowDataValue | TableColumnDataValue).caption as ComponentValue, schema.caption)}</caption>`
-        : '';
-
-      if (schema.mode === 'row_data') {
-        const typed = value as TableRowDataValue;
-        const thead = `<thead><tr>${schema.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>`;
-        const tbody = `<tbody>${typed.rows
-          .map((row) => `<tr>${schema.headers.map((header) => `<td>${escapeHtml(String(row[header] ?? ''))}</td>`).join('')}</tr>`)
-          .join('')}</tbody>`;
-        return `<table>${captionHtml}${thead}${tbody}</table>`;
-      }
-
-      const typed = value as TableColumnDataValue;
-      const columnNames = Object.keys(typed.columns);
-      const thead = `<thead><tr><th></th>${columnNames.map((name) => `<th>${escapeHtml(name)}</th>`).join('')}</tr></thead>`;
-      const tbodyRows = schema.headers
-        .map((rowHeader) => {
-          const cells = columnNames
-            .map((columnName) => `<td>${escapeHtml(String(typed.columns[columnName]?.[rowHeader] ?? ''))}</td>`)
-            .join('');
-          return `<tr><th>${escapeHtml(rowHeader)}</th>${cells}</tr>`;
-        })
-        .join('');
-
-      return `<table>${captionHtml}${thead}<tbody>${tbodyRows}</tbody></table>`;
-    }
-
-    default:
-      return escapeHtml(String(value));
-  }
-}
-
-function renderNode(node: unknown): string {
-  if (Array.isArray(node)) {
-    return node.map((item) => renderNode(item)).join('');
-  }
-
-  if (!isRecord(node)) {
-    return '';
-  }
-
-  const nodeType = typeof node.type === 'string' ? node.type : '';
-  const content = Array.isArray(node.content) ? node.content.map((child) => renderNode(child)).join('') : '';
-
-  switch (nodeType) {
-    case 'doc':
-      return content;
-    case 'paragraph':
-      return `<p>${content}</p>`;
-    case 'text':
-      return escapeHtml(typeof node.text === 'string' ? node.text : '');
-    case 'heading': {
-      const attrs = isRecord(node.attrs) ? node.attrs : {};
-      const levelRaw = typeof attrs.level === 'number' ? attrs.level : 1;
-      const level = levelRaw >= 1 && levelRaw <= 6 ? levelRaw : 1;
-      return `<h${level}>${content}</h${level}>`;
-    }
-    case 'bulletList':
-      return `<ul>${content}</ul>`;
-    case 'orderedList':
-      return `<ol>${content}</ol>`;
-    case 'listItem':
-      return `<li>${content}</li>`;
-    case 'hardBreak':
-      return '<br />';
-    case 'placeholder': {
-      const attrs = isRecord(node.attrs) ? node.attrs : {};
-      const keyTypeMap = getPlaceholderSchemas(attrs);
-      const resolvedValues = isRecord(attrs.resolved_values) ? attrs.resolved_values : {};
-
-      const keys = Object.keys(keyTypeMap);
-      if (keys.length === 1) {
-        const key = keys[0];
-        const schema = keyTypeMap[key];
-        const value = resolvedValues[key];
-
-        if (value !== undefined && value !== null && schema.kind !== 'string' && schema.kind !== 'integer') {
-          const validated = validateAndNormalizeValue(value, schema, key);
-          if (validated.ok) {
-            return renderComponentValue(validated.value, schema);
-          }
-        }
-      }
-
-      return `<span data-placeholder="true">${content}</span>`;
-    }
-    default:
-      return content;
-  }
-}
-
 /**
  * Transforms a populated Tiptap-compatible JSON document object into fully realized
  * and styled standard HTML markup using the required StarterKit and Placeholder plugins.
@@ -797,11 +644,7 @@ function renderNode(node: unknown): string {
  * @returns A raw un-wrapper HTML string representation of the document formatting block.
  */
 export function renderDocumentHtml(documentJson: Record<string, unknown>): string {
-  try {
-    return renderNode(documentJson);
-  } catch {
-    return generateHTML(documentJson, [StarterKit, Placeholder]);
-  }
+  return generateHTML(documentJson, [StarterKit, Placeholder, ...ComponentExtensions]);
 }
 
 /**

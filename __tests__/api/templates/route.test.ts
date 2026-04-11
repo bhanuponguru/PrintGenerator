@@ -285,7 +285,7 @@ describe('POST /api/templates', () => {
     expect(data.data.created_on).toBe(data.data.updated_on);
   });
 
-  it('should return 400 for placeholder schema using legacy key attribute', async () => {
+  it('should return 400 for placeholder schema missing value_schema', async () => {
     const request = new NextRequest('http://localhost:3000/api/templates', {
       method: 'POST',
       body: JSON.stringify({
@@ -314,7 +314,45 @@ describe('POST /api/templates', () => {
 
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
-    expect(data.error).toContain("Placeholder 'key' is unsupported");
+    expect(data.error).toContain('value_schema');
+  });
+
+  it('should return 400 for invalid hyperlinkComponent attrs', async () => {
+    const request = new NextRequest('http://localhost:3000/api/templates', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Invalid Hyperlink Node Template',
+        version: '1.0.0',
+        template: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'hyperlinkComponent',
+                  attrs: {
+                    value: {
+                      alias: 'Docs',
+                      url: '/relative-url',
+                      in_placeholder: false,
+                    },
+                    in_placeholder: false,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+
+    const response = await POST(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain('absolute URL');
   });
 
   it('should handle database errors gracefully', async () => {

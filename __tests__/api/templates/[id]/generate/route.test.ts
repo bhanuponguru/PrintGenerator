@@ -73,9 +73,8 @@ describe('POST /api/templates/[id]/generate', () => {
               {
                 type: 'placeholder',
                 attrs: {
-                  keys: {
-                    name: { kind: 'string', in_placeholder: true },
-                  },
+                  key: 'name',
+                  value_schema: { kind: 'string', in_placeholder: true },
                 },
                 content: [{ type: 'text', text: 'recipient name' }],
               },
@@ -83,9 +82,8 @@ describe('POST /api/templates/[id]/generate', () => {
               {
                 type: 'placeholder',
                 attrs: {
-                  keys: {
-                    orderId: { kind: 'string', in_placeholder: true },
-                  },
+                  key: 'orderId',
+                  value_schema: { kind: 'string', in_placeholder: true },
                 },
                 content: [{ type: 'text', text: 'order id' }],
               },
@@ -134,9 +132,8 @@ describe('POST /api/templates/[id]/generate', () => {
               {
                 type: 'placeholder',
                 attrs: {
-                  keys: {
-                    name: { kind: 'string', in_placeholder: true },
-                  },
+                  key: 'name',
+                  value_schema: { kind: 'string', in_placeholder: true },
                 },
                 content: [{ type: 'text', text: 'recipient name' }],
               },
@@ -144,9 +141,8 @@ describe('POST /api/templates/[id]/generate', () => {
               {
                 type: 'placeholder',
                 attrs: {
-                  keys: {
-                    orderId: { kind: 'string', in_placeholder: true },
-                  },
+                  key: 'orderId',
+                  value_schema: { kind: 'string', in_placeholder: true },
                 },
                 content: [{ type: 'text', text: 'order id' }],
               },

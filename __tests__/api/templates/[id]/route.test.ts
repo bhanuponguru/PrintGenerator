@@ -64,13 +64,12 @@ describe('GET /api/templates/[id]', () => {
                   {
                     type: 'placeholder',
                     attrs: {
-                      keys: {
-                        details: {
-                          kind: 'table',
-                          in_placeholder: true,
-                          mode: 'row_data',
-                          headers: ['A', ''],
-                        },
+                      key: 'details',
+                      value_schema: {
+                        kind: 'table',
+                        in_placeholder: true,
+                        mode: 'row_data',
+                        headers: ['A', ''],
                       },
                     },
                   },

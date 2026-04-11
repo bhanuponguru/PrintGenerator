@@ -5,6 +5,7 @@ import {
   renderDocumentHtml,
   validateDataPointAgainstKeyTypeMap,
 } from '@/lib/document-generation';
+import { createImageComponent, createTableComponent } from '@/lib/tiptap/extensions';
 
 describe('document-generation typed placeholders', () => {
   it('collects placeholder key type map from multiple placeholders', () => {
@@ -17,12 +18,18 @@ describe('document-generation typed placeholders', () => {
             {
               type: 'placeholder',
               attrs: {
-                keys: {
-                  age: { kind: 'integer', in_placeholder: true },
-                  site: { kind: 'hyperlink', in_placeholder: true },
-                },
+                key: 'age',
+                value_schema: { kind: 'integer', in_placeholder: true },
               },
               content: [{ type: 'text', text: 'Age {{age}}' }],
+            },
+            {
+              type: 'placeholder',
+              attrs: {
+                key: 'site',
+                value_schema: { kind: 'hyperlink', in_placeholder: true },
+              },
+              content: [{ type: 'text', text: 'Site' }],
             },
           ],
         },
@@ -145,22 +152,20 @@ describe('document-generation typed placeholders', () => {
             {
               type: 'placeholder',
               attrs: {
-                keys: {
-                  first: { kind: 'string', in_placeholder: true },
-                  last: { kind: 'string', in_placeholder: true },
-                },
+                key: 'name',
+                value_schema: { kind: 'string', in_placeholder: true },
               },
-              content: [{ type: 'text', text: 'Hello {{first}} {{last}}' }],
+              content: [{ type: 'text', text: 'Hello {{name}}' }],
             },
           ],
         },
       ],
     };
 
-    const filled = applyTemplateDataPoint(template, { first: 'Ada', last: 'Lovelace' });
+    const filled = applyTemplateDataPoint(template, { name: 'Ada' });
     const html = renderDocumentHtml(filled);
 
-    expect(html).toContain('Hello Ada Lovelace');
+    expect(html).toContain('Hello Ada');
   });
 
   it('renders image placeholder values into html', () => {
@@ -173,9 +178,8 @@ describe('document-generation typed placeholders', () => {
             {
               type: 'placeholder',
               attrs: {
-                keys: {
-                  logo: { kind: 'image', in_placeholder: true },
-                },
+                key: 'logo',
+                value_schema: { kind: 'image', in_placeholder: true },
               },
             },
           ],
@@ -195,5 +199,51 @@ describe('document-generation typed placeholders', () => {
 
     expect(html).toContain('<img');
     expect(html).toContain('logo.png');
+  });
+
+  it('renders imageComponent tiptap node', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        createImageComponent(
+          {
+            src: 'https://example.com/pic.png',
+            alt: 'Picture',
+            in_placeholder: false,
+          },
+          { width: '120', height: '80' }
+        ),
+      ],
+    };
+
+    const html = renderDocumentHtml(doc);
+    expect(html).toContain('<img');
+    expect(html).toContain('pic.png');
+  });
+
+  it('renders tableComponent tiptap node in row_data mode', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        createTableComponent(
+          {
+            mode: 'row_data',
+            rows: [
+              { Item: 'Pen', Qty: 2 },
+              { Item: 'Book', Qty: 1 },
+            ],
+            caption: 'Inventory',
+            in_placeholder: false,
+          },
+          { headers: ['Item', 'Qty'] }
+        ),
+      ],
+    };
+
+    const html = renderDocumentHtml(doc);
+    expect(html).toContain('<table');
+    expect(html).toContain('<th>Item</th>');
+    expect(html).toContain('<td>Pen</td>');
+    expect(html).toContain('<caption>Inventory</caption>');
   });
 });
