@@ -98,7 +98,10 @@ export const getApiDocs = () => {
             properties: {
               name: { type: 'string' },
               version: { type: 'string' },
-              template: { type: 'object' },
+              template: {
+                type: 'object',
+                description: 'Tiptap/ProseMirror JSON document containing placeholder nodes. Placeholder nodes must use attrs.keys as key->type map.',
+              },
               tag_ids: { type: 'array', items: { type: 'string' }, description: 'Newly added arrays assigning explicitly tags directly during creations strictly' }
             },
           },
@@ -107,9 +110,53 @@ export const getApiDocs = () => {
             properties: {
               name: { type: 'string' },
               version: { type: 'string' },
-              template: { type: 'object' },
+              template: {
+                type: 'object',
+                description: 'Tiptap/ProseMirror JSON document containing placeholder nodes. Placeholder nodes must use attrs.keys as key->type map.',
+              },
               tag_ids: { type: 'array', items: { type: 'string' }, description: 'Array mapping definitions automatically orchestrating differential removal syncing internally via dual mapping' }
             },
+          },
+          ComponentTypeSchema: {
+            type: 'object',
+            required: ['kind', 'in_placeholder'],
+            properties: {
+              kind: {
+                type: 'string',
+                enum: ['string', 'integer', 'image', 'hyperlink', 'list', 'table', 'container'],
+              },
+              in_placeholder: { type: 'boolean' },
+              option: {
+                type: 'object',
+                additionalProperties: true,
+                description: 'Optional image options metadata',
+              },
+              item_type: {
+                $ref: '#/components/schemas/ComponentTypeSchema',
+              },
+              mode: {
+                type: 'string',
+                enum: ['row_data', 'column_data'],
+              },
+              headers: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+              caption: {
+                $ref: '#/components/schemas/ComponentTypeSchema',
+              },
+              component_types: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/ComponentTypeSchema' },
+              },
+            },
+          },
+          PlaceholderKeysMap: {
+            type: 'object',
+            additionalProperties: {
+              $ref: '#/components/schemas/ComponentTypeSchema',
+            },
+            description: 'Map of placeholder key name to type schema',
           },
           ApiResponse: {
             type: 'object',

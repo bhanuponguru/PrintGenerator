@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
 import { getDb, getClient, executeTransaction } from '@/lib/mongodb';
 import { Template, TemplateUpdate, ApiResponse } from '@/types/template';
+import { validateTemplatePlaceholderSchemas } from '@/lib/template-schema';
 
 const COLLECTION_NAME = 'templates';
 
@@ -180,6 +181,23 @@ export async function PUT(
       updateFields.version = body.version;
     }
     if (body.template !== undefined) {
+      if (!body.template || typeof body.template !== 'object') {
+        const response: ApiResponse = {
+          success: false,
+          error: 'Template must be an object',
+        };
+        return NextResponse.json(response, { status: 400 });
+      }
+
+      const placeholderValidation = validateTemplatePlaceholderSchemas(body.template);
+      if (!placeholderValidation.valid) {
+        const response: ApiResponse = {
+          success: false,
+          error: placeholderValidation.error,
+        };
+        return NextResponse.json(response, { status: 400 });
+      }
+
       updateFields.template = body.template;
     }
     

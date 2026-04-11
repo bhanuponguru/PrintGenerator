@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
 import { getDb, getClient, executeTransaction } from '@/lib/mongodb';
 import { Template, TemplateInput, ApiResponse } from '@/types/template';
+import { validateTemplatePlaceholderSchemas } from '@/lib/template-schema';
 
 const COLLECTION_NAME = 'templates';
 
@@ -123,6 +124,15 @@ export async function POST(request: NextRequest) {
       const response: ApiResponse = {
         success: false,
         error: 'Template is required and must be an object',
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
+
+    const placeholderValidation = validateTemplatePlaceholderSchemas(body.template);
+    if (!placeholderValidation.valid) {
+      const response: ApiResponse = {
+        success: false,
+        error: placeholderValidation.error,
       };
       return NextResponse.json(response, { status: 400 });
     }

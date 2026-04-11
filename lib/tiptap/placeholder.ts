@@ -1,4 +1,5 @@
 import { mergeAttributes, Node } from '@tiptap/core';
+import { PlaceholderKeyTypeMap } from '@/types/template';
 
 /**
  * Custom Tiptap node used for fillable values.
@@ -15,12 +16,29 @@ export const Placeholder = Node.create({
 
   addAttributes() {
     return {
-      key: {
-        default: '',
-        parseHTML: (element) => element.getAttribute('data-key') || '',
+      keys: {
+        default: {},
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-keys');
+          if (!raw) {
+            return {};
+          }
+          try {
+            const parsed = JSON.parse(raw) as PlaceholderKeyTypeMap;
+            return parsed && typeof parsed === 'object' ? parsed : {};
+          } catch {
+            return {};
+          }
+        },
         renderHTML: (attributes) => {
-          const key = typeof attributes.key === 'string' ? attributes.key : '';
-          return key ? { 'data-key': key } : {};
+          const keys = attributes.keys as PlaceholderKeyTypeMap | undefined;
+          if (!keys || typeof keys !== 'object' || Array.isArray(keys)) {
+            return {};
+          }
+
+          return {
+            'data-keys': JSON.stringify(keys),
+          };
         },
       },
     };

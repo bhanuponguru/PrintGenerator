@@ -47,6 +47,50 @@ describe('GET /api/templates/[id]', () => {
     expect(data.error).toBe('Invalid template ID format');
   });
 
+  it('should return 400 for invalid placeholder key type schema', async () => {
+    const template = await createTestTemplate();
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          template: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'placeholder',
+                    attrs: {
+                      keys: {
+                        details: {
+                          kind: 'table',
+                          in_placeholder: true,
+                          mode: 'row_data',
+                          headers: ['A', ''],
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      }
+    );
+    const params = Promise.resolve({ id: template._id.toString() });
+
+    const response = await PUT(request, { params });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain('headers must contain non-empty strings');
+  });
+
   it('should return 404 for non-existent template', async () => {
     const nonExistentId = new ObjectId();
     const request = new NextRequest(

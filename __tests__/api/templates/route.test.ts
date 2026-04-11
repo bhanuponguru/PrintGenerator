@@ -285,6 +285,38 @@ describe('POST /api/templates', () => {
     expect(data.data.created_on).toBe(data.data.updated_on);
   });
 
+  it('should return 400 for placeholder schema using legacy key attribute', async () => {
+    const request = new NextRequest('http://localhost:3000/api/templates', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Invalid Placeholder Template',
+        version: '1.0.0',
+        template: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'placeholder',
+                  attrs: { key: 'name' },
+                  content: [{ type: 'text', text: 'Name' }],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+
+    const response = await POST(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("Placeholder 'key' is unsupported");
+  });
+
   it('should handle database errors gracefully', async () => {
     // Close the connection to simulate error
     const { closeConnection } = await import('@/lib/mongodb');

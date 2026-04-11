@@ -72,13 +72,21 @@ describe('POST /api/templates/[id]/generate', () => {
               { type: 'text', text: 'Name: ' },
               {
                 type: 'placeholder',
-                attrs: { key: 'name' },
+                attrs: {
+                  keys: {
+                    name: { kind: 'string', in_placeholder: true },
+                  },
+                },
                 content: [{ type: 'text', text: 'recipient name' }],
               },
               { type: 'text', text: ', Order: ' },
               {
                 type: 'placeholder',
-                attrs: { key: 'orderId' },
+                attrs: {
+                  keys: {
+                    orderId: { kind: 'string', in_placeholder: true },
+                  },
+                },
                 content: [{ type: 'text', text: 'order id' }],
               },
             ],
@@ -104,11 +112,12 @@ describe('POST /api/templates/[id]/generate', () => {
 
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
-    expect(data.error).toBe('Missing required placeholder values');
+    expect(data.error).toBe('Invalid placeholder values');
     expect(data.data.invalidDataPoints).toEqual([
       {
         index: 0,
         missing: ['orderId'],
+        invalid: [],
       },
     ]);
   });
@@ -124,13 +133,21 @@ describe('POST /api/templates/[id]/generate', () => {
               { type: 'text', text: 'Name: ' },
               {
                 type: 'placeholder',
-                attrs: { key: 'name' },
+                attrs: {
+                  keys: {
+                    name: { kind: 'string', in_placeholder: true },
+                  },
+                },
                 content: [{ type: 'text', text: 'recipient name' }],
               },
               { type: 'text', text: ', Order: ' },
               {
                 type: 'placeholder',
-                attrs: { key: 'orderId' },
+                attrs: {
+                  keys: {
+                    orderId: { kind: 'string', in_placeholder: true },
+                  },
+                },
                 content: [{ type: 'text', text: 'order id' }],
               },
             ],

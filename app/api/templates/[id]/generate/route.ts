@@ -5,11 +5,11 @@ import { getDb } from '@/lib/mongodb';
 import { Template } from '@/types/template';
 import {
   applyTemplateDataPoint,
-  collectRequiredPlaceholderKeys,
+  collectPlaceholderKeyTypeMap,
   createPdfFromDocumentHtml,
   DataPoint,
-  findMissingPlaceholderKeys,
   renderDocumentHtml,
+  validateDataPointAgainstKeyTypeMap,
 } from '@/lib/document-generation';
 
 const COLLECTION_NAME = 'templates';
@@ -125,20 +125,25 @@ export async function POST(
       );
     }
 
-    // Deep traverse the TipTap configuration retrieving every unique placeholder key we demand from the client
-    const requiredPlaceholderKeys = collectRequiredPlaceholderKeys(templateDoc.template);
+    // Gather the strict placeholder key->type contracts defined on the template.
+    const placeholderKeyTypeMap = collectPlaceholderKeyTypeMap(templateDoc.template);
     
     // Accumulator array tracking data array indexes that miss critical placeholders
-    const invalidDataPoints: Array<{ index: number; missing: string[] }> = [];
+    const invalidDataPoints: Array<{ index: number; missing: string[]; invalid: string[] }> = [];
+    const normalizedDataPoints: DataPoint[] = [];
 
     for (let i = 0; i < dataPoints.length; i += 1) {
-      const missing = findMissingPlaceholderKeys(dataPoints[i], requiredPlaceholderKeys);
-      if (missing.length > 0) {
+      const validation = validateDataPointAgainstKeyTypeMap(dataPoints[i], placeholderKeyTypeMap);
+      if (validation.missing.length > 0 || validation.invalid.length > 0) {
         invalidDataPoints.push({
           index: i,
-          missing,
+          missing: validation.missing,
+          invalid: validation.invalid,
         });
+        continue;
       }
+
+      normalizedDataPoints.push(validation.normalizedDataPoint);
     }
 
     // Fail early if any provided sequence item is missing required variables.
@@ -147,7 +152,7 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
-          error: 'Missing required placeholder values',
+          error: 'Invalid placeholder values',
           data: {
             invalidDataPoints,
           },
@@ -160,9 +165,9 @@ export async function POST(
     const zip = new JSZip();
 
     // Primary Generation Loop: Iterate sequentially across the supplied variable combinations
-    for (let i = 0; i < dataPoints.length; i += 1) {
+    for (let i = 0; i < normalizedDataPoints.length; i += 1) {
       // 1. Swap placeholders in the JSON AST with the specific dictionary mappings
-      const filledDocument = applyTemplateDataPoint(templateDoc.template, dataPoints[i]);
+      const filledDocument = applyTemplateDataPoint(templateDoc.template, normalizedDataPoints[i]);
       // 2. Synthesize complete browser-ready HTML from the AST
       const html = renderDocumentHtml(filledDocument);
       // 3. Mount a headless Chrome instance to snapshot the DOM as an A4 formatted PDF
