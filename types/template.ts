@@ -8,6 +8,7 @@ export interface Template {
   name: string;
   version: string;
   template: Record<string, any>; // Flexible JSON/BSON object
+  tag_ids?: ObjectId[]; // Internal MongoDB ObjectId references linking to associated Tags
   created_on: Date;
   updated_on: Date;
 }
@@ -19,6 +20,7 @@ export interface TemplateInput {
   name: string;
   version: string;
   template: Record<string, any>;
+  tag_ids?: string[]; // Array of Tag ObjectIds passed as strings from the client
 }
 
 /**
@@ -28,6 +30,7 @@ export interface TemplateUpdate {
   name?: string;
   version?: string;
   template?: Record<string, any>;
+  tag_ids?: string[]; // Array of Tag ObjectIds passed as strings from the client
 }
 
 /**

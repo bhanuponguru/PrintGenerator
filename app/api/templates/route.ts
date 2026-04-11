@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { ObjectId } from 'mongodb';
 import { getDb } from '@/lib/mongodb';
 import { Template, TemplateInput, ApiResponse } from '@/types/template';
 
@@ -127,16 +128,35 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date();
-    const newTemplate = {
+    
+    // Convert string array of tags passed by user into valid BSON ObjectIDs
+    let tagObjectIds: ObjectId[] = [];
+    if (body.tag_ids && Array.isArray(body.tag_ids)) {
+      tagObjectIds = body.tag_ids
+        .filter((id) => typeof id === 'string' && ObjectId.isValid(id))
+        .map((id) => new ObjectId(id));
+    }
+
+    const newTemplate: Omit<Template, '_id'> = {
       name: body.name,
       version: body.version,
       template: body.template,
+      tag_ids: tagObjectIds,
       created_on: now,
       updated_on: now,
     };
 
     const db = await getDb();
     const result = await db.collection(COLLECTION_NAME).insertOne(newTemplate);
+
+    // After successful template insertion, asynchronously hook up the backwards mappings onto tags
+    if (tagObjectIds.length > 0) {
+      // Execute batch updates enforcing dual associations concurrently
+      await db.collection('tags').updateMany(
+        { _id: { $in: tagObjectIds } },
+        { $push: { template_ids: result.insertedId } as any }
+      );
+    }
 
     const createdTemplate = {
       _id: result.insertedId,

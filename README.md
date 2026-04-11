@@ -75,6 +75,9 @@ Next.js utilizes "App Routing", translating folders inside `app/` directly into 
 - **`app/api/templates/route.ts`**: Endpoint pipeline catching `GET` layouts and `POST` commands initializing brand new templates.
 - **`app/api/templates/[id]/route.ts`**: Endpoint designed specifically handling mutations (`PUT`, `DELETE`) on one specific targeted template ID.
 - **`app/api/templates/[id]/generate/route.ts`**: The critical powerhouse endpoint iterating JSON datapoints to orchestrate array-driven PDF conversions exported as Zips.
+- **`app/api/tags/route.ts`**: Handles creation, reading, and renaming generic reusable Tags.
+- **`app/api/tags/[name]/route.ts`**: Allows deletion of specific Tags while automatically nullifying associations across all layouts cleanly.
+- **`app/api/tags/[name]/templates/route.ts`**: Fast resolution endpoint returning detailed templates leveraging optimized two-way database maps natively.
 
 ### React Visual Components (`app/components/`)
 - **`app/components/CreateTemplateModal.tsx`**: Popup window collecting variables rendering the editor meant specifically to build a new template.
@@ -91,6 +94,7 @@ Next.js utilizes "App Routing", translating folders inside `app/` directly into 
 
 ### Database Definitions (`types/`)
 - **`types/template.ts`**: Essential centralized definitions dictating universally formatted database objects verifying strict typing.
+- **`types/tag.ts`**: Establishes standard variable layouts tracking strict dual-reference models for metadata categorization.
 
 ### The Testing Suite (`__tests__/`)
 - **`__tests__/api/templates/route.test.ts`**: Test environments explicitly validating collection-level endpoints like fetching grids or inserting lists successfully.

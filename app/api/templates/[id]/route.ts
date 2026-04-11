@@ -182,8 +182,27 @@ export async function PUT(
     if (body.template !== undefined) {
       updateFields.template = body.template;
     }
+    
+    // Parse mapping arrays safely coercing representations cleanly 
+    if (body.tag_ids !== undefined) {
+      updateFields.tag_ids = Array.isArray(body.tag_ids)
+        ? body.tag_ids
+            .filter((tid) => typeof tid === 'string' && ObjectId.isValid(tid))
+            .map((tid) => new ObjectId(tid))
+        : [];
+    }
 
     const db = await getDb();
+    
+    // Read the original document state FIRST to derive accurate association diffs 
+    const originalTemplate = await db.collection<Template>(COLLECTION_NAME).findOne({ _id: new ObjectId(id) });
+    if (!originalTemplate) {
+      return NextResponse.json(
+        { success: false, error: 'Template not found' },
+        { status: 404 }
+      );
+    }
+    
     const result = await db
       .collection<Template>(COLLECTION_NAME)
       .findOneAndUpdate(
@@ -191,6 +210,32 @@ export async function PUT(
         { $set: updateFields },
         { returnDocument: 'after' }
       );
+
+    // Apply strict differential tagging updating if tag definitions actually changed
+    if (updateFields.tag_ids !== undefined) {
+      const oldTagIds = originalTemplate.tag_ids || [];
+      const newTagIds = updateFields.tag_ids;
+
+      const oldSet = new Set(oldTagIds.map(t => t.toString()));
+      const newSet = new Set(newTagIds.map(t => t.toString()));
+
+      // Identify strict additions and removals without blowing out entire arrays
+      const tagsToRemoveFrom = oldTagIds.filter(t => !newSet.has(t.toString()));
+      const tagsToAddTo = newTagIds.filter(t => !oldSet.has(t.toString()));
+
+      if (tagsToRemoveFrom.length > 0) {
+        await db.collection('tags').updateMany(
+          { _id: { $in: tagsToRemoveFrom } },
+          { $pull: { template_ids: new ObjectId(id) } as any }
+        );
+      }
+      if (tagsToAddTo.length > 0) {
+        await db.collection('tags').updateMany(
+          { _id: { $in: tagsToAddTo } },
+          { $push: { template_ids: new ObjectId(id) } as any }
+        );
+      }
+    }
 
     if (!result) {
       const response: ApiResponse = {
@@ -284,16 +329,35 @@ export async function DELETE(
     }
 
     const db = await getDb();
+    
+    // Attempt lookup caching tag lists prior directly mutating templates destructively
+    const template = await db.collection<Template>(COLLECTION_NAME).findOne({ _id: new ObjectId(id) });
+    if (!template) {
+      return NextResponse.json(
+        { success: false, error: 'Template not found' },
+        { status: 404 }
+      );
+    }
+
+    // Execute the primary Template deletion 
     const result = await db
       .collection(COLLECTION_NAME)
       .deleteOne({ _id: new ObjectId(id) });
 
     if (result.deletedCount === 0) {
-      const response: ApiResponse = {
-        success: false,
-        error: 'Template not found',
-      };
-      return NextResponse.json(response, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: 'Template not found' },
+        { status: 404 }
+      );
+    }
+
+    // Unwind all associated references bound on the isolated tags records
+    const tagIds = template.tag_ids || [];
+    if (tagIds.length > 0) {
+      await db.collection('tags').updateMany(
+        { _id: { $in: tagIds } },
+        { $pull: { template_ids: new ObjectId(id) } as any }
+      );
     }
 
     const response: ApiResponse = {

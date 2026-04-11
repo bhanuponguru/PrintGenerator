@@ -13,16 +13,12 @@ export const getApiDocs = () => {
       info: {
         title: 'Print Generator API',
         version: '0.1.0',
-        description: 'API documentation for Print Generator template management system',
+        description: 'API documentation for Print Generator template management system with dual-associated tagging.',
       },
       servers: [
         {
           url: 'http://localhost:3000',
           description: 'Development server',
-        },
-        {
-          url: 'https://your-production-url.com',
-          description: 'Production server',
         },
       ],
       tags: [
@@ -30,118 +26,98 @@ export const getApiDocs = () => {
           name: 'Templates',
           description: 'Template management endpoints',
         },
+        {
+          name: 'Tags',
+          description: 'Tag management endpoints allowing two-way categorization associations',
+        }
       ],
+      paths: {
+        '/api/tags': {
+          get: {
+            summary: 'List all tags',
+            tags: ['Tags'],
+            responses: {
+              200: { description: 'Successfully recovered pure array of string names for frontend loading' }
+            }
+          },
+          post: {
+            summary: 'Create Tag safely',
+            tags: ['Tags'],
+            requestBody: {
+              content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } }
+            },
+            responses: {
+              201: { description: 'Tag created correctly mapped to new ID.' },
+              409: { description: 'Conflict: Tag heavily existing' }
+            }
+          },
+          patch: {
+            summary: 'Update tag identifier string names completely',
+            tags: ['Tags'],
+            requestBody: {
+              content: { 'application/json': { schema: { type: 'object', properties: { old_name: { type: 'string' }, new_name: { type: 'string' } } } } }
+            },
+            responses: { 200: { description: 'Renamed cleanly' } }
+          }
+        },
+        '/api/tags/{name}': {
+          delete: {
+            summary: 'Hard delete a tag permanently handling mappings',
+            tags: ['Tags'],
+            parameters: [{ in: 'path', name: 'name', type: 'string', required: true }],
+            responses: { 200: { description: 'Deleted correctly removing mappings from every internal layout schema associated concurrently.' } }
+          }
+        },
+        '/api/tags/{name}/templates': {
+          get: {
+            summary: 'Identify specific arrays cleanly isolated to this identifier',
+            tags: ['Tags'],
+            parameters: [{ in: 'path', name: 'name', type: 'string', required: true }],
+            responses: { 200: { description: 'Succeeded fetching subset mapping layout definitions intelligently utilizing 2-way database maps natively.' } }
+          }
+        }
+      },
       components: {
         schemas: {
           Template: {
             type: 'object',
             required: ['_id', 'name', 'version', 'template', 'created_on', 'updated_on'],
             properties: {
-              _id: {
-                type: 'string',
-                description: 'MongoDB ObjectId',
-                example: '507f1f77bcf86cd799439011',
-              },
-              name: {
-                type: 'string',
-                description: 'Template name',
-                example: 'Invoice Template',
-              },
-              version: {
-                type: 'string',
-                description: 'Template version',
-                example: '1.0.0',
-              },
-              template: {
-                type: 'object',
-                description: 'Template configuration object (flexible structure)',
-                example: {
-                  title: 'Sample Title',
-                  content: 'Sample Content',
-                },
-              },
-              created_on: {
-                type: 'string',
-                format: 'date-time',
-                description: 'Creation timestamp',
-              },
-              updated_on: {
-                type: 'string',
-                format: 'date-time',
-                description: 'Last update timestamp',
-              },
+              _id: { type: 'string', description: 'MongoDB ObjectId' },
+              name: { type: 'string' },
+              version: { type: 'string' },
+              template: { type: 'object' },
+              tag_ids: { type: 'array', items: { type: 'string' }, description: 'Mapping IDs referencing independent specific categories securely' },
+              created_on: { type: 'string', format: 'date-time' },
+              updated_on: { type: 'string', format: 'date-time' },
             },
           },
           TemplateInput: {
             type: 'object',
             required: ['name', 'version', 'template'],
             properties: {
-              name: {
-                type: 'string',
-                description: 'Template name',
-                example: 'New Template',
-              },
-              version: {
-                type: 'string',
-                description: 'Template version',
-                example: '1.0.0',
-              },
-              template: {
-                type: 'object',
-                description: 'Template configuration object',
-                example: {
-                  title: 'Sample Title',
-                  content: 'Sample Content',
-                },
-              },
+              name: { type: 'string' },
+              version: { type: 'string' },
+              template: { type: 'object' },
+              tag_ids: { type: 'array', items: { type: 'string' }, description: 'Newly added arrays assigning explicitly tags directly during creations strictly' }
             },
           },
           TemplateUpdate: {
             type: 'object',
             properties: {
-              name: {
-                type: 'string',
-                description: 'Template name',
-              },
-              version: {
-                type: 'string',
-                description: 'Template version',
-              },
-              template: {
-                type: 'object',
-                description: 'Template configuration object',
-              },
+              name: { type: 'string' },
+              version: { type: 'string' },
+              template: { type: 'object' },
+              tag_ids: { type: 'array', items: { type: 'string' }, description: 'Array mapping definitions automatically orchestrating differential removal syncing internally via dual mapping' }
             },
           },
           ApiResponse: {
             type: 'object',
             required: ['success'],
             properties: {
-              success: {
-                type: 'boolean',
-                description: 'Indicates if the request was successful',
-              },
-              data: {
-                description: 'Response data (type varies by endpoint)',
-              },
-              error: {
-                type: 'string',
-                description: 'Error message if success is false',
-              },
-            },
-          },
-          Error: {
-            type: 'object',
-            required: ['success', 'error'],
-            properties: {
-              success: {
-                type: 'boolean',
-                example: false,
-              },
-              error: {
-                type: 'string',
-                example: 'Error message',
-              },
+              success: { type: 'boolean' },
+              data: { description: 'Response data' },
+              error: { type: 'string' },
             },
           },
         },
