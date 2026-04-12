@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import type { Template } from '../page';
 import type { ComponentTypeSchema } from '@/types/template';
 import { deriveSchemaFromChildren } from '@/lib/tiptap/extensions';
@@ -259,6 +259,37 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
   const [jsonError,  setJsonError]  = useState('');
   const [loading,    setLoading]    = useState(false);
   const [downloaded, setDownloaded] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        // Basic validation: attempt to parse
+        JSON.parse(content);
+        setDataPointsJson(content);
+        setJsonError('');
+        setDownloaded(false);
+      } catch (err) {
+        onError('Invalid JSON file format');
+      } finally {
+        // Reset input so the same file can be selected again
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.onerror = () => onError('Failed to read file');
+    reader.readAsText(file);
+  };
+
+  const handleClearDataPoints = () => {
+    setDataPointsJson('[]');
+    setJsonError('');
+    setDownloaded(false);
+  };
 
   /** Live parse count */
   const parsedCount = useMemo(() => {
@@ -398,8 +429,33 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
 
           {/* Data-points JSON editor */}
           <div className="pg-field">
-            <label className="pg-label" htmlFor="g-dp">
+            <label className="pg-label" htmlFor="g-dp" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
               Data Points
+              <div style={{ display: 'inline-flex', gap: '8px', marginLeft: 'auto' }}>
+                <button
+                  className="pg-btn-ghost"
+                  style={{ fontSize: '12px', padding: '2px 6px', height: 'auto' }}
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Upload JSON file"
+                >
+                  Upload JSON
+                </button>
+                <button
+                  className="pg-btn-ghost"
+                  style={{ fontSize: '12px', padding: '2px 6px', height: 'auto' }}
+                  onClick={handleClearDataPoints}
+                  title="Clear all data points"
+                >
+                  Clear
+                </button>
+              </div>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".json,application/json"
+                style={{ display: 'none' }}
+              />
               <span
                 style={{
                   color: 'var(--pg-text-muted)',

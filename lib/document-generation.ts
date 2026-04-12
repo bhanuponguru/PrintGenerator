@@ -259,9 +259,15 @@ function replacePlaceholdersInNode(node: unknown, dataPoint: DataPoint, derivedS
       if (Array.isArray(clonedNode.content)) {
         clonedNode.content = clonedNode.content.map((child) => {
           if (isRecord(child) && child.type === 'text' && typeof child.text === 'string') {
+            let nextText = replaceTextTokens(child.text, dataPoint);
+            // If the text node precisely matches the placeholder key string, treat it as a token.
+            // This fixes cases where the editor inserts the key as plain text without braces.
+            if (nextText === key && dataPoint[key] !== undefined) {
+              nextText = String(dataPoint[key]);
+            }
             return {
               ...child,
-              text: replaceTextTokens(child.text, dataPoint),
+              text: nextText,
             };
           }
           return child;
