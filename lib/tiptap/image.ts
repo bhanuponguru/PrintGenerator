@@ -2,17 +2,18 @@ import { mergeAttributes, Node } from '@tiptap/core';
 import { isRecord } from '@/lib/tiptap/utils';
 import { ImageValue } from '@/types/template';
 
+/** TipTap node payload for rendered image components. */
 export interface ImageComponentNode {
   type: 'imageComponent';
   attrs: {
     value: ImageValue;
-    in_placeholder: boolean;
     width?: string | number;
     height?: string | number;
     [key: string]: unknown;
   };
 }
 
+/** Validates the image component attrs before insertion or rendering. */
 export function validateImageAttrs(attrs: Record<string, unknown>): string | null {
   if (!isRecord(attrs.value)) {
     return 'imageComponent.attrs.value must be an object';
@@ -26,15 +27,13 @@ export function validateImageAttrs(attrs: Record<string, unknown>): string | nul
   if (typeof value.alt !== 'string') {
     return 'imageComponent.attrs.value.alt must be a string';
   }
-  if ('in_placeholder' in attrs && typeof attrs.in_placeholder !== 'boolean') {
-    return 'imageComponent.attrs.in_placeholder must be a boolean';
-  }
   if ('option' in value && value.option !== undefined && !isRecord(value.option)) {
     return 'imageComponent.attrs.value.option must be an object when provided';
   }
   return null;
 }
 
+/** Creates a typed image component node from the editor form payload. */
 export function createImageComponent(
   data: ImageValue,
   attrs: Record<string, unknown> = {}
@@ -42,7 +41,6 @@ export function createImageComponent(
   const mergedAttrs = {
     ...attrs,
     value: data,
-    in_placeholder: typeof data.in_placeholder === 'boolean' ? data.in_placeholder : false,
   };
 
   const validationError = validateImageAttrs(mergedAttrs);
@@ -63,8 +61,7 @@ export const ImageComponent = Node.create({
 
   addAttributes() {
     return {
-      value: { default: { src: '', alt: '', in_placeholder: false } },
-      in_placeholder: { default: false },
+      value: { default: { src: '', alt: '' } },
       width: { default: undefined },
       height: { default: undefined },
     };

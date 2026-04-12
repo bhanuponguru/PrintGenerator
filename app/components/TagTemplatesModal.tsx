@@ -13,6 +13,7 @@ interface TagTemplatesModalProps {
   onGenerateTemplate: (template: Template) => void;
 }
 
+/** Modal that shows every template associated with a selected tag. */
 export default function TagTemplatesModal({
   tag,
   templates,
@@ -21,7 +22,7 @@ export default function TagTemplatesModal({
   onDeleteTemplate,
   onGenerateTemplate,
 }: TagTemplatesModalProps) {
-  // Filter the templates to only include those that have this tag
+  // Only show templates that are associated with the active tag.
   const filteredTemplates = templates.filter(t => 
     t.tag_ids && t.tag_ids.includes(tag._id)
   );

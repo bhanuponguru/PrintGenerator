@@ -8,6 +8,7 @@ interface DeleteConfirmModalProps {
   loading: boolean;
 }
 
+/** Generic confirmation dialog used before destructive delete actions. */
 export default function DeleteConfirmModal({
   title,
   message,

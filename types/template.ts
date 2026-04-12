@@ -1,11 +1,12 @@
 import { ObjectId } from 'mongodb';
 
+/** Shared template and placeholder typing used across the app. */
 export type TableMode = 'row_data' | 'column_data';
 export type ListStyle = 'bulleted' | 'numbered' | 'plain';
 
+/** Base schema discriminant for all placeholder value types. */
 export interface BaseTypeSchema {
   kind: string;
-  in_placeholder: boolean;
 }
 
 export interface StringTypeSchema extends BaseTypeSchema {
@@ -18,7 +19,6 @@ export interface IntegerTypeSchema extends BaseTypeSchema {
 
 export interface ImageTypeSchema extends BaseTypeSchema {
   kind: 'image';
-  option?: Record<string, unknown>;
 }
 
 export interface HyperlinkTypeSchema extends BaseTypeSchema {
@@ -28,7 +28,6 @@ export interface HyperlinkTypeSchema extends BaseTypeSchema {
 export interface ListTypeSchema extends BaseTypeSchema {
   kind: 'list';
   item_type: ComponentTypeSchema;
-  style?: ListStyle;
 }
 
 export interface ContainerTypeSchema extends BaseTypeSchema {
@@ -38,11 +37,10 @@ export interface ContainerTypeSchema extends BaseTypeSchema {
 
 export interface TableTypeSchema extends BaseTypeSchema {
   kind: 'table';
-  mode: TableMode;
-  headers: string[];
   caption?: ComponentTypeSchema;
 }
 
+/** Union of every placeholder schema supported by the editor and backend. */
 export type ComponentTypeSchema =
   | StringTypeSchema
   | IntegerTypeSchema
@@ -52,48 +50,47 @@ export type ComponentTypeSchema =
   | ContainerTypeSchema
   | TableTypeSchema;
 
+/** Maps each placeholder key to the schema expected for its value. */
 export type PlaceholderKeyTypeMap = Record<string, ComponentTypeSchema>;
 
+/** Payload for image placeholders. */
 export interface ImageValue {
-  in_placeholder: boolean;
   src: string;
   alt: string;
-  option?: Record<string, unknown>;
 }
 
+/** Payload for hyperlink placeholders. */
 export interface HyperlinkValue {
-  in_placeholder: boolean;
   alias: string;
   url: string;
 }
 
+/** Row-based table payload. */
 export interface TableRowDataValue {
-  in_placeholder: boolean;
-  mode: 'row_data';
   caption?: ComponentValue;
   rows: Array<Record<string, unknown>>;
 }
 
+/** Column-based table payload. */
 export interface TableColumnDataValue {
-  in_placeholder: boolean;
-  mode: 'column_data';
   caption?: ComponentValue;
   columns: Record<string, Record<string, unknown>>;
 }
 
+/** Composite payload for container placeholders. */
 export interface ContainerValue {
-  in_placeholder: boolean;
   components: ComponentValue[];
 }
 
+/** Composite payload for list placeholders. */
 export interface ListValue {
-  in_placeholder: boolean;
   items: ComponentValue[];
-  style?: ListStyle;
 }
 
+/** Primitive values that can appear inside typed composite payloads. */
 export type PrimitiveComponentValue = string | number;
 
+/** Any supported value that a placeholder can carry. */
 export type ComponentValue =
   | PrimitiveComponentValue
   | ImageValue

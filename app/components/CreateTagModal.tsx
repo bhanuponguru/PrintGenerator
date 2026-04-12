@@ -8,6 +8,7 @@ interface CreateTagModalProps {
   onError: (msg: string) => void;
 }
 
+/** Modal for creating a tag and surfacing any API errors inline. */
 export default function CreateTagModal({
   onClose,
   onSuccess,

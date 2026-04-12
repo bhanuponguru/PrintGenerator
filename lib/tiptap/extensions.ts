@@ -2,10 +2,11 @@ import { ContainerComponent, createContainerComponent, validateContainerAttrs } 
 import { HyperlinkComponent, createHyperlinkComponent, validateHyperlinkAttrs } from '@/lib/tiptap/hyperlink';
 import { ImageComponent, createImageComponent, validateImageAttrs } from '@/lib/tiptap/image';
 import { ListComponent, createListComponent, validateListAttrs } from '@/lib/tiptap/list';
-import { createPlaceholderNode, substitutePlaceholderValue, validatePlaceholderAttrs } from '@/lib/tiptap/placeholder';
+import { createPlaceholderNode, substitutePlaceholderValue, validatePlaceholderAttrs, deriveSchemaFromChildren } from '@/lib/tiptap/placeholder';
 import { TableComponent, createTableComponent, validateTableAttrs } from '@/lib/tiptap/table';
 import { getComponentTypeExpectation } from '@/lib/tiptap/component-type';
 
+/** Convenience list of the custom TipTap extensions required by the editor. */
 export const ComponentExtensions = [
   ImageComponent,
   HyperlinkComponent,
@@ -29,4 +30,5 @@ export {
   validateContainerAttrs,
   validateTableAttrs,
   validatePlaceholderAttrs,
+  deriveSchemaFromChildren,
 };

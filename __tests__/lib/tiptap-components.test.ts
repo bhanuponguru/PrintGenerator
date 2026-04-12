@@ -13,94 +13,85 @@ import { validateTemplatePlaceholderSchemas } from '@/lib/template-schema';
 
 describe('TipTap component validators (destructive)', () => {
   it('rejects image with missing src', () => {
-    const err = validateImageAttrs({ value: { alt: 'x', in_placeholder: false }, in_placeholder: false });
+    const err = validateImageAttrs({ value: { alt: 'x' } });
     expect(err).toContain('src');
   });
 
   it('rejects image with invalid option shape', () => {
     const err = validateImageAttrs({
-      value: { src: 'https://a.com/x.png', alt: 'x', option: 'bad', in_placeholder: false },
-      in_placeholder: false,
+      value: { src: 'https://a.com/x.png', alt: 'x', option: 'bad' },
     });
     expect(err).toContain('option');
   });
 
   it('rejects hyperlink with relative url', () => {
     const err = validateHyperlinkAttrs({
-      value: { alias: 'Docs', url: '/docs', in_placeholder: false },
-      in_placeholder: false,
+      value: { alias: 'Docs', url: '/docs' },
     });
     expect(err).toContain('absolute URL');
   });
 
   it('rejects hyperlink with empty alias', () => {
     const err = validateHyperlinkAttrs({
-      value: { alias: '', url: 'https://a.com', in_placeholder: false },
-      in_placeholder: false,
+      value: { alias: '', url: 'https://a.com' },
     });
     expect(err).toContain('alias');
   });
 
   it('rejects list with non-array items', () => {
-    const err = validateListAttrs({ value: { items: 'bad', in_placeholder: false }, in_placeholder: false });
+    const err = validateListAttrs({ value: { items: 'bad' } });
     expect(err).toContain('items');
   });
 
   it('rejects container with non-array components', () => {
-    const err = validateContainerAttrs({ value: { components: {}, in_placeholder: false }, in_placeholder: false });
+    const err = validateContainerAttrs({ value: { components: {} } });
     expect(err).toContain('components');
   });
 
   it('rejects container with non-array component_types', () => {
     const err = validateContainerAttrs({
-      value: { components: [], in_placeholder: false },
+      value: { components: [] },
       component_types: {},
-      in_placeholder: false,
     });
     expect(err).toContain('component_types');
   });
 
-  it('rejects table with invalid mode', () => {
+  it('rejects table without rows/columns payload', () => {
     const err = validateTableAttrs({
-      value: { mode: 'unknown', in_placeholder: false },
+      value: { mode: 'unknown' },
       headers: ['H1'],
-      in_placeholder: false,
     });
-    expect(err).toContain('mode');
+    expect(err).toContain('either rows[] or columns{}');
   });
 
   it('rejects table with empty headers', () => {
     const err = validateTableAttrs({
-      value: { mode: 'row_data', rows: [], in_placeholder: false },
+      value: { rows: [] },
       headers: ['H1', ''],
-      in_placeholder: false,
     });
     expect(err).toContain('headers');
   });
 
   it('rejects row_data table with non-array rows', () => {
     const err = validateTableAttrs({
-      value: { mode: 'row_data', rows: {}, in_placeholder: false },
+      value: { rows: {} },
       headers: ['H1'],
-      in_placeholder: false,
     });
-    expect(err).toContain('rows');
+    expect(err).toContain('either rows[] or columns{}');
   });
 
   it('rejects column_data table with non-object columns', () => {
     const err = validateTableAttrs({
-      value: { mode: 'column_data', columns: [], in_placeholder: false },
+      value: { columns: [] },
       headers: ['R1'],
-      in_placeholder: false,
     });
-    expect(err).toContain('columns');
+    expect(err).toContain('either rows[] or columns{}');
   });
 
   it('rejects column_data table with empty column names', () => {
     const err = validateTableAttrs({
-      value: { mode: 'column_data', columns: { '': { R1: 'x' } }, in_placeholder: false },
+      value: { columns: { '': { R1: 'x' } } },
       headers: ['R1'],
-      in_placeholder: false,
     });
     expect(err).toContain('empty column names');
   });
@@ -111,7 +102,7 @@ describe('TipTap component validators (destructive)', () => {
       content: [
         {
           type: 'imageComponent',
-          attrs: { value: { src: '', alt: 'x', in_placeholder: false }, in_placeholder: false },
+          attrs: { value: { src: '', alt: 'x' } },
         },
       ],
     });
@@ -129,9 +120,8 @@ describe('TipTap component validators (destructive)', () => {
         {
           type: 'tableComponent',
           attrs: {
-            value: { mode: 'row_data', rows: [123], in_placeholder: false },
+            value: { mode: 'row_data', rows: [123] },
             headers: ['H1'],
-            in_placeholder: false,
           },
         },
       ],
@@ -148,8 +138,6 @@ describe('TipTap component validators (destructive)', () => {
       {
         src: 'https://example.com/logo.png',
         alt: 'Logo',
-        in_placeholder: false,
-        option: {},
       },
       { width: '120', height: '80' }
     );
@@ -166,7 +154,6 @@ describe('TipTap component validators (destructive)', () => {
       {
         alias: 'Docs',
         url: 'https://example.com/docs',
-        in_placeholder: false,
       },
       { title: 'Documentation' }
     );
@@ -180,7 +167,6 @@ describe('TipTap component validators (destructive)', () => {
   it('creates a list component node from schema-shaped data', () => {
     const node = createListComponent({
       items: ['A', 'B'],
-      in_placeholder: false,
     });
 
     expect(node.type).toBe('listComponent');
@@ -191,12 +177,11 @@ describe('TipTap component validators (destructive)', () => {
     const node = createContainerComponent(
       {
         components: ['First', 'Second'],
-        in_placeholder: false,
       },
       {
         component_types: [
-          { kind: 'string', in_placeholder: false },
-          { kind: 'string', in_placeholder: false },
+          { kind: 'string' },
+          { kind: 'string' },
         ],
       }
     );
@@ -208,16 +193,13 @@ describe('TipTap component validators (destructive)', () => {
 
   it('creates a table component node from row data schema', () => {
     const node = createTableComponent({
-      mode: 'row_data',
       rows: [{ Item: 'Pen', Qty: 2 }],
       caption: 'Inventory',
-      in_placeholder: false,
     }, {
       headers: ['Item', 'Qty'],
     });
 
     expect(node.type).toBe('tableComponent');
-    expect(node.attrs.value.mode).toBe('row_data');
     expect(node.attrs.headers).toEqual(['Item', 'Qty']);
   });
 });

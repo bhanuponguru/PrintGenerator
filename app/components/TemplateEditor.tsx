@@ -50,6 +50,7 @@ type PlaceholderKind = ComponentTypeSchema['kind'];
 
 const KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
+/** Walks a TipTap document tree so validation can inspect every node. */
 function walkTiptapJson(node: Record<string, any>, visit: (n: Record<string, any>) => void) {
   visit(node);
   if (Array.isArray(node.content)) {
@@ -79,9 +80,33 @@ function normalizeListStyle(style: string): ListStyle {
   return style === 'numbered' || style === 'plain' ? style : 'bulleted';
 }
 
+/** Returns a sensible default schema for the selected placeholder kind. */
+function defaultSchemaForKind(kind: PlaceholderKind): ComponentTypeSchema {
+  if (kind === 'string' || kind === 'integer' || kind === 'image' || kind === 'hyperlink') {
+    return { kind } as ComponentTypeSchema;
+  }
+
+  if (kind === 'list') {
+    return {
+      kind: 'list',
+      item_type: { kind: 'string' },
+    };
+  }
+
+  if (kind === 'container') {
+    return {
+      kind: 'container',
+      component_types: [{ kind: 'string' }],
+    };
+  }
+
+  return { kind: 'table' };
+}
+
 function collectValidationErrors(documentJson: Record<string, any>): string[] {
   const errors: string[] = [];
 
+  /** Enforce the structural contract for each inserted node type. */
   walkTiptapJson(documentJson, (node) => {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
 
@@ -91,6 +116,14 @@ function collectValidationErrors(documentJson: Record<string, any>): string[] {
       const err = validatePlaceholderAttrs(attrs);
       if (err) {
         errors.push(`placeholder: ${err}`);
+      }
+
+      if (attrs.kind === 'list' && (attrs.item_kind !== 'string' && attrs.item_kind !== 'integer' && attrs.item_kind !== 'image' && attrs.item_kind !== 'hyperlink')) {
+        errors.push('placeholder: list placeholders require item_kind');
+      }
+
+      if (attrs.kind === 'container' && (!Array.isArray(attrs.component_kinds) || attrs.component_kinds.length === 0)) {
+        errors.push('placeholder: container placeholders require component_kinds');
       }
 
       const key = typeof attrs.key === 'string' ? attrs.key : '';
@@ -134,19 +167,27 @@ export default function TemplateEditor({
   onValidationChange,
   hasError = false,
 }: TemplateEditorProps) {
+  /** Toolbar panel state for the various insert dialogs. */
   const [insertPanel, setInsertPanel] = useState<InsertPanel>(null);
+  /** Live validation state shown to the user and bubbled to the parent. */
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
 
+  /** Placeholder insertion form state. */
   const [phKey, setPhKey] = useState('');
   const [phKind, setPhKind] = useState<PlaceholderKind>('string');
   const [phListStyle, setPhListStyle] = useState<ListStyle>('bulleted');
+  const [phListItemKind, setPhListItemKind] = useState<PlaceholderKind>('string');
   const [phTableMode, setPhTableMode] = useState<TableMode>('row_data');
   const [phTableHeaders, setPhTableHeaders] = useState('Item,Qty');
+  const [phTableColumnKinds, setPhTableColumnKinds] = useState<Record<string, PlaceholderKind>>({});
+  const [phTableRowKinds, setPhTableRowKinds] = useState<Record<string, PlaceholderKind>>({});
   const [phContainerSlots, setPhContainerSlots] = useState('2');
+  const [phContainerKinds, setPhContainerKinds] = useState<Record<number, PlaceholderKind>>({});
   const [insertError, setInsertError] = useState('');
 
+  /** Component insertion form state. */
   const [imageSrc, setImageSrc] = useState('https://example.com/logo.png');
   const [imageAlt, setImageAlt] = useState('Image');
 
@@ -219,43 +260,6 @@ export default function TemplateEditor({
     setIsPreviewOpen(true);
   }, [editor]);
 
-  const placeholderSchema = useMemo<ComponentTypeSchema | null>(() => {
-    if (phKind === 'string' || phKind === 'integer' || phKind === 'image' || phKind === 'hyperlink') {
-      return { kind: phKind, in_placeholder: true } as ComponentTypeSchema;
-    }
-
-    if (phKind === 'list') {
-      return {
-        kind: 'list',
-        in_placeholder: true,
-        style: normalizeListStyle(phListStyle),
-        item_type: { kind: 'string', in_placeholder: true },
-      };
-    }
-
-    if (phKind === 'container') {
-      const slots = Number(phContainerSlots);
-      const count = Number.isFinite(slots) && slots > 0 ? Math.floor(slots) : 2;
-      return {
-        kind: 'container',
-        in_placeholder: true,
-        component_types: Array.from({ length: count }, () => ({ kind: 'string', in_placeholder: true })),
-      };
-    }
-
-    if (phKind === 'table') {
-      const headers = parseCommaSeparated(phTableHeaders);
-      return {
-        kind: 'table',
-        in_placeholder: true,
-        mode: phTableMode,
-        headers,
-      };
-    }
-
-    return null;
-  }, [phKind, phListStyle, phTableMode, phTableHeaders, phContainerSlots]);
-
   const insertTypedPlaceholder = useCallback(() => {
     const key = phKey.trim().replace(/\s+/g, '_');
     if (!key || !KEY_RE.test(key)) {
@@ -263,14 +267,48 @@ export default function TemplateEditor({
       return;
     }
 
-    if (!placeholderSchema) {
-      setInsertError('Choose a valid placeholder schema.');
+    const attrs: Record<string, unknown> = {
+      key,
+      kind: phKind,
+      value: '',
+    };
+
+    if (phKind === 'list') {
+      attrs.style = normalizeListStyle(phListStyle);
+      attrs.item_kind = phListItemKind;
+    }
+
+    if (phKind === 'container') {
+      const slots = Number(phContainerSlots);
+      const count = Number.isFinite(slots) && slots > 0 ? Math.floor(slots) : 2;
+      attrs.component_kinds = Array.from({ length: count }, (_, index) => phContainerKinds[index] || 'string');
+    }
+
+    if (phKind === 'table' && parseCommaSeparated(phTableHeaders).length === 0) {
+      setInsertError('Table placeholders require at least one header.');
       return;
     }
 
-    if (placeholderSchema.kind === 'table' && placeholderSchema.headers.length === 0) {
-      setInsertError('Table placeholders require at least one header.');
-      return;
+    if (phKind === 'table') {
+      const headers = parseCommaSeparated(phTableHeaders);
+      attrs.mode = phTableMode;
+      attrs.headers = headers;
+
+      if (phTableMode === 'row_data') {
+        attrs.column_types = Object.fromEntries(
+          headers.map((header) => [
+            header,
+            defaultSchemaForKind(phTableColumnKinds[header] || 'string'),
+          ])
+        );
+      } else {
+        attrs.row_types = Object.fromEntries(
+          headers.map((header) => [
+            header,
+            defaultSchemaForKind(phTableRowKinds[header] || 'string'),
+          ])
+        );
+      }
     }
 
     const result = editor
@@ -278,12 +316,7 @@ export default function TemplateEditor({
       .focus()
       .insertContent({
         type: 'placeholder',
-        attrs: {
-          key,
-          value_schema: placeholderSchema,
-          value: '',
-          in_placeholder: true,
-        },
+        attrs,
         content: [{ type: 'text', text: key }],
       })
       .run();
@@ -296,7 +329,7 @@ export default function TemplateEditor({
     setInsertError('');
     setPhKey('');
     setInsertPanel(null);
-  }, [editor, phKey, placeholderSchema]);
+  }, [editor, phKey, phKind, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds, phListStyle, phListItemKind, phContainerSlots, phContainerKinds]);
 
   const insertImageComponent = useCallback(() => {
     try {
@@ -304,7 +337,6 @@ export default function TemplateEditor({
         {
           src: imageSrc.trim(),
           alt: imageAlt.trim(),
-          in_placeholder: false,
         },
         {}
       );
@@ -322,7 +354,6 @@ export default function TemplateEditor({
         {
           alias: linkAlias.trim(),
           url: linkUrl.trim(),
-          in_placeholder: false,
         },
         {}
       );
@@ -345,7 +376,6 @@ export default function TemplateEditor({
       const node = createListComponent({
         items,
         style: normalizeListStyle(listStyle),
-        in_placeholder: false,
       });
       editor?.chain().focus().insertContent(node as any).run();
       setInsertError('');
@@ -366,10 +396,9 @@ export default function TemplateEditor({
       const node = createContainerComponent(
         {
           components,
-          in_placeholder: false,
         },
         {
-          component_types: components.map(() => ({ kind: 'string', in_placeholder: false })),
+          component_types: components.map(() => ({ kind: 'string' })),
         }
       );
       editor?.chain().focus().insertContent(node as any).run();
@@ -403,7 +432,6 @@ export default function TemplateEditor({
             mode: 'row_data',
             rows,
             caption: tableCaption.trim() || undefined,
-            in_placeholder: false,
           },
           { headers }
         );
@@ -436,7 +464,6 @@ export default function TemplateEditor({
             mode: 'column_data',
             columns: colData,
             caption: tableCaption.trim() || undefined,
-            in_placeholder: false,
           },
           { headers }
         );
@@ -451,6 +478,7 @@ export default function TemplateEditor({
     }
   }, [editor, tableMode, rowHeaders, rowRows, colRowHeaders, colNames, colMatrix, tableCaption]);
 
+  /** Extracts the set of placeholder keys present in the current editor state. */
   const placeholderKeys = useMemo(() => {
     if (!editor) return [] as string[];
 
@@ -634,21 +662,49 @@ export default function TemplateEditor({
               </div>
 
               {phKind === 'list' && (
-                <div className="pg-insert-row">
-                  <label className="pg-label">List style</label>
-                  <select className="pg-input" value={phListStyle} onChange={(e) => setPhListStyle(e.target.value as ListStyle)}>
-                    <option value="bulleted">bulleted</option>
-                    <option value="numbered">numbered</option>
-                    <option value="plain">plain</option>
-                  </select>
-                </div>
+                <>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">List style</label>
+                    <select className="pg-input" value={phListStyle} onChange={(e) => setPhListStyle(e.target.value as ListStyle)}>
+                      <option value="bulleted">bulleted</option>
+                      <option value="numbered">numbered</option>
+                      <option value="plain">plain</option>
+                    </select>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">List item type</label>
+                    <select className="pg-input" value={phListItemKind} onChange={(e) => setPhListItemKind(e.target.value as PlaceholderKind)}>
+                      <option value="string">string</option>
+                      <option value="integer">integer</option>
+                      <option value="image">image</option>
+                      <option value="hyperlink">hyperlink</option>
+                    </select>
+                  </div>
+                </>
               )}
 
               {phKind === 'container' && (
-                <div className="pg-insert-row">
-                  <label className="pg-label">Container slots</label>
-                  <input className="pg-input" value={phContainerSlots} onChange={(e) => setPhContainerSlots(e.target.value)} placeholder="2" />
-                </div>
+                <>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Container slots</label>
+                    <input className="pg-input" value={phContainerSlots} onChange={(e) => setPhContainerSlots(e.target.value)} placeholder="2" />
+                  </div>
+                  {Array.from({ length: Number.isFinite(Number(phContainerSlots)) && Number(phContainerSlots) > 0 ? Math.floor(Number(phContainerSlots)) : 2 }, (_, index) => (
+                    <div className="pg-insert-row" key={`container-kind-${index}`}>
+                      <label className="pg-label">Slot {index + 1} kind</label>
+                      <select
+                        className="pg-input"
+                        value={phContainerKinds[index] || 'string'}
+                        onChange={(e) => setPhContainerKinds((prev) => ({ ...prev, [index]: e.target.value as PlaceholderKind }))}
+                      >
+                        <option value="string">string</option>
+                        <option value="integer">integer</option>
+                        <option value="image">image</option>
+                        <option value="hyperlink">hyperlink</option>
+                      </select>
+                    </div>
+                  ))}
+                </>
               )}
 
               {phKind === 'table' && (
@@ -664,6 +720,59 @@ export default function TemplateEditor({
                     <label className="pg-label">Headers (comma separated)</label>
                     <input className="pg-input" value={phTableHeaders} onChange={(e) => setPhTableHeaders(e.target.value)} placeholder="Item,Qty" />
                   </div>
+
+                  {parseCommaSeparated(phTableHeaders).length > 0 && (
+                    <div className="pg-sheet-wrap" style={{ marginTop: 8 }}>
+                      <div className="pg-sheet-toolbar">
+                        <strong>
+                          {phTableMode === 'row_data'
+                            ? 'Column type for each header'
+                            : 'Row type for each header'}
+                        </strong>
+                      </div>
+                      <table className="pg-sheet-table">
+                        <thead>
+                          <tr>
+                            <th>Header</th>
+                            <th>Type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {parseCommaSeparated(phTableHeaders).map((header) => (
+                            <tr key={header}>
+                              <td>{header}</td>
+                              <td>
+                                <select
+                                  className="pg-input"
+                                  value={
+                                    phTableMode === 'row_data'
+                                      ? (phTableColumnKinds[header] || 'string')
+                                      : (phTableRowKinds[header] || 'string')
+                                  }
+                                  onChange={(e) => {
+                                    const kind = e.target.value as PlaceholderKind;
+                                    if (phTableMode === 'row_data') {
+                                      setPhTableColumnKinds((prev) => ({ ...prev, [header]: kind }));
+                                    } else {
+                                      setPhTableRowKinds((prev) => ({ ...prev, [header]: kind }));
+                                    }
+                                  }}
+                                >
+                                  <option value="string">string</option>
+                                  <option value="integer">integer</option>
+                                  <option value="image">image</option>
+                                  <option value="hyperlink">hyperlink</option>
+                                  <option value="list">list</option>
+                                  <option value="container">container</option>
+                                  <option value="table">table</option>
+                                </select>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </>
               )}
 

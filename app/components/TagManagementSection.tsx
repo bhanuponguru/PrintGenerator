@@ -9,6 +9,7 @@ interface TagManagementSectionProps {
   onViewTemplatesClick: (tag: TagResponse) => void;
 }
 
+/** Displays the tag collection and exposes edit/delete/view actions per tag. */
 export default function TagManagementSection({
   tags,
   onEditClick,

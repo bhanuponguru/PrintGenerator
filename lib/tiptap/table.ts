@@ -2,17 +2,18 @@ import { Node } from '@tiptap/core';
 import { isRecord } from '@/lib/tiptap/utils';
 import { TableColumnDataValue, TableRowDataValue } from '@/types/template';
 
+/** TipTap node payload for rendered table components. */
 export interface TableComponentNode {
   type: 'tableComponent';
   attrs: {
     value: TableRowDataValue | TableColumnDataValue;
     headers: string[];
     caption?: unknown;
-    in_placeholder: boolean;
     [key: string]: unknown;
   };
 }
 
+/** Validates the table component attrs before insertion or rendering. */
 export function validateTableAttrs(attrs: Record<string, unknown>): string | null {
   if (!attrs.value || typeof attrs.value !== 'object' || Array.isArray(attrs.value)) {
     return 'tableComponent.attrs.value must be an object';
@@ -20,39 +21,37 @@ export function validateTableAttrs(attrs: Record<string, unknown>): string | nul
 
   const value = attrs.value as Record<string, unknown>;
 
-  if (value.mode !== 'row_data' && value.mode !== 'column_data') {
-    return "tableComponent.attrs.value.mode must be 'row_data' or 'column_data'";
+  // Infer mode from data: if has rows → row_data, if has columns → column_data
+  const hasRows = Array.isArray(value.rows);
+  const hasColumns = isRecord(value.columns);
+
+  if (!hasRows && !hasColumns) {
+    return 'tableComponent.attrs.value must have either rows[] or columns{}';
+  }
+
+  if (hasRows && hasColumns) {
+    return 'tableComponent.attrs.value cannot have both rows[] and columns{}';
   }
 
   if (!Array.isArray(attrs.headers) || attrs.headers.some((h) => typeof h !== 'string' || h.trim() === '')) {
     return 'tableComponent.attrs.headers must be an array of non-empty strings';
   }
 
-  if ('in_placeholder' in attrs && typeof attrs.in_placeholder !== 'boolean') {
-    return 'tableComponent.attrs.in_placeholder must be a boolean';
-  }
-
   if ('caption' in attrs && attrs.caption !== undefined && attrs.caption !== null && !isRecord(attrs.caption) && typeof attrs.caption !== 'string') {
     return 'tableComponent.attrs.caption must be a component object or string when provided';
   }
 
-  if (value.mode === 'row_data') {
-    if (!Array.isArray(value.rows)) {
-      return 'tableComponent.attrs.value.rows must be an array for row_data mode';
-    }
-    for (let i = 0; i < value.rows.length; i += 1) {
-      if (!isRecord(value.rows[i])) {
+  if (hasRows) {
+    for (let i = 0; i < (value.rows as unknown[]).length; i += 1) {
+      if (!isRecord((value.rows as unknown[])[i])) {
         return `tableComponent.attrs.value.rows[${i}] must be an object`;
       }
     }
     return null;
   }
 
-  if (!isRecord(value.columns)) {
-    return 'tableComponent.attrs.value.columns must be an object for column_data mode';
-  }
-
-  for (const [columnName, columnData] of Object.entries(value.columns)) {
+  // hasColumns
+  for (const [columnName, columnData] of Object.entries(value.columns as Record<string, unknown>)) {
     if (!columnName.trim()) {
       return 'tableComponent.attrs.value.columns cannot contain empty column names';
     }
@@ -64,6 +63,7 @@ export function validateTableAttrs(attrs: Record<string, unknown>): string | nul
   return null;
 }
 
+/** Creates a typed table component node from the editor form payload. */
 export function createTableComponent(
   data: TableRowDataValue | TableColumnDataValue,
   attrs: Record<string, unknown> = {}
@@ -72,7 +72,6 @@ export function createTableComponent(
     ...attrs,
     headers: Array.isArray(attrs.headers) ? attrs.headers : [],
     value: data,
-    in_placeholder: typeof data.in_placeholder === 'boolean' ? data.in_placeholder : false,
   };
 
   const validationError = validateTableAttrs(mergedAttrs);
@@ -93,10 +92,9 @@ export const TableComponent = Node.create({
 
   addAttributes() {
     return {
-      value: { default: { mode: 'row_data', rows: [], in_placeholder: false } },
+      value: { default: { rows: [] } },
       headers: { default: [] },
       caption: { default: undefined },
-      in_placeholder: { default: false },
     };
   },
 
@@ -120,7 +118,7 @@ export const TableComponent = Node.create({
       ? ['caption', {}, typeof caption === 'string' ? caption : JSON.stringify(caption)]
       : null;
 
-    if (value.mode === 'row_data') {
+    if (Array.isArray(value.rows)) {
       const rows = value.rows as Array<Record<string, unknown>>;
       const thead = ['thead', {}, ['tr', {}, ...headers.map((h) => ['th', {}, h])]];
       const tbody = [
@@ -132,7 +130,7 @@ export const TableComponent = Node.create({
       return ['table', { 'data-component': 'table' }, ...(captionNode ? [captionNode] : []), thead, tbody];
     }
 
-    const columns = value.columns as Record<string, Record<string, unknown>>;
+    const columns = isRecord(value.columns) ? value.columns as Record<string, Record<string, unknown>> : {};
     const columnNames = Object.keys(columns);
 
     const thead = ['thead', {}, ['tr', {}, ['th', {}, ''], ...columnNames.map((name) => ['th', {}, name])]];

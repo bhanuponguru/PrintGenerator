@@ -15,13 +15,8 @@ interface EditTemplateModalProps {
 }
 
 /**
- * Interactive Dialog overlay primarily purposed to load and mutate existing data arrays
- * reflecting document templates. Incorporates backwards compatibility handlers to manage
- * older raw JSON configurations safely gracefully adapting structures for rich text editing.
- * @param template A populated Template profile representing the existing saved item properties.
- * @param onClose Callback trigger designed to close this element scope without saving.
- * @param onSuccess Execution pipeline signalling the completion of dataset transformations.
- * @param onError Extricated handling pipe signalling application execution failures.
+ * Modal for editing an existing template in place, preserving the current
+ * values while validating and resubmitting the updated document.
  */
 export default function EditTemplateModal({
   template,

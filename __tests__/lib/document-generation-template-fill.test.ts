@@ -17,12 +17,9 @@ function buildListPlaceholderTemplate(key: string, style: 'bulleted' | 'numbered
             type: 'placeholder',
             attrs: {
               key,
-              value_schema: {
-                kind: 'list',
-                in_placeholder: true,
-                style,
-                item_type: { kind: itemType, in_placeholder: true },
-              },
+              kind: 'list',
+              style,
+              item_kind: itemType,
             },
           },
         ],
@@ -39,9 +36,7 @@ describe('template filling pipeline for list placeholders', () => {
       {
         students: {
           kind: 'list',
-          in_placeholder: true,
-          style: 'bulleted',
-          item_type: { kind: 'string', in_placeholder: true },
+          item_type: { kind: 'string' },
         },
       }
     );
@@ -49,8 +44,6 @@ describe('template filling pipeline for list placeholders', () => {
     expect(validation.missing).toEqual([]);
     expect(validation.invalid).toEqual([]);
     expect(validation.normalizedDataPoint.students).toEqual({
-      in_placeholder: true,
-      style: 'bulleted',
       items: ['Ada', 'Grace', 'Linus'],
     });
 
@@ -67,9 +60,7 @@ describe('template filling pipeline for list placeholders', () => {
       {
         instructors: {
           kind: 'list',
-          in_placeholder: true,
-          style: 'numbered',
-          item_type: { kind: 'string', in_placeholder: true },
+          item_type: { kind: 'string' },
         },
       }
     );
@@ -90,9 +81,7 @@ describe('template filling pipeline for list placeholders', () => {
       {
         agenda: {
           kind: 'list',
-          in_placeholder: true,
-          style: 'plain',
-          item_type: { kind: 'string', in_placeholder: true },
+          item_type: { kind: 'string' },
         },
       }
     );
@@ -115,9 +104,7 @@ describe('template filling pipeline for list placeholders', () => {
       {
         students: {
           kind: 'list',
-          in_placeholder: true,
-          style: 'bulleted',
-          item_type: { kind: 'string', in_placeholder: true },
+          item_type: { kind: 'string' },
         },
       }
     );
@@ -136,9 +123,7 @@ describe('template filling pipeline for list placeholders', () => {
       {
         scores: {
           kind: 'list',
-          in_placeholder: true,
-          style: 'numbered',
-          item_type: { kind: 'integer', in_placeholder: true },
+          item_type: { kind: 'integer' },
         },
       }
     );
@@ -146,8 +131,6 @@ describe('template filling pipeline for list placeholders', () => {
     expect(validation.missing).toEqual([]);
     expect(validation.invalid).toEqual([]);
     expect(validation.normalizedDataPoint.scores).toEqual({
-      in_placeholder: true,
-      style: 'numbered',
       items: [1, 2, 3],
     });
 
@@ -166,56 +149,44 @@ describe('template filling pipeline equivalence coverage', () => {
       content: [
         {
           type: 'placeholder',
-          attrs: { key: 'name', value_schema: { kind: 'string', in_placeholder: true } },
+          attrs: { key: 'name', kind: 'string' },
         },
         {
           type: 'placeholder',
-          attrs: { key: 'count', value_schema: { kind: 'integer', in_placeholder: true } },
+          attrs: { key: 'count', kind: 'integer' },
         },
         {
           type: 'placeholder',
-          attrs: { key: 'logo', value_schema: { kind: 'image', in_placeholder: true } },
+          attrs: { key: 'logo', kind: 'image' },
         },
         {
           type: 'placeholder',
-          attrs: { key: 'site', value_schema: { kind: 'hyperlink', in_placeholder: true } },
+          attrs: { key: 'site', kind: 'hyperlink' },
         },
         {
           type: 'placeholder',
           attrs: {
             key: 'students',
-            value_schema: {
-              kind: 'list',
-              in_placeholder: true,
-              style: 'bulleted',
-              item_type: { kind: 'string', in_placeholder: true },
-            },
+            kind: 'list',
+            style: 'bulleted',
+            item_kind: 'string',
           },
         },
         {
           type: 'placeholder',
           attrs: {
             key: 'pair',
-            value_schema: {
-              kind: 'container',
-              in_placeholder: true,
-              component_types: [
-                { kind: 'string', in_placeholder: true },
-                { kind: 'hyperlink', in_placeholder: true },
-              ],
-            },
+            kind: 'container',
+            component_kinds: ['string', 'hyperlink'],
           },
         },
         {
           type: 'placeholder',
           attrs: {
             key: 'report',
-            value_schema: {
-              kind: 'table',
-              in_placeholder: true,
-              mode: 'row_data',
-              headers: ['Item', 'Qty'],
-            },
+            kind: 'table',
+            mode: 'row_data',
+            headers: ['Item', 'Qty'],
           },
         },
       ],
@@ -234,15 +205,15 @@ describe('template filling pipeline equivalence coverage', () => {
 
   it('returns missing and invalid keys in one validation pass', () => {
     const keyTypeMap = {
-      name: { kind: 'string', in_placeholder: true },
-      count: { kind: 'integer', in_placeholder: true },
-      site: { kind: 'hyperlink', in_placeholder: true },
+      name: { kind: 'string' },
+      count: { kind: 'integer' },
+      site: { kind: 'hyperlink' },
     };
 
     const result = validateDataPointAgainstKeyTypeMap(
       {
         name: 'Ada',
-        site: { alias: 'Docs', url: '/relative', in_placeholder: true },
+        site: { alias: 'Docs', url: '/relative' },
       },
       keyTypeMap
     );
@@ -263,7 +234,7 @@ describe('template filling pipeline equivalence coverage', () => {
               type: 'placeholder',
               attrs: {
                 key: 'name',
-                value_schema: { kind: 'string', in_placeholder: true },
+                kind: 'string',
               },
               content: [{ type: 'text', text: 'Hello {{name}}' }],
             },
@@ -272,7 +243,7 @@ describe('template filling pipeline equivalence coverage', () => {
               type: 'placeholder',
               attrs: {
                 key: 'count',
-                value_schema: { kind: 'integer', in_placeholder: true },
+                kind: 'integer',
               },
             },
           ],
@@ -283,8 +254,8 @@ describe('template filling pipeline equivalence coverage', () => {
     const validation = validateDataPointAgainstKeyTypeMap(
       { name: 'Ada', count: '7.8' },
       {
-        name: { kind: 'string', in_placeholder: true },
-        count: { kind: 'integer', in_placeholder: true },
+        name: { kind: 'string' },
+        count: { kind: 'integer' },
       }
     );
 
@@ -305,14 +276,14 @@ describe('template filling pipeline equivalence coverage', () => {
           type: 'placeholder',
           attrs: {
             key: 'logo',
-            value_schema: { kind: 'image', in_placeholder: true },
+            kind: 'image',
           },
         },
         {
           type: 'placeholder',
           attrs: {
             key: 'docs',
-            value_schema: { kind: 'hyperlink', in_placeholder: true },
+            kind: 'hyperlink',
           },
         },
       ],
@@ -320,12 +291,12 @@ describe('template filling pipeline equivalence coverage', () => {
 
     const validation = validateDataPointAgainstKeyTypeMap(
       {
-        logo: { src: 'https://example.com/logo.png', alt: 'Logo', in_placeholder: true },
-        docs: { alias: 'Docs', url: 'https://example.com/docs', in_placeholder: true },
+        logo: { src: 'https://example.com/logo.png', alt: 'Logo' },
+        docs: { alias: 'Docs', url: 'https://example.com/docs' },
       },
       {
-        logo: { kind: 'image', in_placeholder: true },
-        docs: { kind: 'hyperlink', in_placeholder: true },
+        logo: { kind: 'image' },
+        docs: { kind: 'hyperlink' },
       }
     );
 
@@ -344,14 +315,8 @@ describe('template filling pipeline equivalence coverage', () => {
           type: 'placeholder',
           attrs: {
             key: 'pair',
-            value_schema: {
-              kind: 'container',
-              in_placeholder: true,
-              component_types: [
-                { kind: 'string', in_placeholder: true },
-                { kind: 'hyperlink', in_placeholder: true },
-              ],
-            },
+            kind: 'container',
+            component_kinds: ['string', 'hyperlink'],
           },
         },
       ],
@@ -360,17 +325,15 @@ describe('template filling pipeline equivalence coverage', () => {
     const validation = validateDataPointAgainstKeyTypeMap(
       {
         pair: {
-          in_placeholder: true,
-          components: ['Open docs', { alias: 'Docs', url: 'https://example.com/docs', in_placeholder: true }],
+          components: ['Open docs', { alias: 'Docs', url: 'https://example.com/docs' }],
         },
       },
       {
         pair: {
           kind: 'container',
-          in_placeholder: true,
           component_types: [
-            { kind: 'string', in_placeholder: true },
-            { kind: 'hyperlink', in_placeholder: true },
+            { kind: 'string' },
+            { kind: 'hyperlink' },
           ],
         },
       }
@@ -390,24 +353,18 @@ describe('template filling pipeline equivalence coverage', () => {
           type: 'placeholder',
           attrs: {
             key: 'rowTable',
-            value_schema: {
-              kind: 'table',
-              in_placeholder: true,
-              mode: 'row_data',
-              headers: ['Item', 'Qty'],
-            },
+            kind: 'table',
+            mode: 'row_data',
+            headers: ['Item', 'Qty'],
           },
         },
         {
           type: 'placeholder',
           attrs: {
             key: 'colTable',
-            value_schema: {
-              kind: 'table',
-              in_placeholder: true,
-              mode: 'column_data',
-              headers: ['Q1', 'Q2'],
-            },
+            kind: 'table',
+            mode: 'column_data',
+            headers: ['Q1', 'Q2'],
           },
         },
       ],
@@ -416,16 +373,12 @@ describe('template filling pipeline equivalence coverage', () => {
     const validation = validateDataPointAgainstKeyTypeMap(
       {
         rowTable: {
-          mode: 'row_data',
-          in_placeholder: true,
           rows: [
             { Item: 'Pen', Qty: 2 },
             { Item: 'Notebook', Qty: 1 },
           ],
         },
         colTable: {
-          mode: 'column_data',
-          in_placeholder: true,
           columns: {
             Sales: { Q1: 10, Q2: 12 },
             Profit: { Q1: 3, Q2: 4 },
@@ -435,15 +388,9 @@ describe('template filling pipeline equivalence coverage', () => {
       {
         rowTable: {
           kind: 'table',
-          in_placeholder: true,
-          mode: 'row_data',
-          headers: ['Item', 'Qty'],
         },
         colTable: {
           kind: 'table',
-          in_placeholder: true,
-          mode: 'column_data',
-          headers: ['Q1', 'Q2'],
         },
       }
     );
@@ -460,23 +407,17 @@ describe('template filling pipeline equivalence coverage', () => {
     const result = validateDataPointAgainstKeyTypeMap(
       {
         rowTable: {
-          mode: 'row_data',
-          in_placeholder: true,
           rows: [{ Item: 'Pen' }],
         },
       },
       {
         rowTable: {
           kind: 'table',
-          in_placeholder: true,
-          mode: 'row_data',
-          headers: ['Item', 'Qty'],
         },
       }
     );
 
-    expect(result.invalid).toHaveLength(1);
-    expect(result.invalid[0]).toContain("missing header 'Qty'");
+    expect(result.invalid).toEqual([]);
   });
 
   it('renders listComponent nodes by explicit style in direct component mode', () => {
@@ -486,15 +427,13 @@ describe('template filling pipeline equivalence coverage', () => {
         {
           type: 'listComponent',
           attrs: {
-            in_placeholder: false,
-            value: { in_placeholder: false, style: 'numbered', items: ['A', 'B'] },
+            value: { style: 'numbered', items: ['A', 'B'] },
           },
         },
         {
           type: 'listComponent',
           attrs: {
-            in_placeholder: false,
-            value: { in_placeholder: false, style: 'plain', items: ['X', 'Y'] },
+            value: { style: 'plain', items: ['X', 'Y'] },
           },
         },
       ],

@@ -119,13 +119,12 @@ export const getApiDocs = () => {
           },
           ComponentTypeSchema: {
             type: 'object',
-            required: ['kind', 'in_placeholder'],
+            required: ['kind'],
             properties: {
               kind: {
                 type: 'string',
                 enum: ['string', 'integer', 'image', 'hyperlink', 'list', 'table', 'container'],
               },
-              in_placeholder: { type: 'boolean' },
               option: {
                 type: 'object',
                 additionalProperties: true,

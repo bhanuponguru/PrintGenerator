@@ -65,12 +65,7 @@ describe('GET /api/templates/[id]', () => {
                     type: 'placeholder',
                     attrs: {
                       key: 'details',
-                      value_schema: {
-                        kind: 'table',
-                        in_placeholder: true,
-                        mode: 'row_data',
-                        headers: ['A', ''],
-                      },
+                      kind: 'list',
                     },
                   },
                 ],
@@ -87,7 +82,7 @@ describe('GET /api/templates/[id]', () => {
 
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
-    expect(data.error).toContain('headers must contain non-empty strings');
+    expect(data.error).toContain('item_kind is required');
   });
 
   it('should return 404 for non-existent template', async () => {

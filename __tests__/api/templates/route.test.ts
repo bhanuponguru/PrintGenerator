@@ -285,7 +285,45 @@ describe('POST /api/templates', () => {
     expect(data.data.created_on).toBe(data.data.updated_on);
   });
 
-  it('should return 400 for placeholder schema missing value_schema', async () => {
+  it('should create template with placeholder that has derived schema from structure', async () => {
+    const request = new NextRequest('http://localhost:3000/api/templates', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Derived Schema Template',
+        version: '1.0.0',
+        template: {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'placeholder',
+                  attrs: { key: 'name', kind: 'list', style: 'bulleted', item_kind: 'string' },
+                  content: [
+                    {
+                      type: 'placeholder',
+                      attrs: { key: 'student', kind: 'string' },
+                      content: [{ type: 'text', text: 'Name' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+
+    const response = await POST(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(data.success).toBe(true);
+    expect(data.data._id).toBeDefined();
+  });
+
+  it('should return 400 for placeholder missing kind', async () => {
     const request = new NextRequest('http://localhost:3000/api/templates', {
       method: 'POST',
       body: JSON.stringify({
@@ -314,7 +352,7 @@ describe('POST /api/templates', () => {
 
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
-    expect(data.error).toContain('value_schema');
+    expect(data.error).toContain('kind');
   });
 
   it('should return 400 for invalid hyperlinkComponent attrs', async () => {
@@ -335,9 +373,7 @@ describe('POST /api/templates', () => {
                     value: {
                       alias: 'Docs',
                       url: '/relative-url',
-                      in_placeholder: false,
                     },
-                    in_placeholder: false,
                   },
                 },
               ],

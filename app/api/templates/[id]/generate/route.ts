@@ -5,11 +5,11 @@ import { getDb } from '@/lib/mongodb';
 import { Template } from '@/types/template';
 import {
   applyTemplateDataPoint,
-  collectPlaceholderKeyTypeMap,
+  collectPlaceholderValidationConfigMap,
   createPdfFromDocumentHtml,
   DataPoint,
   renderDocumentHtml,
-  validateDataPointAgainstKeyTypeMap,
+  validateDataPointAgainstPlaceholderConfigMap,
 } from '@/lib/document-generation';
 
 const COLLECTION_NAME = 'templates';
@@ -125,15 +125,15 @@ export async function POST(
       );
     }
 
-    // Gather the strict placeholder key->type contracts defined on the template.
-    const placeholderKeyTypeMap = collectPlaceholderKeyTypeMap(templateDoc.template);
+    // Gather placeholder type and template-level config contracts (mode/headers/type maps).
+    const placeholderConfigMap = collectPlaceholderValidationConfigMap(templateDoc.template);
     
     // Accumulator array tracking data array indexes that miss critical placeholders
     const invalidDataPoints: Array<{ index: number; missing: string[]; invalid: string[] }> = [];
     const normalizedDataPoints: DataPoint[] = [];
 
     for (let i = 0; i < dataPoints.length; i += 1) {
-      const validation = validateDataPointAgainstKeyTypeMap(dataPoints[i], placeholderKeyTypeMap);
+      const validation = validateDataPointAgainstPlaceholderConfigMap(dataPoints[i], placeholderConfigMap);
       if (validation.missing.length > 0 || validation.invalid.length > 0) {
         invalidDataPoints.push({
           index: i,

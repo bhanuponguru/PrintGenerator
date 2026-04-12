@@ -1,5 +1,6 @@
 import { MongoClient, Db, ClientSession } from 'mongodb';
 
+/** Cached connection bundle shared across requests and tests. */
 interface MongoConnection {
   client: MongoClient;
   db: Db;
@@ -11,6 +12,7 @@ let cachedConnection: MongoConnection | null = null;
  * Connect to MongoDB and return the database instance.
  * Uses connection caching for serverless environments.
  */
+/** Connects to MongoDB, falling back to an in-memory replica set in tests. */
 export async function connectToDatabase(): Promise<MongoConnection> {
   // Get environment variables at runtime, not module load time
   const uri = process.env.MONGODB_URI;
@@ -60,6 +62,7 @@ export async function connectToDatabase(): Promise<MongoConnection> {
 /**
  * Get the database instance
  */
+/** Returns the active database handle. */
 export async function getDb(): Promise<Db> {
   const { db } = await connectToDatabase();
   return db;
@@ -68,6 +71,7 @@ export async function getDb(): Promise<Db> {
 /**
  * Get the raw MongoClient instance (required for managing ClientSession Transactions)
  */
+/** Returns the underlying Mongo client for transaction/session workflows. */
 export async function getClient(): Promise<MongoClient> {
   const { client } = await connectToDatabase();
   return client;
@@ -77,6 +81,10 @@ export async function getClient(): Promise<MongoClient> {
  * Executes a callback within a database transaction safely mapping to the exact cluster capabilities. 
  * If the current topology does not support transactions (e.g. standalone test DBs lacking Replica Sets),
  * it elegantly falls back to running the operations serially without throwing MongoDB Server Errors.
+ */
+/**
+ * Executes a callback in a transaction when possible, otherwise falls back
+ * to a non-transactional run so standalone deployments still work.
  */
 export async function executeTransaction<T>(
   client: MongoClient,
@@ -115,6 +123,7 @@ export async function executeTransaction<T>(
 /**
  * Close the database connection (mainly for testing)
  */
+/** Closes the cached connection, primarily for test cleanup. */
 export async function closeConnection(): Promise<void> {
   if (cachedConnection) {
     await cachedConnection.client.close();
@@ -125,6 +134,7 @@ export async function closeConnection(): Promise<void> {
 /**
  * Reset the cached connection (for testing)
  */
+/** Clears the cached connection reference without closing it. */
 export function resetConnection(): void {
   cachedConnection = null;
 }

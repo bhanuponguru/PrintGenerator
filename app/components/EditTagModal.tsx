@@ -10,6 +10,7 @@ interface EditTagModalProps {
   onError: (msg: string) => void;
 }
 
+/** Modal for renaming a tag while keeping the current name as the initial value. */
 export default function EditTagModal({
   tag,
   onClose,

@@ -21,7 +21,7 @@ describe('document generation HTML coverage', () => {
               type: 'placeholder',
               attrs: {
                 key: 'name',
-                value_schema: { kind: 'string', in_placeholder: true },
+                kind: 'string',
               },
               content: [{ type: 'text', text: '{{name}}' }],
             },
@@ -31,7 +31,6 @@ describe('document generation HTML coverage', () => {
           {
             src: 'https://example.com/logo.png',
             alt: 'Company logo',
-            in_placeholder: false,
           },
           { width: '200', height: '120' }
         ),
@@ -39,49 +38,42 @@ describe('document generation HTML coverage', () => {
           {
             alias: 'Docs',
             url: 'https://example.com/docs',
-            in_placeholder: false,
           },
           { title: 'Documentation' }
         ),
         createListComponent(
           {
             items: ['First', 'Second'],
-            in_placeholder: false,
           },
           { 'data-role': 'bullets' }
         ),
         createContainerComponent(
           {
             components: ['Intro', 'Body', 'Footer'],
-            in_placeholder: false,
           },
           {
             component_types: [
-              { kind: 'string', in_placeholder: false },
-              { kind: 'string', in_placeholder: false },
-              { kind: 'string', in_placeholder: false },
+              { kind: 'string' },
+              { kind: 'string' },
+              { kind: 'string' },
             ],
           }
         ),
         createTableComponent({
-          mode: 'row_data',
           rows: [
             { Item: 'Pen', Qty: 2 },
             { Item: 'Notebook', Qty: 1 },
           ],
           caption: 'Inventory',
-          in_placeholder: false,
         }, {
           headers: ['Item', 'Qty'],
         }),
         createTableComponent({
-          mode: 'column_data',
           columns: {
             Sales: { Q1: 10, Q2: 12 },
             Profit: { Q1: 3, Q2: 4 },
           },
           caption: 'Quarterly',
-          in_placeholder: false,
         }, {
           headers: ['Q1', 'Q2'],
         }),
@@ -91,8 +83,8 @@ describe('document generation HTML coverage', () => {
     const validation = validateDataPointAgainstKeyTypeMap(
       { name: 'Ada', count: '42.8' },
       {
-        name: { kind: 'string', in_placeholder: true },
-        count: { kind: 'integer', in_placeholder: true },
+        name: { kind: 'string' },
+        count: { kind: 'integer' },
       }
     );
 
@@ -125,13 +117,10 @@ describe('document generation HTML coverage', () => {
       content: [
         createListComponent({
           items: [],
-          in_placeholder: false,
         }),
         createTableComponent({
-          mode: 'row_data',
           rows: [],
           caption: 'Empty rows',
-          in_placeholder: false,
         }, {
           headers: ['A', 'B'],
         }),
@@ -151,10 +140,8 @@ describe('document generation HTML coverage', () => {
       type: 'doc',
       content: [
         createTableComponent({
-          mode: 'column_data',
           columns: {},
           caption: 'Empty matrix',
-          in_placeholder: false,
         }, {
           headers: ['Q1', 'Q2'],
         }),
@@ -176,13 +163,12 @@ describe('document generation HTML coverage', () => {
         createContainerComponent(
           {
             components: ['First block', 'Second block', 'Third block'],
-            in_placeholder: false,
           },
           {
             component_types: [
-              { kind: 'string', in_placeholder: false },
-              { kind: 'string', in_placeholder: false },
-              { kind: 'string', in_placeholder: false },
+              { kind: 'string' },
+              { kind: 'string' },
+              { kind: 'string' },
             ],
           }
         ),
@@ -210,7 +196,7 @@ describe('document generation HTML coverage', () => {
               type: 'placeholder',
               attrs: {
                 key: 'title',
-                value_schema: { kind: 'string', in_placeholder: true },
+                kind: 'string',
               },
               content: [{ type: 'text', text: 'Hello {{title}}' }],
             },

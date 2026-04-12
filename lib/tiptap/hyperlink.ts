@@ -2,15 +2,16 @@ import { mergeAttributes, Node } from '@tiptap/core';
 import { isAbsoluteUrl } from '@/lib/tiptap/utils';
 import { HyperlinkValue } from '@/types/template';
 
+/** TipTap node payload for rendered hyperlink components. */
 export interface HyperlinkComponentNode {
   type: 'hyperlinkComponent';
   attrs: {
     value: HyperlinkValue;
-    in_placeholder: boolean;
     [key: string]: unknown;
   };
 }
 
+/** Validates the hyperlink component attrs before insertion or rendering. */
 export function validateHyperlinkAttrs(attrs: Record<string, unknown>): string | null {
   if (!attrs.value || typeof attrs.value !== 'object' || Array.isArray(attrs.value)) {
     return 'hyperlinkComponent.attrs.value must be an object';
@@ -27,12 +28,10 @@ export function validateHyperlinkAttrs(attrs: Record<string, unknown>): string |
   if (!isAbsoluteUrl(value.url)) {
     return 'hyperlinkComponent.attrs.value.url must be an absolute URL';
   }
-  if ('in_placeholder' in attrs && typeof attrs.in_placeholder !== 'boolean') {
-    return 'hyperlinkComponent.attrs.in_placeholder must be a boolean';
-  }
   return null;
 }
 
+/** Creates a typed hyperlink component node from the editor form payload. */
 export function createHyperlinkComponent(
   data: HyperlinkValue,
   attrs: Record<string, unknown> = {}
@@ -40,7 +39,6 @@ export function createHyperlinkComponent(
   const mergedAttrs = {
     ...attrs,
     value: data,
-    in_placeholder: typeof data.in_placeholder === 'boolean' ? data.in_placeholder : false,
   };
 
   const validationError = validateHyperlinkAttrs(mergedAttrs);
@@ -62,8 +60,7 @@ export const HyperlinkComponent = Node.create({
 
   addAttributes() {
     return {
-      value: { default: { alias: '', url: '', in_placeholder: false } },
-      in_placeholder: { default: false },
+      value: { default: { alias: '', url: '' } },
     };
   },
 

@@ -1,19 +1,21 @@
 import { Node } from '@tiptap/core';
 import { ListStyle, ListValue } from '@/types/template';
 
+/** Normalizes list styles so rendering only branches on supported values. */
 function normalizeListStyle(style: unknown): ListStyle {
   return style === 'numbered' || style === 'plain' ? style : 'bulleted';
 }
 
+/** TipTap node payload for rendered list components. */
 export interface ListComponentNode {
   type: 'listComponent';
   attrs: {
     value: ListValue;
-    in_placeholder: boolean;
     [key: string]: unknown;
   };
 }
 
+/** Validates the list component attrs before insertion or rendering. */
 export function validateListAttrs(attrs: Record<string, unknown>): string | null {
   if (!attrs.value || typeof attrs.value !== 'object' || Array.isArray(attrs.value)) {
     return 'listComponent.attrs.value must be an object';
@@ -26,12 +28,10 @@ export function validateListAttrs(attrs: Record<string, unknown>): string | null
   if ('style' in value && value.style !== undefined && value.style !== null && !['bulleted', 'numbered', 'plain'].includes(String(value.style))) {
     return 'listComponent.attrs.value.style must be bulleted, numbered, or plain';
   }
-  if ('in_placeholder' in attrs && typeof attrs.in_placeholder !== 'boolean') {
-    return 'listComponent.attrs.in_placeholder must be a boolean';
-  }
   return null;
 }
 
+/** Creates a typed list component node from the editor form payload. */
 export function createListComponent(
   data: ListValue,
   attrs: Record<string, unknown> = {}
@@ -44,7 +44,6 @@ export function createListComponent(
       items: Array.isArray(data.items) ? data.items : [],
       style: normalizeListStyle(dataRecord.style),
     },
-    in_placeholder: typeof data.in_placeholder === 'boolean' ? data.in_placeholder : false,
   };
 
   const validationError = validateListAttrs(mergedAttrs);
@@ -65,8 +64,7 @@ export const ListComponent = Node.create({
 
   addAttributes() {
     return {
-      value: { default: { items: [], style: 'bulleted', in_placeholder: false } },
-      in_placeholder: { default: false },
+      value: { default: { items: [], style: 'bulleted' } },
     };
   },
 

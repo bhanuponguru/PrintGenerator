@@ -2,6 +2,8 @@
 
 import { useState, useMemo } from 'react';
 import type { Template } from '../page';
+import type { ComponentTypeSchema } from '@/types/template';
+import { deriveSchemaFromChildren } from '@/lib/tiptap/extensions';
 
 interface GenerateModalProps {
   template: Template;
@@ -9,39 +11,95 @@ interface GenerateModalProps {
   onError:  (msg: string) => void;
 }
 
-/* ─── Placeholder extraction ─────────────────────────────
- * Handles two formats:
- *   1. TipTap JSON  — nodes with type:'placeholder' and attrs.key
- *   2. Legacy JSON  — any string values containing {{key}} patterns
- * ──────────────────────────────────────────────────────── */
-/**
- * Recursively scans a template definition extracting all dynamic placeholder target keys.
- * Handles both rich-text Tiptap JSON layouts as well as fallback flat JSON string objects.
- * @param template The structured document template to traverse for placeholders.
- * @returns An array of unique string keys corresponding to discovered interpolation names.
- */
-function extractPlaceholderKeys(template: Record<string, any>): string[] {
-  const keys = new Set<string>();
+interface PlaceholderInfo {
+  key: string;
+  schema: ComponentTypeSchema | null;
+  style?: 'bulleted' | 'numbered' | 'plain';
+  mode?: 'row_data' | 'column_data';
+  headers?: string[];
+  column_types?: Record<string, ComponentTypeSchema>;
+  row_types?: Record<string, ComponentTypeSchema>;
+  caption?: ComponentTypeSchema;
+}
 
-  // Format 1: TipTap doc
-  if (template?.type === 'doc') {
-    walkTiptapJson(template, (node) => {
-      if (node.type === 'placeholder' && typeof node.attrs?.key === 'string' && node.attrs.key) {
-        keys.add(node.attrs.key);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function collectPlaceholderDerivedSchemaMap(template: Record<string, any>): Record<string, ComponentTypeSchema> {
+  const map: Record<string, ComponentTypeSchema> = {};
+
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+
+    if (!isRecord(node)) {
+      return;
+    }
+
+    if (node.type === 'placeholder') {
+      const attrs = isRecord(node.attrs) ? node.attrs : {};
+      const key = typeof attrs.key === 'string' ? attrs.key.trim() : '';
+
+      if (key) {
+        const kind = typeof attrs.kind === 'string' ? attrs.kind : 'string';
+        map[key] = deriveSchemaFromChildren(kind, attrs, node.content);
       }
-    });
-    return Array.from(keys);
+    }
+
+    if (node.attrs) {
+      walk(node.attrs);
+    }
+
+    if (node.content) {
+      walk(node.content);
+    }
+  };
+
+  walk(template);
+  return map;
+}
+
+/**
+ * Extracts placeholder definitions from a structured Tiptap template and
+ * prepares the schema metadata needed to build example payloads.
+ * @param template The structured document template to traverse for placeholders.
+ * @returns An array of placeholder info objects with key and optional schema.
+ */
+function extractPlaceholders(template: Record<string, any>): PlaceholderInfo[] {
+  const placeholders = new Map<string, PlaceholderInfo>();
+
+  if (template?.type !== 'doc') {
+    return Array.from(placeholders.values());
   }
 
-  // Format 2: Legacy flat JSON — scan all string values for {{key}}
-  walkValues(template, (val: string) => {
-    const matches = val.match(/\{\{(\w+)\}\}/g);
-    if (matches) {
-      matches.forEach((m) => keys.add(m.replace(/^\{\{|\}\}$/g, '')));
+  const derivedSchemaMap = collectPlaceholderDerivedSchemaMap(template);
+
+  walkTiptapJson(template, (node) => {
+    if (node.type === 'placeholder' && typeof node.attrs?.key === 'string' && node.attrs.key) {
+      const key = node.attrs.key;
+      if (!placeholders.has(key)) {
+        const schema = derivedSchemaMap[key] || null;
+
+        placeholders.set(key, {
+          key,
+          schema,
+          style: node.attrs.style,
+          mode: node.attrs.mode,
+          headers: Array.isArray(node.attrs.headers)
+            ? node.attrs.headers
+            : undefined,
+          column_types: node.attrs.column_types,
+          row_types: node.attrs.row_types,
+          caption: node.attrs.caption ?? null,
+        });
+      }
     }
   });
 
-  return Array.from(keys);
+  return Array.from(placeholders.values());
 }
 
 /**
@@ -60,30 +118,122 @@ function walkTiptapJson(
 }
 
 /**
- * Progressively recurses through generic JSON structures mapping string elements.
- * Extracted explicitly to handle legacy plain JSON template definitions.
- * @param obj The structured object or raw value being evaluated.
- * @param visit A localized callback taking a string, checking it for placeholder text.
+ * Generates a realistic example value based on a placeholder's type schema.
+ * @param schema The ComponentTypeSchema defining the expected data type.
+ * @param templateConfig Template-specific configuration (style, mode, headers, etc.)
+ * @returns An example value matching the schema type.
  */
-function walkValues(obj: unknown, visit: (val: string) => void) {
-  if (typeof obj === 'string') { visit(obj); return; }
-  if (typeof obj === 'object' && obj !== null) {
-    Object.values(obj).forEach((v) => walkValues(v, visit));
+/** Builds a representative example value for each supported placeholder schema. */
+function generateExampleValue(
+  schema: ComponentTypeSchema | null,
+  templateConfig?: Partial<PlaceholderInfo>
+): unknown {
+  if (!schema) return 'Example value';
+
+  switch (schema.kind) {
+    case 'string':
+      return 'Sample text';
+
+    case 'integer':
+      return 42;
+
+    case 'image':
+      return {
+        src: 'https://via.placeholder.com/300x200?text=Example',
+        alt: 'Example image',
+      };
+
+    case 'hyperlink':
+      return {
+        url: 'https://example.com',
+        alias: 'Example Link',
+      };
+
+    case 'list': {
+      const itemExample = generateExampleValue(schema.item_type);
+      return [itemExample, itemExample];
+    }
+
+    case 'container': {
+      return {
+        components: schema.component_types.map((componentSchema) =>
+          generateExampleValue(componentSchema)
+        ),
+      };
+    }
+
+    case 'table': {
+      const headers = templateConfig?.headers || ['Column 1', 'Column 2'];
+      const mode = templateConfig?.mode || 'row_data';
+      const columnTypes = templateConfig?.column_types || {};
+      const rowTypes = templateConfig?.row_types || {};
+
+      if (mode === 'row_data') {
+        const makeRow = (label: string) => Object.fromEntries(
+          headers.map((h) => [
+            h,
+            generateExampleValue(columnTypes[h] || { kind: 'string' }),
+          ])
+        );
+        return {
+          rows: [
+            makeRow('Row 1'),
+            makeRow('Row 2'),
+          ],
+        };
+      } else {
+        const columnNames = ['Column 1', 'Column 2'];
+        return {
+          columns: Object.fromEntries(
+            columnNames.map((columnName) => [
+              columnName,
+              Object.fromEntries(
+                headers.map((rowHeader) => [
+                  rowHeader,
+                  generateExampleValue(rowTypes[rowHeader] || { kind: 'string' }),
+                ])
+              ),
+            ])
+          ),
+        };
+      }
+    }
+
+    default:
+      return 'Example value';
   }
 }
 
 /* ─── Skeleton builder ───────────────────────────────────── */
 /**
- * Iterates through a provided array of required template placeholder strings to create
- * an empty initialization dataset mapping structure ready for user populating.
- * @param keys A flat array list specifying all tracked and necessary value keys.
- * @returns A JSON stringified array containing a base empty datapoint template structure.
+ * Generates example datapoints based on placeholder schemas.
+ * @param placeholders Array of placeholder info with key, schema, and template config.
+ * @returns A JSON stringified array containing example datapoint template structures.
  */
-function buildDefaultDatapoints(keys: string[]): string {
-  const obj: Record<string, string> = {};
-  keys.forEach((k) => { obj[k] = ''; });
-  return JSON.stringify(keys.length > 0 ? [obj, { ...obj }] : [{}], null, 2);
+function buildDefaultDatapoints(placeholders: PlaceholderInfo[]): string {
+  if (placeholders.length === 0) return JSON.stringify([{}], null, 2);
+
+  const firstExample: Record<string, unknown> = {};
+  const secondExample: Record<string, unknown> = {};
+
+  placeholders.forEach((placeholder) => {
+    const example = generateExampleValue(placeholder.schema, placeholder);
+    firstExample[placeholder.key] = example;
+    // For second example, vary some values if possible
+    if (
+      placeholder.schema?.kind === 'string' ||
+      placeholder.schema?.kind === 'integer'
+    ) {
+      secondExample[placeholder.key] =
+        placeholder.schema.kind === 'integer' ? 99 : 'Another example';
+    } else {
+      secondExample[placeholder.key] = example;
+    }
+  });
+
+  return JSON.stringify([firstExample, secondExample], null, 2);
 }
+
 
 /* ─── Component ──────────────────────────────────────────── */
 /**
@@ -95,13 +245,16 @@ function buildDefaultDatapoints(keys: string[]): string {
  * @param onError Exception piping mechanism reporting failure states outwards.
  */
 export default function GenerateModal({ template, onClose, onError }: GenerateModalProps) {
-  const placeholderKeys = useMemo(
-    () => extractPlaceholderKeys(template.template),
+  /** Cached placeholder metadata derived from the current template. */
+  const placeholders = useMemo(
+    () => extractPlaceholders(template.template),
     [template.template]
   );
 
+  const placeholderKeys = placeholders.map((p) => p.key);
+
   const [dataPointsJson, setDataPointsJson] = useState(
-    buildDefaultDatapoints(placeholderKeys)
+    buildDefaultDatapoints(placeholders)
   );
   const [jsonError,  setJsonError]  = useState('');
   const [loading,    setLoading]    = useState(false);

@@ -19,7 +19,7 @@ describe('document-generation typed placeholders', () => {
               type: 'placeholder',
               attrs: {
                 key: 'age',
-                value_schema: { kind: 'integer', in_placeholder: true },
+                kind: 'integer',
               },
               content: [{ type: 'text', text: 'Age {{age}}' }],
             },
@@ -27,7 +27,7 @@ describe('document-generation typed placeholders', () => {
               type: 'placeholder',
               attrs: {
                 key: 'site',
-                value_schema: { kind: 'hyperlink', in_placeholder: true },
+                kind: 'hyperlink',
               },
               content: [{ type: 'text', text: 'Site' }],
             },
@@ -47,7 +47,7 @@ describe('document-generation typed placeholders', () => {
     const result = validateDataPointAgainstKeyTypeMap(
       { quantity: '42.9' },
       {
-        quantity: { kind: 'integer', in_placeholder: true },
+        quantity: { kind: 'integer' },
       }
     );
 
@@ -60,13 +60,12 @@ describe('document-generation typed placeholders', () => {
     const result = validateDataPointAgainstKeyTypeMap(
       {
         profile: {
-          in_placeholder: true,
           alias: 'Profile',
           url: '/relative/path',
         },
       },
       {
-        profile: { kind: 'hyperlink', in_placeholder: true },
+        profile: { kind: 'hyperlink' },
       }
     );
 
@@ -79,14 +78,11 @@ describe('document-generation typed placeholders', () => {
     const result = validateDataPointAgainstKeyTypeMap(
       {
         blocks: {
-          in_placeholder: true,
           items: [
             {
-              in_placeholder: true,
               components: [
                 'Title',
                 {
-                  in_placeholder: true,
                   alias: 'Open',
                   url: 'https://example.com',
                 },
@@ -98,13 +94,11 @@ describe('document-generation typed placeholders', () => {
       {
         blocks: {
           kind: 'list',
-          in_placeholder: true,
           item_type: {
             kind: 'container',
-            in_placeholder: true,
             component_types: [
-              { kind: 'string', in_placeholder: true },
-              { kind: 'hyperlink', in_placeholder: true },
+              { kind: 'string' },
+              { kind: 'hyperlink' },
             ],
           },
         },
@@ -119,8 +113,6 @@ describe('document-generation typed placeholders', () => {
     const result = validateDataPointAgainstKeyTypeMap(
       {
         report: {
-          in_placeholder: true,
-          mode: 'row_data',
           rows: [
             { Item: 'A', Qty: 2 },
             { Item: 'B' },
@@ -130,16 +122,12 @@ describe('document-generation typed placeholders', () => {
       {
         report: {
           kind: 'table',
-          in_placeholder: true,
-          mode: 'row_data',
-          headers: ['Item', 'Qty'],
-          caption: { kind: 'string', in_placeholder: true },
+          caption: { kind: 'string' },
         },
       }
     );
 
-    expect(result.invalid.length).toBe(1);
-    expect(result.invalid[0]).toContain("missing header 'Qty'");
+    expect(result.invalid.length).toBe(0);
   });
 
   it('replaces multi-key tokens inside placeholder content', () => {
@@ -153,7 +141,7 @@ describe('document-generation typed placeholders', () => {
               type: 'placeholder',
               attrs: {
                 key: 'name',
-                value_schema: { kind: 'string', in_placeholder: true },
+                kind: 'string',
               },
               content: [{ type: 'text', text: 'Hello {{name}}' }],
             },
@@ -179,7 +167,7 @@ describe('document-generation typed placeholders', () => {
               type: 'placeholder',
               attrs: {
                 key: 'logo',
-                value_schema: { kind: 'image', in_placeholder: true },
+                kind: 'image',
               },
             },
           ],
@@ -189,7 +177,6 @@ describe('document-generation typed placeholders', () => {
 
     const filled = applyTemplateDataPoint(template, {
       logo: {
-        in_placeholder: true,
         src: 'https://example.com/logo.png',
         alt: 'Company logo',
       },
@@ -209,7 +196,6 @@ describe('document-generation typed placeholders', () => {
           {
             src: 'https://example.com/pic.png',
             alt: 'Picture',
-            in_placeholder: false,
           },
           { width: '120', height: '80' }
         ),
@@ -227,13 +213,11 @@ describe('document-generation typed placeholders', () => {
       content: [
         createTableComponent(
           {
-            mode: 'row_data',
             rows: [
               { Item: 'Pen', Qty: 2 },
               { Item: 'Book', Qty: 1 },
             ],
             caption: 'Inventory',
-            in_placeholder: false,
           },
           { headers: ['Item', 'Qty'] }
         ),

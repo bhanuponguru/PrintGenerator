@@ -6,6 +6,7 @@ import {
   validateListAttrs,
   validatePlaceholderAttrs,
   validateTableAttrs,
+  deriveSchemaFromChildren,
 } from '@/lib/tiptap/extensions';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -23,11 +24,7 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
     return `${path}.kind must be a non-empty string`;
   }
 
-  if (typeof schema.in_placeholder !== 'boolean') {
-    return `${path}.in_placeholder must be a boolean`;
-  }
-
-  const typed = schema as Record<string, unknown> & { kind: string; in_placeholder: boolean };
+  const typed = schema as Record<string, unknown> & { kind: string };
 
   switch (typed.kind) {
     case 'string':
@@ -39,10 +36,6 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
     case 'list': {
       if (!('item_type' in typed)) {
         return `${path}.item_type is required`;
-      }
-      const style = typed.style;
-      if (style !== undefined && style !== 'bulleted' && style !== 'numbered' && style !== 'plain') {
-        return `${path}.style must be 'bulleted', 'numbered', or 'plain'`;
       }
       return validateComponentTypeSchema(typed.item_type, `${path}.item_type`);
     }
@@ -64,20 +57,6 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
     }
 
     case 'table': {
-      const mode = typed.mode;
-      if (mode !== 'row_data' && mode !== 'column_data') {
-        return `${path}.mode must be 'row_data' or 'column_data'`;
-      }
-
-      const headers = typed.headers;
-      if (!Array.isArray(headers)) {
-        return `${path}.headers must be an array`;
-      }
-
-      if (headers.some((header) => typeof header !== 'string' || header.trim() === '')) {
-        return `${path}.headers must contain non-empty strings`;
-      }
-
       const caption = typed.caption;
       if (caption !== undefined) {
         const captionError = validateComponentTypeSchema(caption, `${path}.caption`);
@@ -175,9 +154,67 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
       return `Placeholder key '${String(attrs.key)}' is invalid`;
     }
 
-    const schemaError = validateComponentTypeSchema(attrs.value_schema, `Placeholder key '${String(attrs.key)}' type`);
+    const kind = typeof attrs.kind === 'string' ? attrs.kind : 'string';
+    if (kind === 'list') {
+      if (typeof attrs.item_kind !== 'string' || attrs.item_kind.trim() === '') {
+        return `Placeholder key '${String(attrs.key)}' item_kind is required`;
+      }
+    }
+
+    if (kind === 'container') {
+      if (!Array.isArray(attrs.component_kinds) || attrs.component_kinds.length === 0) {
+        return `Placeholder key '${String(attrs.key)}' component_kinds is required`;
+      }
+
+      if (attrs.component_kinds.some((componentKind) => typeof componentKind !== 'string' || componentKind.trim() === '')) {
+        return `Placeholder key '${String(attrs.key)}' component_kinds must contain non-empty strings`;
+      }
+    }
+
+    // Derive the schema from the node structure
+    const derivedSchema = deriveSchemaFromChildren(kind, attrs, node.content);
+    const schemaError = validateComponentTypeSchema(derivedSchema, `Placeholder key '${String(attrs.key)}' type`);
     if (schemaError) {
       return schemaError;
+    }
+
+    const schema = derivedSchema as unknown as Record<string, unknown>;
+    if (schema.kind === 'list' && attrs.style !== undefined) {
+      const style = attrs.style;
+      if (style !== 'bulleted' && style !== 'numbered' && style !== 'plain') {
+        return `Placeholder key '${String(attrs.key)}' style must be 'bulleted', 'numbered', or 'plain'`;
+      }
+    }
+
+    if (schema.kind === 'table') {
+      if (attrs.mode !== 'row_data' && attrs.mode !== 'column_data') {
+        return `Placeholder key '${String(attrs.key)}' mode must be 'row_data' or 'column_data'`;
+      }
+
+      if (!Array.isArray(attrs.headers) || attrs.headers.some((h) => typeof h !== 'string' || h.trim() === '')) {
+        return `Placeholder key '${String(attrs.key)}' headers must contain non-empty strings`;
+      }
+
+      const typeMapAttr = attrs.mode === 'row_data' ? attrs.column_types : attrs.row_types;
+      if (typeMapAttr !== undefined) {
+        if (!isRecord(typeMapAttr)) {
+          return `Placeholder key '${String(attrs.key)}' ${attrs.mode === 'row_data' ? 'column_types' : 'row_types'} must be an object`;
+        }
+
+        for (const [header, typeSchema] of Object.entries(typeMapAttr)) {
+          if (typeof header !== 'string' || header.trim() === '') {
+            return `Placeholder key '${String(attrs.key)}' type map keys must be non-empty strings`;
+          }
+
+          const childError = validateComponentTypeSchema(
+            typeSchema,
+            `Placeholder key '${String(attrs.key)}' ${attrs.mode === 'row_data' ? 'column_types' : 'row_types'}.${header}`
+          );
+          if (childError) {
+            return childError;
+          }
+        }
+      }
     }
 
     return null;

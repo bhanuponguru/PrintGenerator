@@ -1,16 +1,17 @@
 import { Node } from '@tiptap/core';
 import { ContainerValue } from '@/types/template';
 
+/** TipTap node payload for rendered container components. */
 export interface ContainerComponentNode {
   type: 'containerComponent';
   attrs: {
     value: ContainerValue;
-    in_placeholder: boolean;
     component_types?: unknown[];
     [key: string]: unknown;
   };
 }
 
+/** Validates the container component attrs before insertion or rendering. */
 export function validateContainerAttrs(attrs: Record<string, unknown>): string | null {
   if (!attrs.value || typeof attrs.value !== 'object' || Array.isArray(attrs.value)) {
     return 'containerComponent.attrs.value must be an object';
@@ -24,12 +25,10 @@ export function validateContainerAttrs(attrs: Record<string, unknown>): string |
   if ('component_types' in attrs && !Array.isArray(attrs.component_types)) {
     return 'containerComponent.attrs.component_types must be an array when provided';
   }
-  if ('in_placeholder' in attrs && typeof attrs.in_placeholder !== 'boolean') {
-    return 'containerComponent.attrs.in_placeholder must be a boolean';
-  }
   return null;
 }
 
+/** Creates a typed container component node from the editor form payload. */
 export function createContainerComponent(
   data: ContainerValue,
   attrs: Record<string, unknown> = {}
@@ -40,7 +39,6 @@ export function createContainerComponent(
       ...data,
       components: Array.isArray(data.components) ? data.components : [],
     },
-    in_placeholder: typeof data.in_placeholder === 'boolean' ? data.in_placeholder : false,
   };
 
   const validationError = validateContainerAttrs(mergedAttrs);
@@ -61,9 +59,8 @@ export const ContainerComponent = Node.create({
 
   addAttributes() {
     return {
-      value: { default: { components: [], in_placeholder: false } },
+      value: { default: { components: [] } },
       component_types: { default: [] },
-      in_placeholder: { default: false },
     };
   },
 
