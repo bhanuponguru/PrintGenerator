@@ -20,6 +20,10 @@ import {
   Box,
   Table,
   Layers,
+  File,
+  PanelTop,
+  PanelBottom,
+  SeparatorHorizontal,
 } from 'lucide-react';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
@@ -29,12 +33,18 @@ import {
   createImageComponent,
   createListComponent,
   createTableComponent,
+  createPageComponent,
+  createHeaderComponent,
+  createFooterComponent,
   validateContainerAttrs,
   validateHyperlinkAttrs,
   validateImageAttrs,
   validateListAttrs,
   validatePlaceholderAttrs,
   validateTableAttrs,
+  validatePageAttrs,
+  validateHeaderAttrs,
+  validateFooterAttrs,
 } from '@/lib/tiptap/extensions';
 import { ComponentTypeSchema, ListStyle, TableMode } from '@/types/template';
 
@@ -45,7 +55,7 @@ interface TemplateEditorProps {
   hasError?: boolean;
 }
 
-type InsertPanel = 'placeholder' | 'image' | 'hyperlink' | 'list' | 'container' | 'table' | null;
+type InsertPanel = 'placeholder' | 'image' | 'hyperlink' | 'list' | 'container' | 'table' | 'page' | 'header' | 'footer' | null;
 type PlaceholderKind = ComponentTypeSchema['kind'];
 
 const KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -156,6 +166,21 @@ function collectValidationErrors(documentJson: Record<string, any>): string[] {
       const err = validateTableAttrs(attrs);
       if (err) errors.push(`tableComponent: ${err}`);
     }
+
+    if (node.type === 'pageComponent') {
+      const err = validatePageAttrs(attrs);
+      if (err) errors.push(`pageComponent: ${err}`);
+    }
+
+    if (node.type === 'headerComponent') {
+      const err = validateHeaderAttrs(attrs);
+      if (err) errors.push(`headerComponent: ${err}`);
+    }
+
+    if (node.type === 'footerComponent') {
+      const err = validateFooterAttrs(attrs);
+      if (err) errors.push(`footerComponent: ${err}`);
+    }
   });
 
   return unique(errors);
@@ -207,6 +232,13 @@ export default function TemplateEditor({
   const [colNames, setColNames] = useState<string[]>(['Sales']);
   const [colMatrix, setColMatrix] = useState<string[][]>([['10'], ['12']]);
 
+  const [pageItemsText, setPageItemsText] = useState('Section A\nSection B');
+  const [pageSize, setPageSize] = useState('A4');
+  const [pageOrientation, setPageOrientation] = useState<'portrait'|'landscape'>('portrait');
+  const [pageNumber, setPageNumber] = useState(1);
+  const [headerItemsText, setHeaderItemsText] = useState('Company Name');
+  const [footerItemsText, setFooterItemsText] = useState('Page {pageNumber}');
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -219,7 +251,17 @@ export default function TemplateEditor({
     ],
     content: initialContent ?? {
       type: 'doc',
-      content: [{ type: 'paragraph' }],
+      content: [
+        {
+          type: 'pageComponent',
+          attrs: {
+            pageNumber: 1,
+            size: 'A4',
+            orientation: 'portrait',
+            value: { components: [] }
+          }
+        }
+      ],
     },
     onUpdate({ editor: ed }) {
       const json = ed.getJSON();
@@ -478,6 +520,55 @@ export default function TemplateEditor({
     }
   }, [editor, tableMode, rowHeaders, rowRows, colRowHeaders, colNames, colMatrix, tableCaption]);
 
+  const insertPageComponent = useCallback(() => {
+    const components = parseLineItems(pageItemsText);
+    try {
+      const node = createPageComponent({ components }, {
+        component_types: components.map(() => ({ kind: 'string' })),
+        pageNumber,
+        size: pageSize,
+        orientation: pageOrientation
+      });
+      editor?.chain().focus().insertContent(node as any).run();
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid page component');
+    }
+  }, [editor, pageItemsText, pageNumber, pageSize, pageOrientation]);
+
+  const insertHeaderComponent = useCallback(() => {
+    const components = parseLineItems(headerItemsText);
+    try {
+      const node = createHeaderComponent({ components }, {
+        component_types: components.map(() => ({ kind: 'string' }))
+      });
+      editor?.chain().focus().insertContent(node as any).run();
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid header component');
+    }
+  }, [editor, headerItemsText]);
+
+  const insertFooterComponent = useCallback(() => {
+    const components = parseLineItems(footerItemsText);
+    try {
+      const node = createFooterComponent({ components }, {
+        component_types: components.map(() => ({ kind: 'string' }))
+      });
+      editor?.chain().focus().insertContent(node as any).run();
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid footer component');
+    }
+  }, [editor, footerItemsText]);
+
+  const insertPageBreak = useCallback(() => {
+    editor?.chain().focus().insertContent({ type: 'pageBreakComponent' }).run();
+  }, [editor]);
+
   /** Extracts the set of placeholder keys present in the current editor state. */
   const placeholderKeys = useMemo(() => {
     if (!editor) return [] as string[];
@@ -626,6 +717,24 @@ export default function TemplateEditor({
 
         <button type="button" className={`pg-tb-btn${insertPanel === 'table' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'table' ? null : 'table'); }} title="Insert table component">
           <Table size={16} />
+        </button>
+
+        <span className="pg-tb-sep" aria-hidden="true" />
+
+        <button type="button" className={`pg-tb-btn${insertPanel === 'page' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'page' ? null : 'page'); }} title="Insert page element">
+          <File size={16} />
+        </button>
+
+        <button type="button" className={`pg-tb-btn${insertPanel === 'header' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'header' ? null : 'header'); }} title="Insert header element">
+          <PanelTop size={16} />
+        </button>
+
+        <button type="button" className={`pg-tb-btn${insertPanel === 'footer' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'footer' ? null : 'footer'); }} title="Insert footer element">
+          <PanelBottom size={16} />
+        </button>
+
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(insertPageBreak)} title="Insert page break">
+          <SeparatorHorizontal size={16} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
@@ -847,6 +956,64 @@ export default function TemplateEditor({
               <div className="pg-insert-actions">
                 <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
                 <button type="button" className="pg-btn-primary" onClick={insertContainerComponent}>Insert Container</button>
+              </div>
+            </>
+          )}
+
+          {insertPanel === 'page' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Page Number (optional)</label>
+                <input className="pg-input" type="number" min="1" value={pageNumber} onChange={(e) => setPageNumber(parseInt(e.target.value) || 1)} />
+              </div>
+              <div className="pg-insert-row">
+                <label className="pg-label">Page Size</label>
+                <select className="pg-input" value={pageSize} onChange={(e) => setPageSize(e.target.value)}>
+                  <option value="A4">A4</option>
+                  <option value="A3">A3</option>
+                  <option value="Letter">Letter</option>
+                </select>
+              </div>
+              <div className="pg-insert-row">
+                <label className="pg-label">Orientation</label>
+                <select className="pg-input" value={pageOrientation} onChange={(e) => setPageOrientation(e.target.value as any)}>
+                  <option value="portrait">Portrait</option>
+                  <option value="landscape">Landscape</option>
+                </select>
+              </div>
+              <div className="pg-insert-row">
+                <label className="pg-label">Components (one per line)</label>
+                <textarea className="pg-input" rows={5} value={pageItemsText} onChange={(e) => setPageItemsText(e.target.value)} />
+              </div>
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertPageComponent}>Insert Page</button>
+              </div>
+            </>
+          )}
+
+          {insertPanel === 'header' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Header Components (one per line)</label>
+                <textarea className="pg-input" rows={3} value={headerItemsText} onChange={(e) => setHeaderItemsText(e.target.value)} />
+              </div>
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertHeaderComponent}>Insert Header</button>
+              </div>
+            </>
+          )}
+
+          {insertPanel === 'footer' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Footer Components (one per line)</label>
+                <textarea className="pg-input" rows={3} value={footerItemsText} onChange={(e) => setFooterItemsText(e.target.value)} />
+              </div>
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertFooterComponent}>Insert Footer</button>
               </div>
             </>
           )}
