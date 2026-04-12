@@ -6,6 +6,9 @@ import {
   validateListAttrs,
   validatePlaceholderAttrs,
   validateTableAttrs,
+  validatePageAttrs,
+  validateHeaderAttrs,
+  validateFooterAttrs,
   deriveSchemaFromChildren,
 } from '@/lib/tiptap/extensions';
 
@@ -40,6 +43,12 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
       return validateComponentTypeSchema(typed.item_type, `${path}.item_type`);
     }
 
+    case 'page_break':
+      return null;
+
+    case 'page':
+    case 'header':
+    case 'footer':
     case 'container': {
       const componentTypes = typed.component_types;
       if (!Array.isArray(componentTypes)) {
@@ -110,6 +119,34 @@ function walk(node: unknown, visit: (n: Record<string, unknown>) => string | nul
   return null;
 }
 
+export function validateTemplateStructure(template: Record<string, unknown>): { valid: true } | { valid: false; error: string } {
+  if (template.type !== 'doc') {
+    return { valid: false, error: 'Template root must be a document type' };
+  }
+  const content = template.content;
+  if (!Array.isArray(content)) {
+    return { valid: false, error: 'Template must have content array' };
+  }
+
+  if (content.length === 0) {
+    return { valid: false, error: 'Template must contain at least one pageComponent' };
+  }
+
+  // template=list of pages rule: all top-level blocks MUST be pageComponent
+  for (let i = 0; i < content.length; i++) {
+    const node = content[i];
+    if (!isRecord(node) || node.type !== 'pageComponent') {
+      return { valid: false, error: `Invalid template structure: Top-level elements must be 'pageComponent', found '${isRecord(node) ? node.type : 'unknown'}'` };
+    }
+    const attrs = isRecord(node.attrs) ? node.attrs : {};
+    if (i === 0 && attrs.pageNumber !== 1) {
+      return { valid: false, error: 'The first page must start with pageNumber 1.' };
+    }
+  }
+
+  return { valid: true };
+}
+
 export function validateTemplatePlaceholderSchemas(template: Record<string, unknown>): { valid: true } | { valid: false; error: string } {
   const err = walk(template, (node) => {
     if (typeof node.type === 'string') {
@@ -129,6 +166,18 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
 
       if (node.type === 'containerComponent') {
         return validateContainerAttrs(attrs);
+      }
+
+      if (node.type === 'pageComponent') {
+        return validatePageAttrs(attrs);
+      }
+
+      if (node.type === 'headerComponent') {
+        return validateHeaderAttrs(attrs);
+      }
+
+      if (node.type === 'footerComponent') {
+        return validateFooterAttrs(attrs);
       }
 
       if (node.type === 'tableComponent') {

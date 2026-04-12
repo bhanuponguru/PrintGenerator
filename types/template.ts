@@ -35,6 +35,25 @@ export interface ContainerTypeSchema extends BaseTypeSchema {
   component_types: ComponentTypeSchema[];
 }
 
+export interface PageTypeSchema extends BaseTypeSchema {
+  kind: 'page';
+  component_types: ComponentTypeSchema[];
+}
+
+export interface HeaderTypeSchema extends BaseTypeSchema {
+  kind: 'header';
+  component_types: ComponentTypeSchema[];
+}
+
+export interface FooterTypeSchema extends BaseTypeSchema {
+  kind: 'footer';
+  component_types: ComponentTypeSchema[];
+}
+
+export interface PageBreakTypeSchema extends BaseTypeSchema {
+  kind: 'page_break';
+}
+
 export interface TableTypeSchema extends BaseTypeSchema {
   kind: 'table';
   caption?: ComponentTypeSchema;
@@ -48,6 +67,10 @@ export type ComponentTypeSchema =
   | HyperlinkTypeSchema
   | ListTypeSchema
   | ContainerTypeSchema
+  | PageTypeSchema
+  | HeaderTypeSchema
+  | FooterTypeSchema
+  | PageBreakTypeSchema
   | TableTypeSchema;
 
 /** Maps each placeholder key to the schema expected for its value. */
@@ -82,6 +105,18 @@ export interface ContainerValue {
   components: ComponentValue[];
 }
 
+export interface PageValue {
+  components: ComponentValue[];
+}
+
+export interface HeaderValue {
+  components: ComponentValue[];
+}
+
+export interface FooterValue {
+  components: ComponentValue[];
+}
+
 /** Composite payload for list placeholders. */
 export interface ListValue {
   items: ComponentValue[];
@@ -97,6 +132,9 @@ export type ComponentValue =
   | HyperlinkValue
   | ListValue
   | ContainerValue
+  | PageValue
+  | HeaderValue
+  | FooterValue
   | TableRowDataValue
   | TableColumnDataValue;
 

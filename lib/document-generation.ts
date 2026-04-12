@@ -149,6 +149,9 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
         item_type: normalizeTypeSchema(listSchema.item_type),
       };
     }
+    case 'page':
+    case 'header':
+    case 'footer':
     case 'container': {
       const containerSchema = schema as ContainerTypeSchema;
       return {
@@ -536,9 +539,12 @@ function validateAndNormalizeValue(
       return { ok: true, value: normalized };
     }
 
+    case 'page':
+    case 'header':
+    case 'footer':
     case 'container': {
       if (!isRecord(value) || !Array.isArray(value.components)) {
-        return { ok: false, error: `${path} must be a container object with components[]` };
+        return { ok: false, error: `${path} must be a ${schema.kind} object with components[]` };
       }
 
       if (value.components.length !== schema.component_types.length) {
