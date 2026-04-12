@@ -24,6 +24,10 @@ import {
   PanelTop,
   PanelBottom,
   SeparatorHorizontal,
+  ArrowUp,
+  ArrowDown,
+  X,
+  Plus,
 } from 'lucide-react';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
@@ -55,8 +59,88 @@ interface TemplateEditorProps {
   hasError?: boolean;
 }
 
-type InsertPanel = 'placeholder' | 'image' | 'hyperlink' | 'list' | 'container' | 'table' | 'page' | 'header' | 'footer' | null;
+type InsertPanel = 'placeholder' | 'image' | 'hyperlink' | null;
 type PlaceholderKind = ComponentTypeSchema['kind'];
+type SubmodalTarget = 'container' | 'page' | 'header' | 'footer' | 'list' | 'table';
+type AnyChildType = 'string' | 'integer' | 'image' | 'hyperlink' | 'container' | 'list' | 'table';
+
+interface ChildEntry {
+  id: number;
+  type: AnyChildType;
+  value: unknown; // string, {src,alt}, {alias,url}, {components:[]}, {items:[]}, table data
+  schema: ComponentTypeSchema; // the schema for this child
+}
+
+interface ModalStackEntry {
+  id: number;
+  target: SubmodalTarget;
+  label: string; // breadcrumb
+  children: ChildEntry[];
+  nextChildId: number;
+  error: string;
+  // Page-specific
+  pageSize?: string;
+  pageOrientation?: 'portrait' | 'landscape';
+  pageNumber?: number;
+  // List-specific
+  listStyle?: ListStyle;
+  listItemType?: AnyChildType;
+  // Table-specific
+  tableMode?: TableMode;
+  tableCaption?: string;
+  tableRowHeaders?: string[];
+  tableRowRows?: string[][];
+  tableColRowHeaders?: string[];
+  tableColNames?: string[];
+  tableColMatrix?: string[][];
+  // Callback when this modal confirms
+  onConfirm: (children: ChildEntry[], extra?: Record<string, unknown>) => void;
+}
+
+function childPreview(child: ChildEntry): string {
+  const v = child.value;
+  if (v === null || v === undefined) return '(empty)';
+  if (typeof v === 'string') return v || '(empty)';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'object' && 'src' in (v as any)) return (v as any).alt || (v as any).src || '(image)';
+  if (typeof v === 'object' && 'alias' in (v as any)) return (v as any).alias || (v as any).url || '(link)';
+  if (typeof v === 'object' && 'components' in (v as any)) {
+    const comps = (v as any).components as unknown[];
+    return `{${comps.length} component${comps.length !== 1 ? 's' : ''}}`;
+  }
+  if (typeof v === 'object' && 'items' in (v as any)) {
+    const items = (v as any).items as unknown[];
+    return `[${items.length} item${items.length !== 1 ? 's' : ''}]`;
+  }
+  if (typeof v === 'object' && ('rows' in (v as any) || 'columns' in (v as any))) return '(table)';
+  return JSON.stringify(v).slice(0, 40);
+}
+
+function childToComponentValue(child: ChildEntry): unknown {
+  return child.value;
+}
+
+function schemaForChildType(type: AnyChildType, childEntries?: ChildEntry[]): ComponentTypeSchema {
+  if (type === 'string' || type === 'integer' || type === 'image' || type === 'hyperlink') {
+    return { kind: type } as ComponentTypeSchema;
+  }
+  if (type === 'container' && childEntries) {
+    return { kind: 'container', component_types: childEntries.map(c => c.schema) };
+  }
+  if (type === 'list') return { kind: 'list', item_type: { kind: 'string' } };
+  if (type === 'table') return { kind: 'table' };
+  return { kind: type } as ComponentTypeSchema;
+}
+
+const ALL_CHILD_TYPES: { value: AnyChildType; label: string }[] = [
+  { value: 'string', label: 'string' },
+  { value: 'integer', label: 'integer' },
+  { value: 'image', label: 'image' },
+  { value: 'hyperlink', label: 'hyperlink' },
+  { value: 'container', label: 'container' },
+  { value: 'list', label: 'list' },
+  { value: 'table', label: 'table' },
+];
 
 const KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -219,25 +303,19 @@ export default function TemplateEditor({
   const [linkAlias, setLinkAlias] = useState('Docs');
   const [linkUrl, setLinkUrl] = useState('https://example.com/docs');
 
-  const [listStyle, setListStyle] = useState<ListStyle>('bulleted');
-  const [listItemsText, setListItemsText] = useState('First item\nSecond item');
-
-  const [containerItemsText, setContainerItemsText] = useState('Block A\nBlock B');
-
-  const [tableMode, setTableMode] = useState<TableMode>('row_data');
-  const [tableCaption, setTableCaption] = useState('');
-  const [rowHeaders, setRowHeaders] = useState<string[]>(['Item', 'Qty']);
-  const [rowRows, setRowRows] = useState<string[][]>([['Pen', '2']]);
-  const [colRowHeaders, setColRowHeaders] = useState<string[]>(['Q1', 'Q2']);
-  const [colNames, setColNames] = useState<string[]>(['Sales']);
-  const [colMatrix, setColMatrix] = useState<string[][]>([['10'], ['12']]);
-
-  const [pageItemsText, setPageItemsText] = useState('Section A\nSection B');
-  const [pageSize, setPageSize] = useState('A4');
-  const [pageOrientation, setPageOrientation] = useState<'portrait'|'landscape'>('portrait');
-  const [pageNumber, setPageNumber] = useState(1);
-  const [headerItemsText, setHeaderItemsText] = useState('Company Name');
-  const [footerItemsText, setFooterItemsText] = useState('Page {pageNumber}');
+  /** Submodal state — modal stack for recursive editing. */
+  const [modalStack, setModalStack] = useState<ModalStackEntry[]>([]);
+  const [modalNextId, setModalNextId] = useState(1);
+  // Per-modal form state (for the primitive add-child form on the topmost modal)
+  const [addChildType, setAddChildType] = useState<AnyChildType>('string');
+  const [addChildValue, setAddChildValue] = useState('');
+  const [addChildImageSrc, setAddChildImageSrc] = useState('https://example.com/logo.png');
+  const [addChildImageAlt, setAddChildImageAlt] = useState('Image');
+  const [addChildLinkAlias, setAddChildLinkAlias] = useState('Link');
+  const [addChildLinkUrl, setAddChildLinkUrl] = useState('https://example.com');
+  // List-specific (when adding a list child)
+  const [addListItemType, setAddListItemType] = useState<AnyChildType>('string');
+  const [addListStyle, setAddListStyle] = useState<ListStyle>('bulleted');
 
   const editor = useEditor({
     extensions: [
@@ -407,163 +485,294 @@ export default function TemplateEditor({
     }
   }, [editor, linkAlias, linkUrl]);
 
-  const insertListComponent = useCallback(() => {
-    const items = parseLineItems(listItemsText);
-    if (items.length === 0) {
-      setInsertError('List requires at least one item.');
-      return;
-    }
+  // Legacy inline list/table components handled by the full modal stack
 
-    try {
-      const node = createListComponent({
-        items,
-        style: normalizeListStyle(listStyle),
-      });
-      editor?.chain().focus().insertContent(node as any).run();
-      setInsertError('');
-      setInsertPanel(null);
-    } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid list component');
-    }
-  }, [editor, listItemsText, listStyle]);
+  /** ── Modal stack helpers ─────────────────────────────────── */
+  const topModal = modalStack.length > 0 ? modalStack[modalStack.length - 1] : null;
+  const submodalOpen = modalStack.length > 0;
 
-  const insertContainerComponent = useCallback(() => {
-    const components = parseLineItems(containerItemsText);
-    if (components.length === 0) {
-      setInsertError('Container requires at least one component line.');
-      return;
-    }
+  const pushModal = useCallback((entry: Omit<ModalStackEntry, 'id' | 'children' | 'nextChildId' | 'error'>) => {
+    setModalNextId(prev => {
+      setModalStack(stack => [...stack, { ...entry, id: prev, children: [], nextChildId: 1, error: '' }]);
+      return prev + 1;
+    });
+    setAddChildType('string');
+    setAddChildValue('');
+    setInsertPanel(null);
+  }, []);
 
-    try {
-      const node = createContainerComponent(
-        {
-          components,
-        },
-        {
-          component_types: components.map(() => ({ kind: 'string' })),
-        }
-      );
-      editor?.chain().focus().insertContent(node as any).run();
-      setInsertError('');
-      setInsertPanel(null);
-    } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid container component');
-    }
-  }, [editor, containerItemsText]);
+  const popModal = useCallback(() => {
+    setModalStack(stack => stack.slice(0, -1));
+  }, []);
 
-  const insertTableComponent = useCallback(() => {
-    try {
-      if (tableMode === 'row_data') {
-        const headers = rowHeaders.map((h) => h.trim()).filter(Boolean);
-        if (headers.length === 0) {
-          setInsertError('Row table requires at least one header.');
-          return;
-        }
+  const updateTopModal = useCallback((updater: (entry: ModalStackEntry) => ModalStackEntry) => {
+    setModalStack(stack => {
+      if (stack.length === 0) return stack;
+      const next = [...stack];
+      next[next.length - 1] = updater(next[next.length - 1]);
+      return next;
+    });
+  }, []);
 
-        const rows = rowRows
-          .map((row) => {
-            const rowObj: Record<string, unknown> = {};
-            headers.forEach((header, index) => {
-              rowObj[header] = row[index] ?? '';
+  const openSubmodal = useCallback((target: SubmodalTarget) => {
+    const label = target.charAt(0).toUpperCase() + target.slice(1);
+    pushModal({
+      target,
+      label,
+      onConfirm: (children, extra) => {
+        const components = children.map(c => childToComponentValue(c)) as ComponentValue[];
+        const componentTypes = children.map(c => c.schema);
+        try {
+          if (target === 'container') {
+            const node = createContainerComponent({ components }, { component_types: componentTypes });
+            editor?.chain().focus().insertContent(node as any).run();
+          } else if (target === 'page') {
+            const node = createPageComponent({ components }, {
+              component_types: componentTypes,
+              pageNumber: extra?.pageNumber as number ?? 1,
+              size: extra?.size as string ?? 'A4',
+              orientation: extra?.orientation as string ?? 'portrait',
             });
-            return rowObj;
-          });
-
-        const node = createTableComponent(
-          {
-            mode: 'row_data',
-            rows,
-            caption: tableCaption.trim() || undefined,
-          },
-          { headers }
-        );
-
-        editor?.chain().focus().insertContent(node as any).run();
-      } else {
-        const headers = colRowHeaders.map((h) => h.trim()).filter(Boolean);
-        const columns = colNames.map((c) => c.trim()).filter(Boolean);
-
-        if (headers.length === 0) {
-          setInsertError('Column table requires row headers.');
-          return;
+            editor?.chain().focus().insertContent(node as any).run();
+          } else if (target === 'header') {
+            const node = createHeaderComponent({ components }, { component_types: componentTypes });
+            editor?.chain().focus().insertContent(node as any).run();
+          } else if (target === 'footer') {
+            const node = createFooterComponent({ components }, { component_types: componentTypes });
+            editor?.chain().focus().insertContent(node as any).run();
+          } else if (target === 'list') {
+            const items = components;
+            const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' };
+            const node = createListComponent(
+              { items, style: (extra?.listStyle as ListStyle) || 'bulleted' } as any,
+              { item_type: itemSchema as ComponentTypeSchema }
+            );
+            editor?.chain().focus().insertContent(node as any).run();
+          } else if (target === 'table') {
+            const tableMode = (extra?.tableMode as TableMode) ?? 'row_data';
+            const tableCaption = extra?.tableCaption as string | undefined;
+            if (tableMode === 'row_data') {
+              const headers = (extra?.tableRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
+              const rowRows = extra?.tableRowRows as string[][] ?? [];
+              const rows = rowRows.map((row) => {
+                const rowObj: Record<string, unknown> = {};
+                headers.forEach((header, index) => { rowObj[header] = row[index] ?? ''; });
+                return rowObj;
+              });
+              const node = createTableComponent({ mode: 'row_data', rows, caption: tableCaption } as any, { headers });
+              editor?.chain().focus().insertContent(node as any).run();
+            } else {
+              const headers = (extra?.tableColRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
+              const colNames = extra?.tableColNames as string[] ?? [];
+              const colMatrix = extra?.tableColMatrix as string[][] ?? [];
+              const columns = colNames.map((name, colIdx) => {
+                const vals = colMatrix.map((row) => row[colIdx] ?? '');
+                return [name, ...vals];
+              });
+              const node = createTableComponent({ mode: 'column_data', columns, caption: tableCaption } as any, { headers });
+              editor?.chain().focus().insertContent(node as any).run();
+            }
+          } else if (target === 'list') {
+            const items = children.map((c) => childToComponentValue(c));
+            const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' };
+            const node = createListComponent(
+              { items, style: (extra?.listStyle as ListStyle) || 'bulleted' },
+              { item_type: itemSchema as ComponentTypeSchema }
+            );
+            editor?.chain().focus().insertContent(node as any).run();
+          } else if (target === 'table') {
+            const tableMode = extra?.tableMode as TableMode ?? 'row_data';
+            const tableCaption = extra?.tableCaption as string | undefined;
+            if (tableMode === 'row_data') {
+              const headers = (extra?.tableRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
+              const rowRows = extra?.tableRowRows as string[][] ?? [];
+              const rows = rowRows.map((row) => {
+                const rowObj: Record<string, unknown> = {};
+                headers.forEach((header, index) => { rowObj[header] = row[index] ?? ''; });
+                return rowObj;
+              });
+              const node = createTableComponent({ mode: 'row_data', rows, caption: tableCaption }, { headers });
+              editor?.chain().focus().insertContent(node as any).run();
+            } else {
+              const headers = (extra?.tableColRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
+              const colNames = extra?.tableColNames as string[] ?? [];
+              const colMatrix = extra?.tableColMatrix as string[][] ?? [];
+              const columns = colNames.map((name, colIdx) => {
+                const vals = colMatrix.map((row) => row[colIdx] ?? '');
+                return [name, ...vals];
+              });
+              const node = createTableComponent({ mode: 'column_data', columns, caption: tableCaption }, { headers });
+              editor?.chain().focus().insertContent(node as any).run();
+            }
+          }
+        } catch (err) {
+          // error handled at modal level
         }
-        if (columns.length === 0) {
-          setInsertError('Column table requires at least one column name.');
-          return;
-        }
+      },
+      // extra initial state per target
+      ...(target === 'page' ? { pageSize: 'A4', pageOrientation: 'portrait' as const, pageNumber: 1 } : {}),
+      ...(target === 'list' ? { listStyle: 'bulleted' as const, listItemType: 'string' as const } : {}),
+      ...(target === 'table' ? {
+        tableMode: 'row_data' as const,
+        tableCaption: '',
+        tableRowHeaders: ['Item', 'Qty'],
+        tableRowRows: [['Pen', '2']],
+        tableColRowHeaders: ['Q1', 'Q2'],
+        tableColNames: ['Sales'],
+        tableColMatrix: [['10'], ['12']],
+      } : {}),
+    });
+  }, [editor, pushModal]);
 
-        const colData: Record<string, Record<string, unknown>> = {};
-        columns.forEach((colName, cIdx) => {
-          const values: Record<string, unknown> = {};
-          headers.forEach((rowHeader, rIdx) => {
-            values[rowHeader] = colMatrix[rIdx]?.[cIdx] ?? '';
-          });
-          colData[colName] = values;
-        });
+  const closeSubmodal = useCallback(() => {
+    setModalStack([]);
+  }, []);
 
-        const node = createTableComponent(
-          {
-            mode: 'column_data',
-            columns: colData,
-            caption: tableCaption.trim() || undefined,
-          },
-          { headers }
-        );
+  const addPrimitiveChild = useCallback(() => {
+    let value: unknown;
+    let schema: ComponentTypeSchema;
 
-        editor?.chain().focus().insertContent(node as any).run();
+    if (addChildType === 'string' || addChildType === 'integer') {
+      if (!addChildValue.trim()) {
+        updateTopModal(m => ({ ...m, error: 'Value cannot be empty.' }));
+        return;
       }
-
-      setInsertError('');
-      setInsertPanel(null);
-    } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid table component');
+      value = addChildValue.trim();
+      schema = { kind: addChildType } as ComponentTypeSchema;
+    } else if (addChildType === 'image') {
+      if (!addChildImageSrc.trim()) {
+        updateTopModal(m => ({ ...m, error: 'Image URL cannot be empty.' }));
+        return;
+      }
+      value = { src: addChildImageSrc.trim(), alt: addChildImageAlt.trim() };
+      schema = { kind: 'image' };
+    } else if (addChildType === 'hyperlink') {
+      if (!addChildLinkUrl.trim()) {
+        updateTopModal(m => ({ ...m, error: 'Link URL cannot be empty.' }));
+        return;
+      }
+      value = { alias: addChildLinkAlias.trim(), url: addChildLinkUrl.trim() };
+      schema = { kind: 'hyperlink' };
+    } else {
+      return; // complex types handled by pushing a new modal
     }
-  }, [editor, tableMode, rowHeaders, rowRows, colRowHeaders, colNames, colMatrix, tableCaption]);
 
-  const insertPageComponent = useCallback(() => {
-    const components = parseLineItems(pageItemsText);
-    try {
-      const node = createPageComponent({ components }, {
-        component_types: components.map(() => ({ kind: 'string' })),
-        pageNumber,
-        size: pageSize,
-        orientation: pageOrientation
+    updateTopModal(m => ({
+      ...m,
+      children: [...m.children, { id: m.nextChildId, type: addChildType, value, schema }],
+      nextChildId: m.nextChildId + 1,
+      error: '',
+    }));
+    setAddChildValue('');
+  }, [addChildType, addChildValue, addChildImageSrc, addChildImageAlt, addChildLinkAlias, addChildLinkUrl, updateTopModal]);
+
+  const addComplexChild = useCallback((type: 'container' | 'list' | 'table') => {
+    const parentLabel = topModal?.label || '';
+    const childIdx = (topModal?.children.length ?? 0) + 1;
+
+    if (type === 'container') {
+      pushModal({
+        target: 'container',
+        label: `${parentLabel} > Container #${childIdx}`,
+        onConfirm: (children) => {
+          const components = children.map(c => childToComponentValue(c));
+          const componentTypes = children.map(c => c.schema);
+          const containerValue = { components };
+          const containerSchema: ComponentTypeSchema = { kind: 'container', component_types: componentTypes };
+          updateTopModal(m => ({
+            ...m,
+            children: [...m.children, { id: m.nextChildId, type: 'container', value: containerValue, schema: containerSchema }],
+            nextChildId: m.nextChildId + 1,
+            error: '',
+          }));
+        },
       });
-      editor?.chain().focus().insertContent(node as any).run();
-      setInsertError('');
-      setInsertPanel(null);
-    } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid page component');
-    }
-  }, [editor, pageItemsText, pageNumber, pageSize, pageOrientation]);
+    } else if (type === 'list') {
+      // For list: push a modal that collects list items
+      pushModal({
+        target: 'container', // reuse container-like UI for collecting items
+        label: `${parentLabel} > List #${childIdx}`,
+        onConfirm: (children) => {
+          const items = children.map(c => childToComponentValue(c));
+          const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' as const };
+          const tableMode = children[0]?.value && typeof children[0].value === 'object' && 'mode' in children[0].value ? (children[0].value as any).mode : 'row_data';
 
-  const insertHeaderComponent = useCallback(() => {
-    const components = parseLineItems(headerItemsText);
-    try {
-      const node = createHeaderComponent({ components }, {
-        component_types: components.map(() => ({ kind: 'string' }))
-      });
-      editor?.chain().focus().insertContent(node as any).run();
-      setInsertError('');
-      setInsertPanel(null);
-    } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid header component');
-    }
-  }, [editor, headerItemsText]);
+          let tableValue: unknown;
+          if (tableMode === 'row_data') {
+            const headers = extra?.tableRowHeaders as string[] ?? [];
+            const rowRows = extra?.tableRowRows as string[][] ?? [];
+            const rows = rowRows.map((row) => {
+              const rowObj: Record<string, unknown> = {};
+              headers.forEach((h, i) => { rowObj[h] = row[i] ?? ''; });
+              return rowObj;
+            });
+            tableValue = { rows, mode: 'row_data', caption: extra?.tableCaption };
+          } else {
+            const headers = extra?.tableColRowHeaders as string[] ?? [];
+            const colNames = extra?.tableColNames as string[] ?? [];
+            const colMatrix = extra?.tableColMatrix as string[][] ?? [];
+            const columns = colNames.map((name, colIdx) => [name, ...colMatrix.map(r => r[colIdx] ?? '')]);
+            tableValue = { columns, mode: 'column_data', caption: extra?.tableCaption };
+          }
 
-  const insertFooterComponent = useCallback(() => {
-    const components = parseLineItems(footerItemsText);
-    try {
-      const node = createFooterComponent({ components }, {
-        component_types: components.map(() => ({ kind: 'string' }))
+          updateTopModal(m => ({
+            ...m,
+            children: [...m.children, { id: m.nextChildId, type: 'table', value: tableValue, schema: { kind: 'table' } }],
+            nextChildId: m.nextChildId + 1,
+            error: '',
+          }));
+        },
+        tableMode: 'row_data',
+        tableCaption: '',
+        tableRowHeaders: ['Item', 'Qty'],
+        tableRowRows: [['Pen', '2']],
+        tableColRowHeaders: ['Q1', 'Q2'],
+        tableColNames: ['Sales'],
+        tableColMatrix: [['10'], ['12']],
       });
-      editor?.chain().focus().insertContent(node as any).run();
-      setInsertError('');
-      setInsertPanel(null);
-    } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid footer component');
     }
-  }, [editor, footerItemsText]);
+  }, [topModal, pushModal, updateTopModal]);
+
+  const removeModalChild = useCallback((id: number) => {
+    updateTopModal(m => ({ ...m, children: m.children.filter(c => c.id !== id) }));
+  }, [updateTopModal]);
+
+  const moveModalChild = useCallback((id: number, direction: 'up' | 'down') => {
+    updateTopModal(m => {
+      const idx = m.children.findIndex(c => c.id === id);
+      if (idx < 0) return m;
+      const target = direction === 'up' ? idx - 1 : idx + 1;
+      if (target < 0 || target >= m.children.length) return m;
+      const next = [...m.children];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return { ...m, children: next };
+    });
+  }, [updateTopModal]);
+
+  const confirmTopModal = useCallback(() => {
+    if (!topModal) return;
+    if (topModal.children.length === 0) {
+      updateTopModal(m => ({ ...m, error: 'Add at least one component.' }));
+      return;
+    }
+    const extra = {
+      pageNumber: topModal.pageNumber,
+      size: topModal.pageSize,
+      orientation: topModal.pageOrientation,
+      listStyle: topModal.listStyle,
+      tableMode: topModal.tableMode,
+      tableCaption: topModal.tableCaption,
+      tableRowHeaders: topModal.tableRowHeaders,
+      tableRowRows: topModal.tableRowRows,
+      tableColRowHeaders: topModal.tableColRowHeaders,
+      tableColNames: topModal.tableColNames,
+      tableColMatrix: topModal.tableColMatrix,
+    };
+    const onConfirm = topModal.onConfirm;
+    const children = topModal.children;
+    popModal();
+    onConfirm(children, extra);
+  }, [topModal, popModal, updateTopModal]);
 
   const insertPageBreak = useCallback(() => {
     editor?.chain().focus().insertContent({ type: 'pageBreakComponent' }).run();
@@ -584,24 +793,7 @@ export default function TemplateEditor({
     return Array.from(found);
   }, [editor?.state]);
 
-  const addRowHeader = () => {
-    setRowHeaders((prev) => [...prev, `Column ${prev.length + 1}`]);
-    setRowRows((prev) => prev.map((row) => [...row, '']));
-  };
-
-  const addDataRow = () => {
-    setRowRows((prev) => [...prev, Array.from({ length: rowHeaders.length }, () => '')]);
-  };
-
-  const addColumnName = () => {
-    setColNames((prev) => [...prev, `Column ${prev.length + 1}`]);
-    setColMatrix((prev) => prev.map((row) => [...row, '']));
-  };
-
-  const addColumnRowHeader = () => {
-    setColRowHeaders((prev) => [...prev, `Row ${prev.length + 1}`]);
-    setColMatrix((prev) => [...prev, Array.from({ length: colNames.length }, () => '')]);
-  };
+  // Legacy inline spreadsheet helpers removed in favor of topModal updates
 
   return (
     <div className={`pg-tiptap-wrapper${hasError ? ' pg-tiptap-error' : ''}`}>
@@ -707,29 +899,29 @@ export default function TemplateEditor({
           <Link size={16} />
         </button>
 
-        <button type="button" className={`pg-tb-btn${insertPanel === 'list' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'list' ? null : 'list'); }} title="Insert list component">
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'list' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('list')} title="Insert list component">
           <Box size={16} />
         </button>
 
-        <button type="button" className={`pg-tb-btn${insertPanel === 'container' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'container' ? null : 'container'); }} title="Insert container component">
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'container' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('container')} title="Insert container component">
           <Layers size={16} />
         </button>
 
-        <button type="button" className={`pg-tb-btn${insertPanel === 'table' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'table' ? null : 'table'); }} title="Insert table component">
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'table' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('table')} title="Insert table component">
           <Table size={16} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button type="button" className={`pg-tb-btn${insertPanel === 'page' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'page' ? null : 'page'); }} title="Insert page element">
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'page' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('page')} title="Insert page element">
           <File size={16} />
         </button>
 
-        <button type="button" className={`pg-tb-btn${insertPanel === 'header' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'header' ? null : 'header'); }} title="Insert header element">
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'header' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('header')} title="Insert header element">
           <PanelTop size={16} />
         </button>
 
-        <button type="button" className={`pg-tb-btn${insertPanel === 'footer' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'footer' ? null : 'footer'); }} title="Insert footer element">
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'footer' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('footer')} title="Insert footer element">
           <PanelBottom size={16} />
         </button>
 
@@ -926,226 +1118,7 @@ export default function TemplateEditor({
             </>
           )}
 
-          {insertPanel === 'list' && (
-            <>
-              <div className="pg-insert-row">
-                <label className="pg-label">List style</label>
-                <select className="pg-input" value={listStyle} onChange={(e) => setListStyle(e.target.value as ListStyle)}>
-                  <option value="bulleted">bulleted</option>
-                  <option value="numbered">numbered</option>
-                  <option value="plain">plain</option>
-                </select>
-              </div>
-              <div className="pg-insert-row">
-                <label className="pg-label">Items (one per line)</label>
-                <textarea className="pg-input" rows={4} value={listItemsText} onChange={(e) => setListItemsText(e.target.value)} />
-              </div>
-              <div className="pg-insert-actions">
-                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
-                <button type="button" className="pg-btn-primary" onClick={insertListComponent}>Insert List</button>
-              </div>
-            </>
-          )}
-
-          {insertPanel === 'container' && (
-            <>
-              <div className="pg-insert-row">
-                <label className="pg-label">Components (one per line)</label>
-                <textarea className="pg-input" rows={5} value={containerItemsText} onChange={(e) => setContainerItemsText(e.target.value)} />
-              </div>
-              <div className="pg-insert-actions">
-                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
-                <button type="button" className="pg-btn-primary" onClick={insertContainerComponent}>Insert Container</button>
-              </div>
-            </>
-          )}
-
-          {insertPanel === 'page' && (
-            <>
-              <div className="pg-insert-row">
-                <label className="pg-label">Page Number (optional)</label>
-                <input className="pg-input" type="number" min="1" value={pageNumber} onChange={(e) => setPageNumber(parseInt(e.target.value) || 1)} />
-              </div>
-              <div className="pg-insert-row">
-                <label className="pg-label">Page Size</label>
-                <select className="pg-input" value={pageSize} onChange={(e) => setPageSize(e.target.value)}>
-                  <option value="A4">A4</option>
-                  <option value="A3">A3</option>
-                  <option value="Letter">Letter</option>
-                </select>
-              </div>
-              <div className="pg-insert-row">
-                <label className="pg-label">Orientation</label>
-                <select className="pg-input" value={pageOrientation} onChange={(e) => setPageOrientation(e.target.value as any)}>
-                  <option value="portrait">Portrait</option>
-                  <option value="landscape">Landscape</option>
-                </select>
-              </div>
-              <div className="pg-insert-row">
-                <label className="pg-label">Components (one per line)</label>
-                <textarea className="pg-input" rows={5} value={pageItemsText} onChange={(e) => setPageItemsText(e.target.value)} />
-              </div>
-              <div className="pg-insert-actions">
-                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
-                <button type="button" className="pg-btn-primary" onClick={insertPageComponent}>Insert Page</button>
-              </div>
-            </>
-          )}
-
-          {insertPanel === 'header' && (
-            <>
-              <div className="pg-insert-row">
-                <label className="pg-label">Header Components (one per line)</label>
-                <textarea className="pg-input" rows={3} value={headerItemsText} onChange={(e) => setHeaderItemsText(e.target.value)} />
-              </div>
-              <div className="pg-insert-actions">
-                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
-                <button type="button" className="pg-btn-primary" onClick={insertHeaderComponent}>Insert Header</button>
-              </div>
-            </>
-          )}
-
-          {insertPanel === 'footer' && (
-            <>
-              <div className="pg-insert-row">
-                <label className="pg-label">Footer Components (one per line)</label>
-                <textarea className="pg-input" rows={3} value={footerItemsText} onChange={(e) => setFooterItemsText(e.target.value)} />
-              </div>
-              <div className="pg-insert-actions">
-                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
-                <button type="button" className="pg-btn-primary" onClick={insertFooterComponent}>Insert Footer</button>
-              </div>
-            </>
-          )}
-
-          {insertPanel === 'table' && (
-            <>
-              <div className="pg-insert-row">
-                <label className="pg-label">Mode</label>
-                <select className="pg-input" value={tableMode} onChange={(e) => setTableMode(e.target.value as TableMode)}>
-                  <option value="row_data">row_data</option>
-                  <option value="column_data">column_data</option>
-                </select>
-              </div>
-
-              <div className="pg-insert-row">
-                <label className="pg-label">Caption (optional)</label>
-                <input className="pg-input" value={tableCaption} onChange={(e) => setTableCaption(e.target.value)} />
-              </div>
-
-              {tableMode === 'row_data' ? (
-                <div className="pg-sheet-wrap">
-                  <div className="pg-sheet-toolbar">
-                    <button type="button" className="pg-btn-ghost" onClick={addRowHeader}>+ Column</button>
-                    <button type="button" className="pg-btn-ghost" onClick={addDataRow}>+ Row</button>
-                  </div>
-                  <table className="pg-sheet-table">
-                    <thead>
-                      <tr>
-                        {rowHeaders.map((header, cIdx) => (
-                          <th key={`rh-${cIdx}`}>
-                            <input
-                              className="pg-input"
-                              value={header}
-                              onChange={(e) => {
-                                const next = [...rowHeaders];
-                                next[cIdx] = e.target.value;
-                                setRowHeaders(next);
-                              }}
-                            />
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rowRows.map((row, rIdx) => (
-                        <tr key={`rr-${rIdx}`}>
-                          {rowHeaders.map((_, cIdx) => (
-                            <td key={`rc-${rIdx}-${cIdx}`}>
-                              <input
-                                className="pg-input"
-                                value={row[cIdx] ?? ''}
-                                onChange={(e) => {
-                                  const next = rowRows.map((r) => [...r]);
-                                  next[rIdx][cIdx] = e.target.value;
-                                  setRowRows(next);
-                                }}
-                              />
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="pg-sheet-wrap">
-                  <div className="pg-sheet-toolbar">
-                    <button type="button" className="pg-btn-ghost" onClick={addColumnName}>+ Column</button>
-                    <button type="button" className="pg-btn-ghost" onClick={addColumnRowHeader}>+ Row Header</button>
-                  </div>
-                  <table className="pg-sheet-table">
-                    <thead>
-                      <tr>
-                        <th>
-                          <span style={{ color: 'var(--pg-text-muted)', fontSize: '11px' }}>row \ col</span>
-                        </th>
-                        {colNames.map((name, cIdx) => (
-                          <th key={`cn-${cIdx}`}>
-                            <input
-                              className="pg-input"
-                              value={name}
-                              onChange={(e) => {
-                                const next = [...colNames];
-                                next[cIdx] = e.target.value;
-                                setColNames(next);
-                              }}
-                            />
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {colRowHeaders.map((rowHeader, rIdx) => (
-                        <tr key={`ch-${rIdx}`}>
-                          <th>
-                            <input
-                              className="pg-input"
-                              value={rowHeader}
-                              onChange={(e) => {
-                                const next = [...colRowHeaders];
-                                next[rIdx] = e.target.value;
-                                setColRowHeaders(next);
-                              }}
-                            />
-                          </th>
-                          {colNames.map((_, cIdx) => (
-                            <td key={`cc-${rIdx}-${cIdx}`}>
-                              <input
-                                className="pg-input"
-                                value={colMatrix[rIdx]?.[cIdx] ?? ''}
-                                onChange={(e) => {
-                                  const next = colMatrix.map((row) => [...row]);
-                                  if (!next[rIdx]) next[rIdx] = [];
-                                  next[rIdx][cIdx] = e.target.value;
-                                  setColMatrix(next);
-                                }}
-                              />
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <div className="pg-insert-actions">
-                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
-                <button type="button" className="pg-btn-primary" onClick={insertTableComponent}>Insert Table</button>
-              </div>
-            </>
-          )}
+          {/* Legacy inline insert panels removed. */}
 
           {insertError && <p className="pg-field-error">{insertError}</p>}
         </div>
@@ -1171,6 +1144,157 @@ export default function TemplateEditor({
             </div>
             <div className="pg-modal-body">
               <div className="pg-preview-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Recursive Modal Stack ────────────────────────── */}
+      {topModal && (
+        <div
+          className="pg-submodal-overlay"
+          onClick={(e) => e.target === e.currentTarget && (modalStack.length === 1 ? closeSubmodal() : popModal())}
+        >
+          <div className="pg-submodal" role="dialog" aria-modal="true" aria-labelledby="submodal-title">
+            <div className="pg-submodal-header">
+              <div>
+                <h2 className="pg-submodal-title" id="submodal-title">
+                  Edit {topModal.label} Components
+                </h2>
+                {modalStack.length > 1 && (
+                  <p className="pg-submodal-subtitle" style={{ fontFamily: 'var(--pg-font-mono)', fontSize: '11px', color: 'var(--pg-accent)' }}>
+                    {modalStack.map(m => m.label).join(' › ')}
+                  </p>
+                )}
+                <p className="pg-submodal-subtitle">
+                  Add and arrange child components. Complex types open nested editors.
+                </p>
+              </div>
+              <button className="pg-modal-close" onClick={() => modalStack.length === 1 ? closeSubmodal() : popModal()} aria-label="Close">✕</button>
+            </div>
+
+            <div className="pg-submodal-body">
+              {/* Page-specific fields */}
+              {topModal.target === 'page' && modalStack.length === 1 && (
+                <div className="pg-submodal-page-fields">
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Page Number</label>
+                    <input className="pg-input" type="number" min="1" value={topModal.pageNumber ?? 1} onChange={(e) => updateTopModal(m => ({ ...m, pageNumber: parseInt(e.target.value) || 1 }))} />
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Size</label>
+                    <select className="pg-input" value={topModal.pageSize ?? 'A4'} onChange={(e) => updateTopModal(m => ({ ...m, pageSize: e.target.value }))}>
+                      <option value="A4">A4</option>
+                      <option value="A3">A3</option>
+                      <option value="Letter">Letter</option>
+                    </select>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Orientation</label>
+                    <select className="pg-input" value={topModal.pageOrientation ?? 'portrait'} onChange={(e) => updateTopModal(m => ({ ...m, pageOrientation: e.target.value as 'portrait' | 'landscape' }))}>
+                      <option value="portrait">Portrait</option>
+                      <option value="landscape">Landscape</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Child component list */}
+              <div className="pg-child-list">
+                {topModal.children.length === 0 ? (
+                  <div className="pg-child-list-empty">No components added yet. Use the form below to add children.</div>
+                ) : (
+                  topModal.children.map((child, idx) => (
+                    <div className="pg-child-entry" key={child.id}>
+                      <span className="pg-child-index">{idx + 1}</span>
+                      <span className={`pg-child-type-badge pg-child-type-badge--${child.type}`}>{child.type}</span>
+                      <span className="pg-child-preview">{childPreview(child)}</span>
+                      <div className="pg-child-actions">
+                        <button type="button" className="pg-child-action-btn" title="Move up" disabled={idx === 0} onClick={() => moveModalChild(child.id, 'up')}>
+                          <ArrowUp size={14} />
+                        </button>
+                        <button type="button" className="pg-child-action-btn" title="Move down" disabled={idx === topModal.children.length - 1} onClick={() => moveModalChild(child.id, 'down')}>
+                          <ArrowDown size={14} />
+                        </button>
+                        <button type="button" className="pg-child-action-btn danger" title="Remove" onClick={() => removeModalChild(child.id)}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Add child form */}
+              <div className="pg-add-child-section">
+                <div className="pg-add-child-header">
+                  <Plus size={14} />
+                  <label className="pg-label">Type</label>
+                  <select className="pg-input" value={addChildType} onChange={(e) => { setAddChildType(e.target.value as AnyChildType); updateTopModal(m => ({ ...m, error: '' })); }} style={{ maxWidth: 160 }}>
+                    {ALL_CHILD_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="pg-add-child-body">
+                  {(addChildType === 'string' || addChildType === 'integer') && (
+                    <div className="pg-insert-row">
+                      <label className="pg-label">Value</label>
+                      <input className="pg-input" value={addChildValue} onChange={(e) => setAddChildValue(e.target.value)} placeholder={addChildType === 'integer' ? '42' : 'Text content'} />
+                    </div>
+                  )}
+                  {addChildType === 'image' && (
+                    <>
+                      <div className="pg-insert-row">
+                        <label className="pg-label">Image URL</label>
+                        <input className="pg-input" value={addChildImageSrc} onChange={(e) => setAddChildImageSrc(e.target.value)} />
+                      </div>
+                      <div className="pg-insert-row">
+                        <label className="pg-label">Alt text</label>
+                        <input className="pg-input" value={addChildImageAlt} onChange={(e) => setAddChildImageAlt(e.target.value)} />
+                      </div>
+                    </>
+                  )}
+                  {addChildType === 'hyperlink' && (
+                    <>
+                      <div className="pg-insert-row">
+                        <label className="pg-label">Alias</label>
+                        <input className="pg-input" value={addChildLinkAlias} onChange={(e) => setAddChildLinkAlias(e.target.value)} />
+                      </div>
+                      <div className="pg-insert-row">
+                        <label className="pg-label">URL</label>
+                        <input className="pg-input" value={addChildLinkUrl} onChange={(e) => setAddChildLinkUrl(e.target.value)} />
+                      </div>
+                    </>
+                  )}
+                  {(addChildType === 'container' || addChildType === 'list' || addChildType === 'table') && (
+                    <div style={{ padding: '8px 0', color: 'var(--pg-text-muted)', fontSize: '12px' }}>
+                      Click "Add" to open a nested editor for this {addChildType}.
+                    </div>
+                  )}
+                </div>
+                <div className="pg-add-child-actions">
+                  {(addChildType === 'string' || addChildType === 'integer' || addChildType === 'image' || addChildType === 'hyperlink') && (
+                    <button type="button" className="pg-btn-primary" onClick={addPrimitiveChild}>Add Component</button>
+                  )}
+                  {(addChildType === 'container' || addChildType === 'list' || addChildType === 'table') && (
+                    <button type="button" className="pg-btn-primary" onClick={() => addComplexChild(addChildType)}>Add {addChildType.charAt(0).toUpperCase() + addChildType.slice(1)}…</button>
+                  )}
+                </div>
+              </div>
+
+              {topModal.error && <p className="pg-field-error">{topModal.error}</p>}
+            </div>
+
+            <div className="pg-submodal-footer">
+              <button type="button" className="pg-btn-ghost" onClick={() => modalStack.length === 1 ? closeSubmodal() : popModal()}>
+                {modalStack.length === 1 ? 'Cancel' : '← Back'}
+              </button>
+              <button type="button" className="pg-btn-primary" onClick={confirmTopModal}>
+                {modalStack.length === 1
+                  ? `Insert ${topModal.label}`
+                  : `Confirm ${topModal.label}`}
+              </button>
             </div>
           </div>
         </div>
