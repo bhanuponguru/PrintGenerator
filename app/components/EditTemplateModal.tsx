@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import TemplateEditor from './TemplateEditor';
 import type { Template } from '../page';
 import { TagResponse } from '@/types/tag';
@@ -12,16 +12,6 @@ interface EditTemplateModalProps {
   onClose:   () => void;
   onSuccess: () => void;
   onError:   (msg: string) => void;
-}
-
-/**
- * Performs a sanity check on a provided document map to establish if it properly
- * conforms to the structural expectations of an editable TipTap object.
- * @param value The arbitrary document layout sequence being validated.
- * @returns Boolean representing TipTap parsing viability.
- */
-function isTiptapDoc(value: Record<string, any>): boolean {
-  return value?.type === 'doc' && Array.isArray(value?.content);
 }
 
 /**
@@ -47,6 +37,7 @@ export default function EditTemplateModal({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(template.tag_ids || []);
   const [newTagName, setNewTagName] = useState('');
   const [creatingTag, setCreatingTag] = useState(false);
+  const [editorErrors, setEditorErrors] = useState<string[]>([]);
   const [errors,       setErrors]       = useState<Record<string, string>>({});
   const [loading,      setLoading]      = useState(false);
 
@@ -80,22 +71,11 @@ export default function EditTemplateModal({
     }
   };
 
-  /**
-   * If the stored template is already a TipTap doc, initialise the editor with it.
-   * If it's legacy JSON (created via raw API), show a notice and start with a blank doc
-   * so the user can re-author it visually.
-   */
-  const { initialEditorContent, isLegacy } = useMemo(() => {
-    if (isTiptapDoc(template.template)) {
-      return { initialEditorContent: template.template, isLegacy: false };
-    }
-    return { initialEditorContent: undefined, isLegacy: true };
-  }, [template.template]);
-
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!name.trim())    errs.name    = 'Name is required';
     if (!version.trim()) errs.version = 'Version is required';
+    if (editorErrors.length > 0) errs.template = `Resolve ${editorErrors.length} editor validation issue(s) before saving`;
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -154,25 +134,6 @@ export default function EditTemplateModal({
         </div>
 
         <div className="pg-modal-body">
-          {/* Legacy template notice */}
-          {isLegacy && (
-            <div
-              style={{
-                background: 'rgba(232,184,75,0.06)',
-                border: '1px solid rgba(232,184,75,0.2)',
-                borderRadius: 'var(--pg-radius)',
-                padding: '10px 14px',
-                fontSize: 12,
-                color: 'var(--pg-accent)',
-                lineHeight: 1.6,
-              }}
-            >
-              ℹ This template was created with raw JSON (via API or an older version of the UI).
-              The editor is starting blank — save to migrate it to the rich-text format, or leave
-              it unchanged by clicking Cancel.
-            </div>
-          )}
-
           {/* Name + Version */}
           <div className="pg-row">
             <div className="pg-field">
@@ -265,9 +226,19 @@ export default function EditTemplateModal({
           <div className="pg-field">
             <label className="pg-label">Document Content</label>
             <TemplateEditor
-              initialContent={initialEditorContent}
-              onChange={(json) => setTemplateJson(json)}
+              initialContent={template.template}
+              hasError={!!errors.template}
+              onChange={(json) => {
+                setTemplateJson(json);
+                if (errors.template) {
+                  setErrors((prev) => ({ ...prev, template: '' }));
+                }
+              }}
+              onValidationChange={({ errors: nextErrors }) => {
+                setEditorErrors(nextErrors);
+              }}
             />
+            {errors.template && <span className="pg-field-error">{errors.template}</span>}
           </div>
         </div>
 
@@ -275,7 +246,7 @@ export default function EditTemplateModal({
           <button className="pg-btn-ghost" onClick={onClose} disabled={loading}>
             Cancel
           </button>
-          <button className="pg-btn-primary" onClick={handleSubmit} disabled={loading}>
+          <button className="pg-btn-primary" onClick={handleSubmit} disabled={loading || editorErrors.length > 0}>
             {loading ? 'Saving…' : 'Save Changes'}
           </button>
         </div>

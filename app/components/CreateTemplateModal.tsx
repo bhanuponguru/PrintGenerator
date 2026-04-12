@@ -34,6 +34,7 @@ export default function CreateTemplateModal({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [newTagName, setNewTagName] = useState('');
   const [creatingTag, setCreatingTag] = useState(false);
+  const [editorErrors, setEditorErrors] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -72,6 +73,7 @@ export default function CreateTemplateModal({
     if (!name.trim()) errs.name = 'Name is required';
     if (!version.trim()) errs.version = 'Version is required';
     if (!templateJson) errs.template = 'Document content is required';
+    if (editorErrors.length > 0) errs.template = `Resolve ${editorErrors.length} editor validation issue(s) before creating`;
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -228,6 +230,9 @@ export default function CreateTemplateModal({
                 setTemplateJson(json);
                 if (errors.template) setErrors((e) => ({ ...e, template: '' }));
               }}
+              onValidationChange={({ errors: nextErrors }) => {
+                setEditorErrors(nextErrors);
+              }}
               hasError={!!errors.template}
             />
             {errors.template && (
@@ -240,7 +245,7 @@ export default function CreateTemplateModal({
           <button className="pg-btn-ghost" onClick={onClose} disabled={loading}>
             Cancel
           </button>
-          <button className="pg-btn-primary" onClick={handleSubmit} disabled={loading}>
+          <button className="pg-btn-primary" onClick={handleSubmit} disabled={loading || editorErrors.length > 0}>
             {loading ? 'Creating…' : 'Create Template'}
           </button>
         </div>

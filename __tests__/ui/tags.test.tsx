@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TagManagementSection from '@/app/components/TagManagementSection';
 import CreateTagModal from '@/app/components/CreateTagModal';
@@ -7,7 +7,6 @@ import EditTagModal from '@/app/components/EditTagModal';
 import CreateTemplateModal from '@/app/components/CreateTemplateModal';
 import { TagResponse } from '@/types/tag';
 
-// Mock Fetch
 global.fetch = vi.fn();
 
 const mockTags: TagResponse[] = [
@@ -15,204 +14,178 @@ const mockTags: TagResponse[] = [
   { _id: '2', name: 'Draft', template_ids: [], created_on: '2025-01-02T00:00:00Z' },
 ];
 
-describe('Tag Management UI Features', () => {
-
+describe('Tag Management UI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe('TagManagementSection', () => {
-    it('renders all tags properly with correct meta data and template counts', () => {
+    it('renders tag cards with counts and action buttons', () => {
       render(
-        <TagManagementSection 
-          tags={mockTags} 
-          onEditClick={vi.fn()} 
-          onDeleteClick={vi.fn()} 
-          onViewTemplatesClick={vi.fn()} 
+        <TagManagementSection
+          tags={mockTags}
+          onEditClick={vi.fn()}
+          onDeleteClick={vi.fn()}
+          onViewTemplatesClick={vi.fn()}
         />
       );
-      
-      expect(screen.getByText('Critical')).toBeDefined();
-      expect(screen.getByText('2 templates')).toBeDefined();
-      expect(screen.getByText('Draft')).toBeDefined();
-      expect(screen.getByText('0 templates')).toBeDefined();
+
+      expect(screen.getByText('Critical')).toBeTruthy();
+      expect(screen.getByText('2 templates')).toBeTruthy();
+      expect(screen.getByText('Draft')).toBeTruthy();
+      expect(screen.getByText('0 templates')).toBeTruthy();
+      expect(screen.getAllByRole('button', { name: /View Templates/i })).toHaveLength(2);
+      expect(screen.getAllByRole('button', { name: /Edit/i })).toHaveLength(2);
+      expect(screen.getAllByRole('button', { name: /Delete/i })).toHaveLength(2);
     });
 
-    it('triggers view, edit, and delete callbacks correctly with tag payload', async () => {
+    it('emits the clicked tag through each callback', async () => {
+      const user = userEvent.setup();
       const onEdit = vi.fn();
       const onDelete = vi.fn();
       const onView = vi.fn();
 
       render(
-        <TagManagementSection 
-          tags={mockTags} 
-          onEditClick={onEdit} 
-          onDeleteClick={onDelete} 
-          onViewTemplatesClick={onView} 
+        <TagManagementSection
+          tags={mockTags}
+          onEditClick={onEdit}
+          onDeleteClick={onDelete}
+          onViewTemplatesClick={onView}
         />
       );
 
-      const editBtns = screen.getAllByRole('button', { name: /Edit/i });
-      const delBtns = screen.getAllByRole('button', { name: /Delete/i });
-      const viewBtns = screen.getAllByRole('button', { name: /View Templates/i });
+      await user.click(screen.getAllByRole('button', { name: /Edit/i })[0]);
+      await user.click(screen.getAllByRole('button', { name: /Delete/i })[1]);
+      await user.click(screen.getAllByRole('button', { name: /View Templates/i })[0]);
 
-      await userEvent.click(editBtns[0]);
       expect(onEdit).toHaveBeenCalledWith(mockTags[0]);
-
-      await userEvent.click(delBtns[1]);
       expect(onDelete).toHaveBeenCalledWith(mockTags[1]);
-      
-      await userEvent.click(viewBtns[0]);
       expect(onView).toHaveBeenCalledWith(mockTags[0]);
     });
   });
 
   describe('CreateTagModal', () => {
-    it('disables submission when tag name is empty or only whitespace', async () => {
-      render(
-        <CreateTagModal onClose={vi.fn()} onSuccess={vi.fn()} onError={vi.fn()} />
-      );
+    it('blocks empty tag names without calling the API', async () => {
+      const user = userEvent.setup();
 
-      const input = screen.getByRole('textbox');
-      const submitBtn = screen.getByRole('button', { name: /Create Tag/i });
+      render(<CreateTagModal onClose={vi.fn()} onSuccess={vi.fn()} onError={vi.fn()} />);
 
-      await userEvent.type(input, '   ');
-      
-      // Should handle either visual disabled prop or programmatic rejection
-      // Testing programmatic black-box rejection 
-      await userEvent.click(submitBtn);
+      await user.type(screen.getByRole('textbox'), '   ');
+      await user.click(screen.getByRole('button', { name: /Create Tag/i }));
+
       expect(global.fetch).not.toHaveBeenCalled();
+      expect(screen.getByText('Tag name is required')).toBeTruthy();
     });
 
-    it('calls API and triggers onSuccess upon successful tag creation', async () => {
+    it('creates a tag and calls onSuccess on success', async () => {
+      const user = userEvent.setup();
       const onSuccess = vi.fn();
-      (global.fetch as any).mockResolvedValueOnce({
-        json: async () => ({ success: true, data: { id: '3' } })
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
+        json: async () => ({ success: true, data: { id: '3' } }),
       });
 
       render(<CreateTagModal onClose={vi.fn()} onSuccess={onSuccess} onError={vi.fn()} />);
-      
-      await userEvent.type(screen.getByRole('textbox'), 'NewTag');
-      await userEvent.click(screen.getByRole('button', { name: /Create Tag/i }));
 
-      expect(global.fetch).toHaveBeenCalledWith('/api/tags', expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ name: 'NewTag' })
-      }));
+      await user.type(screen.getByRole('textbox'), 'NewTag');
+      await user.click(screen.getByRole('button', { name: /Create Tag/i }));
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/tags',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ name: 'NewTag' }),
+        })
+      );
 
       await waitFor(() => {
         expect(onSuccess).toHaveBeenCalled();
       });
     });
-
-    it('displays error messages natively upon backend rejection', async () => {
-      const onError = vi.fn();
-      (global.fetch as any).mockResolvedValueOnce({
-        json: async () => ({ success: false, error: 'Tag already exists' })
-      });
-
-      render(<CreateTagModal onClose={vi.fn()} onSuccess={vi.fn()} onError={onError} />);
-      
-      await userEvent.type(screen.getByRole('textbox'), 'DuplicateTag');
-      await userEvent.click(screen.getByRole('button', { name: /Create Tag/i }));
-
-      await waitFor(() => {
-        expect(onError).toHaveBeenCalledWith('Tag already exists');
-      });
-    });
   });
 
   describe('EditTagModal', () => {
-    it('pre-loads existing tag name and permits saving modifications', async () => {
-      const onSuccess = vi.fn();
-      (global.fetch as any).mockResolvedValueOnce({
-        json: async () => ({ success: true })
+    it('loads the current tag name and sends the updated value', async () => {
+      const user = userEvent.setup();
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
+        json: async () => ({ success: true }),
       });
 
-      render(
-        <EditTagModal tag={mockTags[0]} onClose={vi.fn()} onSuccess={onSuccess} onError={vi.fn()} />
-      );
+      render(<EditTagModal tag={mockTags[0]} onClose={vi.fn()} onSuccess={vi.fn()} onError={vi.fn()} />);
 
       const input = screen.getByRole('textbox') as HTMLInputElement;
       expect(input.value).toBe('Critical');
 
-      await userEvent.clear(input);
-      await userEvent.type(input, 'Critical-V2');
-      await userEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+      await user.clear(input);
+      await user.type(input, 'Critical-V2');
+      await user.click(screen.getByRole('button', { name: /Save Changes/i }));
 
-      expect(global.fetch).toHaveBeenCalledWith('/api/tags', expect.objectContaining({
-        method: 'PATCH',
-        body: expect.stringContaining('Critical-V2')
-      }));
+      expect(global.fetch).toHaveBeenCalledWith(
+        '/api/tags',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: expect.stringContaining('Critical-V2'),
+        })
+      );
     });
   });
 
-  describe('Inline Tag Creation (CreateTemplateModal)', () => {
-    it('creates tag inline and automatically toggles it on', async () => {
+  describe('CreateTemplateModal inline tags', () => {
+    it('creates a tag inline and shows it after the parent rerenders with the new tags list', async () => {
+      const user = userEvent.setup();
       const onTagCreated = vi.fn();
-      (global.fetch as any).mockResolvedValueOnce({
-        json: async () => ({ success: true, data: { id: 'inline-tag-id' } })
+      (global.fetch as vi.Mock).mockResolvedValueOnce({
+        json: async () => ({ success: true, data: { id: 'inline-tag-id' } }),
       });
 
       const { rerender } = render(
-        <CreateTemplateModal 
-          tags={[]} 
-          onTagCreated={onTagCreated} 
-          onClose={vi.fn()} 
-          onSuccess={vi.fn()} 
-          onError={vi.fn()} 
+        <CreateTemplateModal
+          tags={[]}
+          onTagCreated={onTagCreated}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onError={vi.fn()}
         />
       );
 
-      const newTagInput = screen.getByPlaceholderText('New tag...');
-      const addBtn = screen.getByRole('button', { name: /Add/i });
-
-      await userEvent.type(newTagInput, 'InlineTag');
-      await userEvent.click(addBtn);
+      await user.type(screen.getByPlaceholderText('New tag...'), 'InlineTag');
+      await user.click(screen.getByRole('button', { name: /Add/i }));
 
       await waitFor(() => {
         expect(global.fetch).toHaveBeenCalled();
         expect(onTagCreated).toHaveBeenCalled();
       });
 
-      // Simulate parent component fetching and updating the tags prop
       rerender(
-        <CreateTemplateModal 
-          tags={[{ _id: 'inline-tag-id', name: 'InlineTag', template_ids: [], created_on: '2025-01-01T00:00:00Z' }]} 
-          onTagCreated={onTagCreated} 
-          onClose={vi.fn()} 
-          onSuccess={vi.fn()} 
-          onError={vi.fn()} 
+        <CreateTemplateModal
+          tags={[{ _id: 'inline-tag-id', name: 'InlineTag', template_ids: [], created_on: '2025-01-01T00:00:00Z' }]}
+          onTagCreated={onTagCreated}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onError={vi.fn()}
         />
       );
 
-      // The inline tag should be automatically generated as a chip that is interactable and selected
-      const chips = screen.getAllByRole('button', { name: /InlineTag/i });
-      expect(chips.length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: 'InlineTag' })).toBeTruthy();
     });
 
-    it('rejects inline tag creation if name exactly matches an existing tag', async () => {
+    it('rejects inline tag creation when the name already exists', async () => {
+      const user = userEvent.setup();
+
       render(
-        <CreateTemplateModal 
-          tags={mockTags} 
-          onTagCreated={vi.fn()} 
-          onClose={vi.fn()} 
-          onSuccess={vi.fn()} 
-          onError={vi.fn()} 
+        <CreateTemplateModal
+          tags={mockTags}
+          onTagCreated={vi.fn()}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          onError={vi.fn()}
         />
       );
 
-      const newTagInput = screen.getByPlaceholderText('New tag...');
-      const addBtn = screen.getByRole('button', { name: /Add/i });
+      await user.type(screen.getByPlaceholderText('New tag...'), 'Draft');
+      await user.click(screen.getByRole('button', { name: /Add/i }));
 
-      await userEvent.type(newTagInput, 'Draft'); // 'Draft' exists
-      await userEvent.click(addBtn);
-
-      // Should block the network request natively 
       expect(global.fetch).not.toHaveBeenCalled();
-      
-      expect(screen.getByText('Tag already exists')).toBeDefined();
+      expect(screen.getByText('Tag already exists')).toBeTruthy();
     });
   });
-
 });

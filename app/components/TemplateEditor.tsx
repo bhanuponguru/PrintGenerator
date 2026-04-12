@@ -2,63 +2,192 @@
 
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { generateHTML } from '@tiptap/html';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import {
+  Bold,
+  Italic,
+  Strikethrough,
+  Heading1,
+  Heading2,
+  List,
+  ListOrdered,
+  Undo,
+  Redo,
+  Braces,
+  Image as ImageIcon,
+  Link,
+  Box,
+  Table,
+  Layers,
+} from 'lucide-react';
 import { Placeholder } from '@/lib/tiptap/placeholder';
-import { Bold, Italic, Strikethrough, Heading1, Heading2, List, ListOrdered, Undo, Redo, Braces } from 'lucide-react';
+import {
+  ComponentExtensions,
+  createContainerComponent,
+  createHyperlinkComponent,
+  createImageComponent,
+  createListComponent,
+  createTableComponent,
+  validateContainerAttrs,
+  validateHyperlinkAttrs,
+  validateImageAttrs,
+  validateListAttrs,
+  validatePlaceholderAttrs,
+  validateTableAttrs,
+} from '@/lib/tiptap/extensions';
+import { ComponentTypeSchema, ListStyle, TableMode } from '@/types/template';
 
 interface TemplateEditorProps {
-  /** Initial TipTap JSON content (from editor.getJSON()). Pass undefined for a blank doc. */
   initialContent?: Record<string, any>;
-  /** Called every time the document changes with the latest editor.getJSON() */
   onChange: (json: Record<string, any>) => void;
+  onValidationChange?: (state: { isValid: boolean; errors: string[] }) => void;
   hasError?: boolean;
 }
 
-/** Validate placeholder key: letters, digits, underscores, must start with letter/underscore */
+type InsertPanel = 'placeholder' | 'image' | 'hyperlink' | 'list' | 'container' | 'table' | null;
+type PlaceholderKind = ComponentTypeSchema['kind'];
+
 const KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
-/**
- * Comprehensive Rich Text visual document styling wrapper using the TipTap framework.
- * Specializes in facilitating the insertion of programmatic placeholders enabling parameter
- * replacement during static PDF export phases later. Emits consistent parsed JSON representations.
- * @param initialContent The pre-hydrated map of editor operations and node configurations (if any).
- * @param onChange Subscribed callback firing actively whenever editor mutation occurs returning state.
- * @param hasError Prop flagging invalid structural editor states for exterior visual styling shifts.
- */
+function walkTiptapJson(node: Record<string, any>, visit: (n: Record<string, any>) => void) {
+  visit(node);
+  if (Array.isArray(node.content)) {
+    node.content.forEach((child: Record<string, any>) => walkTiptapJson(child, visit));
+  }
+}
+
+function unique(items: string[]): string[] {
+  return Array.from(new Set(items));
+}
+
+function parseCommaSeparated(input: string): string[] {
+  return input
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function parseLineItems(input: string): string[] {
+  return input
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function normalizeListStyle(style: string): ListStyle {
+  return style === 'numbered' || style === 'plain' ? style : 'bulleted';
+}
+
+function collectValidationErrors(documentJson: Record<string, any>): string[] {
+  const errors: string[] = [];
+
+  walkTiptapJson(documentJson, (node) => {
+    if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
+
+    const attrs = (node.attrs || {}) as Record<string, unknown>;
+
+    if (node.type === 'placeholder') {
+      const err = validatePlaceholderAttrs(attrs);
+      if (err) {
+        errors.push(`placeholder: ${err}`);
+      }
+
+      const key = typeof attrs.key === 'string' ? attrs.key : '';
+      if (!KEY_RE.test(key)) {
+        errors.push(`placeholder: invalid key '${key}'`);
+      }
+    }
+
+    if (node.type === 'imageComponent') {
+      const err = validateImageAttrs(attrs);
+      if (err) errors.push(`imageComponent: ${err}`);
+    }
+
+    if (node.type === 'hyperlinkComponent') {
+      const err = validateHyperlinkAttrs(attrs);
+      if (err) errors.push(`hyperlinkComponent: ${err}`);
+    }
+
+    if (node.type === 'listComponent') {
+      const err = validateListAttrs(attrs);
+      if (err) errors.push(`listComponent: ${err}`);
+    }
+
+    if (node.type === 'containerComponent') {
+      const err = validateContainerAttrs(attrs);
+      if (err) errors.push(`containerComponent: ${err}`);
+    }
+
+    if (node.type === 'tableComponent') {
+      const err = validateTableAttrs(attrs);
+      if (err) errors.push(`tableComponent: ${err}`);
+    }
+  });
+
+  return unique(errors);
+}
+
 export default function TemplateEditor({
   initialContent,
   onChange,
+  onValidationChange,
   hasError = false,
 }: TemplateEditorProps) {
-  const [showKeyPopover, setShowKeyPopover] = useState(false);
-  const [keyDraft,       setKeyDraft]       = useState('');
-  const [keyError,       setKeyError]       = useState('');
-  const keyInputRef = useRef<HTMLInputElement>(null);
+  const [insertPanel, setInsertPanel] = useState<InsertPanel>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState('');
 
-  /* ── Tiptap editor ───────────────────────────────────── */
-  // Initialize the core TipTap editing context using a standardized StarterKit configuration
-  // We disable unsupported complex web-only layout blocks to ensure clean PDF conversions later
+  const [phKey, setPhKey] = useState('');
+  const [phKind, setPhKind] = useState<PlaceholderKind>('string');
+  const [phListStyle, setPhListStyle] = useState<ListStyle>('bulleted');
+  const [phTableMode, setPhTableMode] = useState<TableMode>('row_data');
+  const [phTableHeaders, setPhTableHeaders] = useState('Item,Qty');
+  const [phContainerSlots, setPhContainerSlots] = useState('2');
+  const [insertError, setInsertError] = useState('');
+
+  const [imageSrc, setImageSrc] = useState('https://example.com/logo.png');
+  const [imageAlt, setImageAlt] = useState('Image');
+
+  const [linkAlias, setLinkAlias] = useState('Docs');
+  const [linkUrl, setLinkUrl] = useState('https://example.com/docs');
+
+  const [listStyle, setListStyle] = useState<ListStyle>('bulleted');
+  const [listItemsText, setListItemsText] = useState('First item\nSecond item');
+
+  const [containerItemsText, setContainerItemsText] = useState('Block A\nBlock B');
+
+  const [tableMode, setTableMode] = useState<TableMode>('row_data');
+  const [tableCaption, setTableCaption] = useState('');
+  const [rowHeaders, setRowHeaders] = useState<string[]>(['Item', 'Qty']);
+  const [rowRows, setRowRows] = useState<string[][]>([['Pen', '2']]);
+  const [colRowHeaders, setColRowHeaders] = useState<string[]>(['Q1', 'Q2']);
+  const [colNames, setColNames] = useState<string[]>(['Sales']);
+  const [colMatrix, setColMatrix] = useState<string[][]>([['10'], ['12']]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        // Disable features that don't make sense for strict standard A4 document templates
         codeBlock: false,
         blockquote: false,
         horizontalRule: false,
       }),
-      // Inject our custom TipTap Node parser which converts {{keys}} into syntax-highlighted chips
       Placeholder,
+      ...ComponentExtensions,
     ],
-    // Hydrate the editor with either a stored layout graph, or default to an empty text tree
     content: initialContent ?? {
       type: 'doc',
       content: [{ type: 'paragraph' }],
     },
-    // Bind change listener firing backwards into parent state on every modification stroke
     onUpdate({ editor: ed }) {
-      onChange(ed.getJSON());
+      const json = ed.getJSON();
+      onChange(json);
+
+      const errors = collectValidationErrors(json as Record<string, any>);
+      setValidationErrors(errors);
+      onValidationChange?.({ isValid: errors.length === 0, errors });
     },
-    // Avoid hydration mismatch on SSR
     immediatelyRender: false,
     editorProps: {
       attributes: {
@@ -68,74 +197,301 @@ export default function TemplateEditor({
     },
   });
 
-  // Destroy on unmount
   useEffect(() => () => { editor?.destroy(); }, [editor]);
 
-  // Focus the key input when popover opens
-  useEffect(() => {
-    if (showKeyPopover) {
-      setTimeout(() => keyInputRef.current?.focus(), 40);
-    }
-  }, [showKeyPopover]);
-
-  /* ── Insert placeholder node at cursor ───────────────── */
-  // Generates and inserts a custom variable chip representation directly into the document AST
-  const insertPlaceholder = useCallback(() => {
-    const key = keyDraft.trim().replace(/\s+/g, '_');
-
-    // Input sanitization guarding against malformed JSON keys breaking the backend mapping
-    if (!key) {
-      setKeyError('Key cannot be empty');
-      return;
-    }
-    if (!KEY_RE.test(key)) {
-      setKeyError('Letters, digits and underscores only; start with a letter or _');
-      return;
-    }
-
-    // Programmatically fire an insertion command injecting a configured 'placeholder' Node
-    editor
-      ?.chain()
-      .focus()
-      .insertContent({
-        type: 'placeholder', // Specialized custom extension identifier
-        attrs: { key }, // The raw data tracking parameter variable
-        content: [{ type: 'text', text: key }], // Renderable visual label mapping inside editor
-      })
-      .run();
-
-    // Reset localized internal UI states
-    setKeyDraft('');
-    setKeyError('');
-    setShowKeyPopover(false);
-  }, [editor, keyDraft]);
-
-  const handleKeyInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter')  { e.preventDefault(); insertPlaceholder(); }
-    if (e.key === 'Escape') { setShowKeyPopover(false); }
-  };
-
-  /* ── Toolbar helpers ─────────────────────────────────── */
   const active = (name: string, opts?: object) =>
     editor?.isActive(name, opts) ? ' pg-tb-active' : '';
 
   const cmd = (fn: () => void) => (e: React.MouseEvent) => {
-    e.preventDefault(); // don't blur the editor
+    e.preventDefault();
     fn();
   };
 
-  /* ── Render ──────────────────────────────────────────── */
+  const openPreview = useCallback(() => {
+    if (!editor) return;
+
+    try {
+      setPreviewHtml(generateHTML(editor.getJSON(), [StarterKit, Placeholder, ...ComponentExtensions]));
+    } catch {
+      setPreviewHtml('<p>Unable to render preview.</p>');
+    }
+
+    setIsPreviewOpen(true);
+  }, [editor]);
+
+  const placeholderSchema = useMemo<ComponentTypeSchema | null>(() => {
+    if (phKind === 'string' || phKind === 'integer' || phKind === 'image' || phKind === 'hyperlink') {
+      return { kind: phKind, in_placeholder: true } as ComponentTypeSchema;
+    }
+
+    if (phKind === 'list') {
+      return {
+        kind: 'list',
+        in_placeholder: true,
+        style: normalizeListStyle(phListStyle),
+        item_type: { kind: 'string', in_placeholder: true },
+      };
+    }
+
+    if (phKind === 'container') {
+      const slots = Number(phContainerSlots);
+      const count = Number.isFinite(slots) && slots > 0 ? Math.floor(slots) : 2;
+      return {
+        kind: 'container',
+        in_placeholder: true,
+        component_types: Array.from({ length: count }, () => ({ kind: 'string', in_placeholder: true })),
+      };
+    }
+
+    if (phKind === 'table') {
+      const headers = parseCommaSeparated(phTableHeaders);
+      return {
+        kind: 'table',
+        in_placeholder: true,
+        mode: phTableMode,
+        headers,
+      };
+    }
+
+    return null;
+  }, [phKind, phListStyle, phTableMode, phTableHeaders, phContainerSlots]);
+
+  const insertTypedPlaceholder = useCallback(() => {
+    const key = phKey.trim().replace(/\s+/g, '_');
+    if (!key || !KEY_RE.test(key)) {
+      setInsertError('Placeholder key is invalid. Use letters/digits/underscore and start with letter or _.');
+      return;
+    }
+
+    if (!placeholderSchema) {
+      setInsertError('Choose a valid placeholder schema.');
+      return;
+    }
+
+    if (placeholderSchema.kind === 'table' && placeholderSchema.headers.length === 0) {
+      setInsertError('Table placeholders require at least one header.');
+      return;
+    }
+
+    const result = editor
+      ?.chain()
+      .focus()
+      .insertContent({
+        type: 'placeholder',
+        attrs: {
+          key,
+          value_schema: placeholderSchema,
+          value: '',
+          in_placeholder: true,
+        },
+        content: [{ type: 'text', text: key }],
+      })
+      .run();
+
+    if (!result) {
+      setInsertError('Failed to insert placeholder.');
+      return;
+    }
+
+    setInsertError('');
+    setPhKey('');
+    setInsertPanel(null);
+  }, [editor, phKey, placeholderSchema]);
+
+  const insertImageComponent = useCallback(() => {
+    try {
+      const node = createImageComponent(
+        {
+          src: imageSrc.trim(),
+          alt: imageAlt.trim(),
+          in_placeholder: false,
+        },
+        {}
+      );
+      editor?.chain().focus().insertContent(node as any).run();
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid image component');
+    }
+  }, [editor, imageSrc, imageAlt]);
+
+  const insertHyperlinkComponent = useCallback(() => {
+    try {
+      const node = createHyperlinkComponent(
+        {
+          alias: linkAlias.trim(),
+          url: linkUrl.trim(),
+          in_placeholder: false,
+        },
+        {}
+      );
+      editor?.chain().focus().insertContent(node as any).run();
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid hyperlink component');
+    }
+  }, [editor, linkAlias, linkUrl]);
+
+  const insertListComponent = useCallback(() => {
+    const items = parseLineItems(listItemsText);
+    if (items.length === 0) {
+      setInsertError('List requires at least one item.');
+      return;
+    }
+
+    try {
+      const node = createListComponent({
+        items,
+        style: normalizeListStyle(listStyle),
+        in_placeholder: false,
+      });
+      editor?.chain().focus().insertContent(node as any).run();
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid list component');
+    }
+  }, [editor, listItemsText, listStyle]);
+
+  const insertContainerComponent = useCallback(() => {
+    const components = parseLineItems(containerItemsText);
+    if (components.length === 0) {
+      setInsertError('Container requires at least one component line.');
+      return;
+    }
+
+    try {
+      const node = createContainerComponent(
+        {
+          components,
+          in_placeholder: false,
+        },
+        {
+          component_types: components.map(() => ({ kind: 'string', in_placeholder: false })),
+        }
+      );
+      editor?.chain().focus().insertContent(node as any).run();
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid container component');
+    }
+  }, [editor, containerItemsText]);
+
+  const insertTableComponent = useCallback(() => {
+    try {
+      if (tableMode === 'row_data') {
+        const headers = rowHeaders.map((h) => h.trim()).filter(Boolean);
+        if (headers.length === 0) {
+          setInsertError('Row table requires at least one header.');
+          return;
+        }
+
+        const rows = rowRows
+          .map((row) => {
+            const rowObj: Record<string, unknown> = {};
+            headers.forEach((header, index) => {
+              rowObj[header] = row[index] ?? '';
+            });
+            return rowObj;
+          });
+
+        const node = createTableComponent(
+          {
+            mode: 'row_data',
+            rows,
+            caption: tableCaption.trim() || undefined,
+            in_placeholder: false,
+          },
+          { headers }
+        );
+
+        editor?.chain().focus().insertContent(node as any).run();
+      } else {
+        const headers = colRowHeaders.map((h) => h.trim()).filter(Boolean);
+        const columns = colNames.map((c) => c.trim()).filter(Boolean);
+
+        if (headers.length === 0) {
+          setInsertError('Column table requires row headers.');
+          return;
+        }
+        if (columns.length === 0) {
+          setInsertError('Column table requires at least one column name.');
+          return;
+        }
+
+        const colData: Record<string, Record<string, unknown>> = {};
+        columns.forEach((colName, cIdx) => {
+          const values: Record<string, unknown> = {};
+          headers.forEach((rowHeader, rIdx) => {
+            values[rowHeader] = colMatrix[rIdx]?.[cIdx] ?? '';
+          });
+          colData[colName] = values;
+        });
+
+        const node = createTableComponent(
+          {
+            mode: 'column_data',
+            columns: colData,
+            caption: tableCaption.trim() || undefined,
+            in_placeholder: false,
+          },
+          { headers }
+        );
+
+        editor?.chain().focus().insertContent(node as any).run();
+      }
+
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid table component');
+    }
+  }, [editor, tableMode, rowHeaders, rowRows, colRowHeaders, colNames, colMatrix, tableCaption]);
+
+  const placeholderKeys = useMemo(() => {
+    if (!editor) return [] as string[];
+
+    const found = new Set<string>();
+    const json = editor.getJSON() as Record<string, any>;
+    walkTiptapJson(json, (node) => {
+      if (node.type === 'placeholder' && typeof node.attrs?.key === 'string') {
+        found.add(node.attrs.key);
+      }
+    });
+
+    return Array.from(found);
+  }, [editor?.state]);
+
+  const addRowHeader = () => {
+    setRowHeaders((prev) => [...prev, `Column ${prev.length + 1}`]);
+    setRowRows((prev) => prev.map((row) => [...row, '']));
+  };
+
+  const addDataRow = () => {
+    setRowRows((prev) => [...prev, Array.from({ length: rowHeaders.length }, () => '')]);
+  };
+
+  const addColumnName = () => {
+    setColNames((prev) => [...prev, `Column ${prev.length + 1}`]);
+    setColMatrix((prev) => prev.map((row) => [...row, '']));
+  };
+
+  const addColumnRowHeader = () => {
+    setColRowHeaders((prev) => [...prev, `Row ${prev.length + 1}`]);
+    setColMatrix((prev) => [...prev, Array.from({ length: colNames.length }, () => '')]);
+  };
+
   return (
     <div className={`pg-tiptap-wrapper${hasError ? ' pg-tiptap-error' : ''}`}>
-      {/* ── Toolbar ── */}
       <div className="pg-tiptap-toolbar" role="toolbar" aria-label="Editor toolbar">
-        {/* Text marks */}
         <button
           type="button"
           className={`pg-tb-btn${active('bold')}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleBold().run())}
-          title="Bold (Ctrl+B)"
-          aria-pressed={editor?.isActive('bold')}
+          title="Bold"
         >
           <Bold size={16} />
         </button>
@@ -144,8 +500,7 @@ export default function TemplateEditor({
           type="button"
           className={`pg-tb-btn${active('italic')}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleItalic().run())}
-          title="Italic (Ctrl+I)"
-          aria-pressed={editor?.isActive('italic')}
+          title="Italic"
         >
           <Italic size={16} />
         </button>
@@ -155,27 +510,29 @@ export default function TemplateEditor({
           className={`pg-tb-btn${active('strike')}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleStrike().run())}
           title="Strikethrough"
-          aria-pressed={editor?.isActive('strike')}
         >
           <Strikethrough size={16} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        {/* Block nodes */}
         <button
           type="button"
           className={`pg-tb-btn${active('heading', { level: 1 })}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())}
           title="Heading 1"
-        ><Heading1 size={16} /></button>
+        >
+          <Heading1 size={16} />
+        </button>
 
         <button
           type="button"
           className={`pg-tb-btn${active('heading', { level: 2 })}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())}
           title="Heading 2"
-        ><Heading2 size={16} /></button>
+        >
+          <Heading2 size={16} />
+        </button>
 
         <button
           type="button"
@@ -191,149 +548,374 @@ export default function TemplateEditor({
           className={`pg-tb-btn${active('orderedList')}`}
           onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())}
           title="Ordered list"
-        ><ListOrdered size={16} /></button>
+        >
+          <ListOrdered size={16} />
+        </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        {/* Undo / Redo */}
         <button
           type="button"
           className="pg-tb-btn"
           onMouseDown={cmd(() => editor?.chain().focus().undo().run())}
-          title="Undo (Ctrl+Z)"
+          title="Undo"
           disabled={!editor?.can().undo()}
-        ><Undo size={16} /></button>
+        >
+          <Undo size={16} />
+        </button>
 
         <button
           type="button"
           className="pg-tb-btn"
           onMouseDown={cmd(() => editor?.chain().focus().redo().run())}
-          title="Redo (Ctrl+Shift+Z)"
+          title="Redo"
           disabled={!editor?.can().redo()}
-        ><Redo size={16} /></button>
+        >
+          <Redo size={16} />
+        </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        {/* Insert placeholder — accent button + popover */}
-        <div className="pg-tb-placeholder-host">
-          <button
-            type="button"
-            className={`pg-tb-btn pg-tb-btn--accent${showKeyPopover ? ' pg-tb-active' : ''}`}
-            onMouseDown={cmd(() => {
-              setShowKeyPopover((v) => !v);
-              setKeyDraft('');
-              setKeyError('');
-            })}
-            title="Insert placeholder {{key}}"
-          >
-            <Braces size={16} />
-          </button>
+        <button type="button" className={`pg-tb-btn pg-tb-btn--accent${insertPanel === 'placeholder' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'placeholder' ? null : 'placeholder'); }} title="Insert typed placeholder">
+          <Braces size={16} />
+        </button>
 
-          {showKeyPopover && (
-            <div className="pg-key-popover" role="dialog" aria-label="Insert placeholder">
-              <p className="pg-key-popover-label">Placeholder key</p>
-              <p className="pg-key-popover-hint">
-                Will render as{' '}
-                <code className="pg-key-popover-code">
-                  {'{{'}
-                  {keyDraft.trim() || 'key'}
-                  {'}}'}
-                </code>
-                {' '}at generation
-              </p>
-              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                <input
-                  ref={keyInputRef}
-                  className={`pg-input${keyError ? ' error' : ''}`}
-                  style={{ fontSize: 12, padding: '6px 10px', flex: 1 }}
-                  placeholder="e.g. recipient_name"
-                  value={keyDraft}
-                  onChange={(e) => { setKeyDraft(e.target.value); setKeyError(''); }}
-                  onKeyDown={handleKeyInputKeyDown}
-                />
-                <button
-                  type="button"
-                  className="pg-btn-primary"
-                  style={{ fontSize: 12, padding: '6px 12px', flexShrink: 0 }}
-                  onClick={insertPlaceholder}
-                >
-                  Insert
-                </button>
+        <button type="button" className={`pg-tb-btn${insertPanel === 'image' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'image' ? null : 'image'); }} title="Insert image component">
+          <ImageIcon size={16} />
+        </button>
+
+        <button type="button" className={`pg-tb-btn${insertPanel === 'hyperlink' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'hyperlink' ? null : 'hyperlink'); }} title="Insert hyperlink component">
+          <Link size={16} />
+        </button>
+
+        <button type="button" className={`pg-tb-btn${insertPanel === 'list' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'list' ? null : 'list'); }} title="Insert list component">
+          <Box size={16} />
+        </button>
+
+        <button type="button" className={`pg-tb-btn${insertPanel === 'container' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'container' ? null : 'container'); }} title="Insert container component">
+          <Layers size={16} />
+        </button>
+
+        <button type="button" className={`pg-tb-btn${insertPanel === 'table' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'table' ? null : 'table'); }} title="Insert table component">
+          <Table size={16} />
+        </button>
+
+        <span className="pg-tb-sep" aria-hidden="true" />
+
+        <button
+          type="button"
+          className="pg-tb-btn pg-tb-btn--accent"
+          onMouseDown={cmd(openPreview)}
+          title="Preview document"
+        >
+          Preview
+        </button>
+      </div>
+
+      {insertPanel && (
+        <div className="pg-insert-panel">
+          {insertPanel === 'placeholder' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Key</label>
+                <input className="pg-input" value={phKey} onChange={(e) => setPhKey(e.target.value)} placeholder="recipient_name" />
               </div>
-              {keyError && (
-                <p className="pg-field-error" style={{ marginTop: 5 }}>{keyError}</p>
+              <div className="pg-insert-row">
+                <label className="pg-label">Schema kind</label>
+                <select className="pg-input" value={phKind} onChange={(e) => setPhKind(e.target.value as PlaceholderKind)}>
+                  <option value="string">string</option>
+                  <option value="integer">integer</option>
+                  <option value="image">image</option>
+                  <option value="hyperlink">hyperlink</option>
+                  <option value="list">list</option>
+                  <option value="container">container</option>
+                  <option value="table">table</option>
+                </select>
+              </div>
+
+              {phKind === 'list' && (
+                <div className="pg-insert-row">
+                  <label className="pg-label">List style</label>
+                  <select className="pg-input" value={phListStyle} onChange={(e) => setPhListStyle(e.target.value as ListStyle)}>
+                    <option value="bulleted">bulleted</option>
+                    <option value="numbered">numbered</option>
+                    <option value="plain">plain</option>
+                  </select>
+                </div>
               )}
-            </div>
+
+              {phKind === 'container' && (
+                <div className="pg-insert-row">
+                  <label className="pg-label">Container slots</label>
+                  <input className="pg-input" value={phContainerSlots} onChange={(e) => setPhContainerSlots(e.target.value)} placeholder="2" />
+                </div>
+              )}
+
+              {phKind === 'table' && (
+                <>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Table mode</label>
+                    <select className="pg-input" value={phTableMode} onChange={(e) => setPhTableMode(e.target.value as TableMode)}>
+                      <option value="row_data">row_data</option>
+                      <option value="column_data">column_data</option>
+                    </select>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Headers (comma separated)</label>
+                    <input className="pg-input" value={phTableHeaders} onChange={(e) => setPhTableHeaders(e.target.value)} placeholder="Item,Qty" />
+                  </div>
+                </>
+              )}
+
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertTypedPlaceholder}>Insert Placeholder</button>
+              </div>
+            </>
           )}
+
+          {insertPanel === 'image' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Image URL</label>
+                <input className="pg-input" value={imageSrc} onChange={(e) => setImageSrc(e.target.value)} />
+              </div>
+              <div className="pg-insert-row">
+                <label className="pg-label">Alt text</label>
+                <input className="pg-input" value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} />
+              </div>
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertImageComponent}>Insert Image</button>
+              </div>
+            </>
+          )}
+
+          {insertPanel === 'hyperlink' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Alias</label>
+                <input className="pg-input" value={linkAlias} onChange={(e) => setLinkAlias(e.target.value)} />
+              </div>
+              <div className="pg-insert-row">
+                <label className="pg-label">URL</label>
+                <input className="pg-input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
+              </div>
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertHyperlinkComponent}>Insert Hyperlink</button>
+              </div>
+            </>
+          )}
+
+          {insertPanel === 'list' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">List style</label>
+                <select className="pg-input" value={listStyle} onChange={(e) => setListStyle(e.target.value as ListStyle)}>
+                  <option value="bulleted">bulleted</option>
+                  <option value="numbered">numbered</option>
+                  <option value="plain">plain</option>
+                </select>
+              </div>
+              <div className="pg-insert-row">
+                <label className="pg-label">Items (one per line)</label>
+                <textarea className="pg-input" rows={4} value={listItemsText} onChange={(e) => setListItemsText(e.target.value)} />
+              </div>
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertListComponent}>Insert List</button>
+              </div>
+            </>
+          )}
+
+          {insertPanel === 'container' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Components (one per line)</label>
+                <textarea className="pg-input" rows={5} value={containerItemsText} onChange={(e) => setContainerItemsText(e.target.value)} />
+              </div>
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertContainerComponent}>Insert Container</button>
+              </div>
+            </>
+          )}
+
+          {insertPanel === 'table' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Mode</label>
+                <select className="pg-input" value={tableMode} onChange={(e) => setTableMode(e.target.value as TableMode)}>
+                  <option value="row_data">row_data</option>
+                  <option value="column_data">column_data</option>
+                </select>
+              </div>
+
+              <div className="pg-insert-row">
+                <label className="pg-label">Caption (optional)</label>
+                <input className="pg-input" value={tableCaption} onChange={(e) => setTableCaption(e.target.value)} />
+              </div>
+
+              {tableMode === 'row_data' ? (
+                <div className="pg-sheet-wrap">
+                  <div className="pg-sheet-toolbar">
+                    <button type="button" className="pg-btn-ghost" onClick={addRowHeader}>+ Column</button>
+                    <button type="button" className="pg-btn-ghost" onClick={addDataRow}>+ Row</button>
+                  </div>
+                  <table className="pg-sheet-table">
+                    <thead>
+                      <tr>
+                        {rowHeaders.map((header, cIdx) => (
+                          <th key={`rh-${cIdx}`}>
+                            <input
+                              className="pg-input"
+                              value={header}
+                              onChange={(e) => {
+                                const next = [...rowHeaders];
+                                next[cIdx] = e.target.value;
+                                setRowHeaders(next);
+                              }}
+                            />
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rowRows.map((row, rIdx) => (
+                        <tr key={`rr-${rIdx}`}>
+                          {rowHeaders.map((_, cIdx) => (
+                            <td key={`rc-${rIdx}-${cIdx}`}>
+                              <input
+                                className="pg-input"
+                                value={row[cIdx] ?? ''}
+                                onChange={(e) => {
+                                  const next = rowRows.map((r) => [...r]);
+                                  next[rIdx][cIdx] = e.target.value;
+                                  setRowRows(next);
+                                }}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="pg-sheet-wrap">
+                  <div className="pg-sheet-toolbar">
+                    <button type="button" className="pg-btn-ghost" onClick={addColumnName}>+ Column</button>
+                    <button type="button" className="pg-btn-ghost" onClick={addColumnRowHeader}>+ Row Header</button>
+                  </div>
+                  <table className="pg-sheet-table">
+                    <thead>
+                      <tr>
+                        <th>
+                          <span style={{ color: 'var(--pg-text-muted)', fontSize: '11px' }}>row \ col</span>
+                        </th>
+                        {colNames.map((name, cIdx) => (
+                          <th key={`cn-${cIdx}`}>
+                            <input
+                              className="pg-input"
+                              value={name}
+                              onChange={(e) => {
+                                const next = [...colNames];
+                                next[cIdx] = e.target.value;
+                                setColNames(next);
+                              }}
+                            />
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {colRowHeaders.map((rowHeader, rIdx) => (
+                        <tr key={`ch-${rIdx}`}>
+                          <th>
+                            <input
+                              className="pg-input"
+                              value={rowHeader}
+                              onChange={(e) => {
+                                const next = [...colRowHeaders];
+                                next[rIdx] = e.target.value;
+                                setColRowHeaders(next);
+                              }}
+                            />
+                          </th>
+                          {colNames.map((_, cIdx) => (
+                            <td key={`cc-${rIdx}-${cIdx}`}>
+                              <input
+                                className="pg-input"
+                                value={colMatrix[rIdx]?.[cIdx] ?? ''}
+                                onChange={(e) => {
+                                  const next = colMatrix.map((row) => [...row]);
+                                  if (!next[rIdx]) next[rIdx] = [];
+                                  next[rIdx][cIdx] = e.target.value;
+                                  setColMatrix(next);
+                                }}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertTableComponent}>Insert Table</button>
+              </div>
+            </>
+          )}
+
+          {insertError && <p className="pg-field-error">{insertError}</p>}
+        </div>
+      )}
+
+      <div className="pg-editor-layout">
+        <div className="pg-editor-pane">
+          <EditorContent editor={editor} className="pg-tiptap-content" />
         </div>
       </div>
 
-      {/* ── ProseMirror canvas ── */}
-      <EditorContent editor={editor} className="pg-tiptap-content" />
+      {isPreviewOpen && (
+        <div
+          className="pg-overlay"
+          onClick={(e) => e.target === e.currentTarget && setIsPreviewOpen(false)}
+        >
+          <div className="pg-modal pg-modal-xl" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
+            <div className="pg-modal-header">
+              <div>
+                <h2 className="pg-modal-title" id="preview-modal-title">Document Preview</h2>
+              </div>
+              <button className="pg-modal-close" onClick={() => setIsPreviewOpen(false)} aria-label="Close">✕</button>
+            </div>
+            <div className="pg-modal-body">
+              <div className="pg-preview-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* ── Footer — shows placeholder chips detected in doc ── */}
-      <EditorPlaceholderFooter editor={editor} />
+      <div className="pg-tiptap-footer">
+        <span className="pg-tiptap-footer-label">Placeholders:</span>
+        {placeholderKeys.length === 0 && <span style={{ color: 'var(--pg-text-muted)', fontSize: '11px' }}>none</span>}
+        {placeholderKeys.map((k) => (
+          <span key={k} className="pg-key-chip">{`{{${k}}}`}</span>
+        ))}
+      </div>
+
+      {validationErrors.length > 0 && (
+        <div className="pg-validation-summary">
+          <p className="pg-validation-title">Validation summary</p>
+          {validationErrors.map((error, index) => (
+            <p key={`ve-${index}`} className="pg-validation-item">{error}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
-}
-
-/**
- * A sub-component dedicated purely to displaying detected operational dynamic target templates
- * embedded directly within the overarching document body through traversal.
- * @param editor The bound TipTap editor scope defining the primary mutation tree state space.
- */
-function EditorPlaceholderFooter({ editor }: { editor: ReturnType<typeof useEditor> | null }) {
-  const [keys, setKeys] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!editor) return;
-
-    // Core event handler attached to TipTap lifecycle querying active document layout state
-    const update = () => {
-      // Local accumulator filtering off duplicate nodes tracking identical data targets
-      const found = new Set<string>();
-      const json  = editor.getJSON();
-      
-      // Perform a full AST traversal inspecting all sub-elements for our placeholder type
-      walkTiptapJson(json, (node) => {
-        if (node.type === 'placeholder' && node.attrs?.key) {
-          found.add(node.attrs.key as string);
-        }
-      });
-      // Synchronize isolated component scope
-      setKeys(Array.from(found));
-    };
-
-    update();
-    // Subscribe and strictly manage memory bounds through unmounting cleanup callbacks
-    editor.on('update', update);
-    return () => { editor.off('update', update); };
-  }, [editor]);
-
-  if (keys.length === 0) return null;
-
-  return (
-    <div className="pg-tiptap-footer">
-      <span className="pg-tiptap-footer-label">Placeholders detected:</span>
-      {keys.map((k) => (
-        <span key={k} className="pg-key-chip">{`{{${k}}}`}</span>
-      ))}
-    </div>
-  );
-}
-
-/**
- * Progressively recursive helper loop iterating exclusively onto compatible mapped JSON child
- * elements extracting properties targeting deeply nested layouts seamlessly within Tiptap.
- * @param node Actively reviewed single Document Element mapped node properties map.
- * @param visit Supplied functionality trigger execution evaluating found valid node scopes.
- */
-function walkTiptapJson(
-  node: Record<string, any>,
-  visit: (n: Record<string, any>) => void
-) {
-  visit(node);
-  if (Array.isArray(node.content)) {
-    node.content.forEach((child: Record<string, any>) => walkTiptapJson(child, visit));
-  }
 }
