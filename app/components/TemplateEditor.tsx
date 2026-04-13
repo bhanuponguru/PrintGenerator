@@ -2,24 +2,39 @@
 
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { Underline } from '@tiptap/extension-underline';
+import { TextAlign } from '@tiptap/extension-text-align';
+import { TextStyle } from '@tiptap/extension-text-style';
+import { Color } from '@tiptap/extension-color';
+import { Table } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { Placeholder as TiptapPlaceholder } from '@tiptap/extension-placeholder';
 import { generateHTML } from '@tiptap/html';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Bold,
   Italic,
+  Underline as UnderlineIcon,
   Strikethrough,
   Heading1,
   Heading2,
+  Heading3,
   List,
   ListOrdered,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
   Undo,
   Redo,
   Braces,
   Image as ImageIcon,
   Link,
-  Box,
-  Table,
+  ListChecks,
   Layers,
+  Grid,
   File,
   PanelTop,
   PanelBottom,
@@ -28,6 +43,11 @@ import {
   ArrowDown,
   X,
   Plus,
+  Baseline,
+  Minus,
+  RowsIcon,
+  ColumnsIcon,
+  Trash2,
 } from 'lucide-react';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
@@ -50,7 +70,7 @@ import {
   validateHeaderAttrs,
   validateFooterAttrs,
 } from '@/lib/tiptap/extensions';
-import { ComponentTypeSchema, ListStyle, TableMode } from '@/types/template';
+import { ComponentTypeSchema, ListStyle, TableMode, ComponentValue } from '@/types/template';
 
 interface TemplateEditorProps {
   initialContent?: Record<string, any>;
@@ -67,25 +87,22 @@ type AnyChildType = 'string' | 'integer' | 'image' | 'hyperlink' | 'container' |
 interface ChildEntry {
   id: number;
   type: AnyChildType;
-  value: unknown; // string, {src,alt}, {alias,url}, {components:[]}, {items:[]}, table data
-  schema: ComponentTypeSchema; // the schema for this child
+  value: unknown;
+  schema: ComponentTypeSchema;
 }
 
 interface ModalStackEntry {
   id: number;
   target: SubmodalTarget;
-  label: string; // breadcrumb
+  label: string;
   children: ChildEntry[];
   nextChildId: number;
   error: string;
-  // Page-specific
   pageSize?: string;
   pageOrientation?: 'portrait' | 'landscape';
   pageNumber?: number;
-  // List-specific
   listStyle?: ListStyle;
   listItemType?: AnyChildType;
-  // Table-specific
   tableMode?: TableMode;
   tableCaption?: string;
   tableRowHeaders?: string[];
@@ -93,7 +110,6 @@ interface ModalStackEntry {
   tableColRowHeaders?: string[];
   tableColNames?: string[];
   tableColMatrix?: string[][];
-  // Callback when this modal confirms
   onConfirm: (children: ChildEntry[], extra?: Record<string, unknown>) => void;
 }
 
@@ -144,7 +160,6 @@ const ALL_CHILD_TYPES: { value: AnyChildType; label: string }[] = [
 
 const KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
-/** Walks a TipTap document tree so validation can inspect every node. */
 function walkTiptapJson(node: Record<string, any>, visit: (n: Record<string, any>) => void) {
   visit(node);
   if (Array.isArray(node.content)) {
@@ -157,118 +172,62 @@ function unique(items: string[]): string[] {
 }
 
 function parseCommaSeparated(input: string): string[] {
-  return input
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-
-function parseLineItems(input: string): string[] {
-  return input
-    .split(/\r?\n/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+  return input.split(',').map(x => x.trim()).filter(Boolean);
 }
 
 function normalizeListStyle(style: string): ListStyle {
   return style === 'numbered' || style === 'plain' ? style : 'bulleted';
 }
 
-/** Returns a sensible default schema for the selected placeholder kind. */
 function defaultSchemaForKind(kind: PlaceholderKind): ComponentTypeSchema {
   if (kind === 'string' || kind === 'integer' || kind === 'image' || kind === 'hyperlink') {
     return { kind } as ComponentTypeSchema;
   }
-
-  if (kind === 'list') {
-    return {
-      kind: 'list',
-      item_type: { kind: 'string' },
-    };
-  }
-
-  if (kind === 'container') {
-    return {
-      kind: 'container',
-      component_types: [{ kind: 'string' }],
-    };
-  }
-
+  if (kind === 'list') return { kind: 'list', item_type: { kind: 'string' } };
+  if (kind === 'container') return { kind: 'container', component_types: [{ kind: 'string' }] };
   return { kind: 'table' };
 }
 
 function collectValidationErrors(documentJson: Record<string, any>): string[] {
   const errors: string[] = [];
-
-  /** Enforce the structural contract for each inserted node type. */
   walkTiptapJson(documentJson, (node) => {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
-
     const attrs = (node.attrs || {}) as Record<string, unknown>;
 
     if (node.type === 'placeholder') {
       const err = validatePlaceholderAttrs(attrs);
-      if (err) {
-        errors.push(`placeholder: ${err}`);
-      }
-
-      if (attrs.kind === 'list' && (attrs.item_kind !== 'string' && attrs.item_kind !== 'integer' && attrs.item_kind !== 'image' && attrs.item_kind !== 'hyperlink')) {
+      if (err) errors.push(`placeholder: ${err}`);
+      if (attrs.kind === 'list' && attrs.item_kind !== 'string' && attrs.item_kind !== 'integer' && attrs.item_kind !== 'image' && attrs.item_kind !== 'hyperlink') {
         errors.push('placeholder: list placeholders require item_kind');
       }
-
       if (attrs.kind === 'container' && (!Array.isArray(attrs.component_kinds) || attrs.component_kinds.length === 0)) {
         errors.push('placeholder: container placeholders require component_kinds');
       }
-
       const key = typeof attrs.key === 'string' ? attrs.key : '';
-      if (!KEY_RE.test(key)) {
-        errors.push(`placeholder: invalid key '${key}'`);
-      }
+      if (!KEY_RE.test(key)) errors.push(`placeholder: invalid key '${key}'`);
     }
-
-    if (node.type === 'imageComponent') {
-      const err = validateImageAttrs(attrs);
-      if (err) errors.push(`imageComponent: ${err}`);
-    }
-
-    if (node.type === 'hyperlinkComponent') {
-      const err = validateHyperlinkAttrs(attrs);
-      if (err) errors.push(`hyperlinkComponent: ${err}`);
-    }
-
-    if (node.type === 'listComponent') {
-      const err = validateListAttrs(attrs);
-      if (err) errors.push(`listComponent: ${err}`);
-    }
-
-    if (node.type === 'containerComponent') {
-      const err = validateContainerAttrs(attrs);
-      if (err) errors.push(`containerComponent: ${err}`);
-    }
-
-    if (node.type === 'tableComponent') {
-      const err = validateTableAttrs(attrs);
-      if (err) errors.push(`tableComponent: ${err}`);
-    }
-
-    if (node.type === 'pageComponent') {
-      const err = validatePageAttrs(attrs);
-      if (err) errors.push(`pageComponent: ${err}`);
-    }
-
-    if (node.type === 'headerComponent') {
-      const err = validateHeaderAttrs(attrs);
-      if (err) errors.push(`headerComponent: ${err}`);
-    }
-
-    if (node.type === 'footerComponent') {
-      const err = validateFooterAttrs(attrs);
-      if (err) errors.push(`footerComponent: ${err}`);
-    }
+    if (node.type === 'imageComponent') { const err = validateImageAttrs(attrs); if (err) errors.push(`imageComponent: ${err}`); }
+    if (node.type === 'hyperlinkComponent') { const err = validateHyperlinkAttrs(attrs); if (err) errors.push(`hyperlinkComponent: ${err}`); }
+    if (node.type === 'listComponent') { const err = validateListAttrs(attrs); if (err) errors.push(`listComponent: ${err}`); }
+    if (node.type === 'containerComponent') { const err = validateContainerAttrs(attrs); if (err) errors.push(`containerComponent: ${err}`); }
+    if (node.type === 'tableComponent') { const err = validateTableAttrs(attrs); if (err) errors.push(`tableComponent: ${err}`); }
+    if (node.type === 'pageComponent') { const err = validatePageAttrs(attrs); if (err) errors.push(`pageComponent: ${err}`); }
+    if (node.type === 'headerComponent') { const err = validateHeaderAttrs(attrs); if (err) errors.push(`headerComponent: ${err}`); }
+    if (node.type === 'footerComponent') { const err = validateFooterAttrs(attrs); if (err) errors.push(`footerComponent: ${err}`); }
   });
-
   return unique(errors);
 }
+
+// ── Color palette ──────────────────────────────────────────────────────────
+const COLOR_PALETTE = [
+  '#000000','#434343','#666666','#999999','#b7b7b7','#cccccc','#d9d9d9','#ffffff',
+  '#ff0000','#ff9900','#ffff00','#00ff00','#00ffff','#4a86e8','#0000ff','#9900ff',
+  '#e6b8a2','#f4cccc','#fce5cd','#fff2cc','#d9ead3','#d0e0e3','#c9daf8','#cfe2f3',
+  '#ea9999','#f9cb9c','#ffe599','#b6d7a8','#a2c4c9','#a4c2f4','#9fc5e8','#b4a7d6',
+  '#e06666','#f6b26b','#ffd966','#93c47d','#76a5af','#6d9eeb','#6fa8dc','#8e7cc3',
+  '#cc0000','#e69138','#f1c232','#6aa84f','#45818e','#3c78d8','#3d85c8','#674ea7',
+  '#990000','#b45309','#bf9000','#38761d','#134f5c','#1155cc','#0b5394','#351c75',
+];
 
 export default function TemplateEditor({
   initialContent,
@@ -276,14 +235,22 @@ export default function TemplateEditor({
   onValidationChange,
   hasError = false,
 }: TemplateEditorProps) {
-  /** Toolbar panel state for the various insert dialogs. */
   const [insertPanel, setInsertPanel] = useState<InsertPanel>(null);
-  /** Live validation state shown to the user and bubbled to the parent. */
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
 
-  /** Placeholder insertion form state. */
+  // Color picker state
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [activeColor, setActiveColor] = useState('#000000');
+  const colorBtnRef = useRef<HTMLDivElement>(null);
+
+  // Table grid picker state
+  const [showTablePicker, setShowTablePicker] = useState(false);
+  const [tableHover, setTableHover] = useState({ rows: 0, cols: 0 });
+  const tableBtnRef = useRef<HTMLDivElement>(null);
+
+  // Placeholder insertion form state
   const [phKey, setPhKey] = useState('');
   const [phKind, setPhKind] = useState<PlaceholderKind>('string');
   const [phListStyle, setPhListStyle] = useState<ListStyle>('bulleted');
@@ -296,26 +263,24 @@ export default function TemplateEditor({
   const [phContainerKinds, setPhContainerKinds] = useState<Record<number, PlaceholderKind>>({});
   const [insertError, setInsertError] = useState('');
 
-  /** Component insertion form state. */
+  // Image component state
   const [imageSrc, setImageSrc] = useState('https://example.com/logo.png');
   const [imageAlt, setImageAlt] = useState('Image');
+  const [imagePreviewError, setImagePreviewError] = useState(false);
 
+  // Hyperlink state
   const [linkAlias, setLinkAlias] = useState('Docs');
   const [linkUrl, setLinkUrl] = useState('https://example.com/docs');
 
-  /** Submodal state — modal stack for recursive editing. */
+  // Submodal state
   const [modalStack, setModalStack] = useState<ModalStackEntry[]>([]);
   const [modalNextId, setModalNextId] = useState(1);
-  // Per-modal form state (for the primitive add-child form on the topmost modal)
   const [addChildType, setAddChildType] = useState<AnyChildType>('string');
   const [addChildValue, setAddChildValue] = useState('');
   const [addChildImageSrc, setAddChildImageSrc] = useState('https://example.com/logo.png');
   const [addChildImageAlt, setAddChildImageAlt] = useState('Image');
   const [addChildLinkAlias, setAddChildLinkAlias] = useState('Link');
   const [addChildLinkUrl, setAddChildLinkUrl] = useState('https://example.com');
-  // List-specific (when adding a list child)
-  const [addListItemType, setAddListItemType] = useState<AnyChildType>('string');
-  const [addListStyle, setAddListStyle] = useState<ListStyle>('bulleted');
 
   const editor = useEditor({
     extensions: [
@@ -324,27 +289,28 @@ export default function TemplateEditor({
         blockquote: false,
         horizontalRule: false,
       }),
+      Underline,
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      TextStyle,
+      Color,
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      TiptapPlaceholder.configure({
+        placeholder: 'Start typing your document...',
+      }),
       Placeholder,
       ...ComponentExtensions,
     ],
+    // FIX #1: Default to a plain paragraph, NOT a pageComponent atom
     content: initialContent ?? {
       type: 'doc',
-      content: [
-        {
-          type: 'pageComponent',
-          attrs: {
-            pageNumber: 1,
-            size: 'A4',
-            orientation: 'portrait',
-            value: { components: [] }
-          }
-        }
-      ],
+      content: [{ type: 'paragraph' }],
     },
     onUpdate({ editor: ed }) {
       const json = ed.getJSON();
       onChange(json);
-
       const errors = collectValidationErrors(json as Record<string, any>);
       setValidationErrors(errors);
       onValidationChange?.({ isValid: errors.length === 0, errors });
@@ -358,11 +324,24 @@ export default function TemplateEditor({
     },
   });
 
-  useEffect(() => () => { editor?.destroy(); }, [editor]);
+  // Close popups on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (colorBtnRef.current && !colorBtnRef.current.contains(e.target as Node)) {
+        setShowColorPicker(false);
+      }
+      if (tableBtnRef.current && !tableBtnRef.current.contains(e.target as Node)) {
+        setShowTablePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const active = (name: string, opts?: object) =>
     editor?.isActive(name, opts) ? ' pg-tb-active' : '';
 
+  // onMouseDown prevents editor from losing focus
   const cmd = (fn: () => void) => (e: React.MouseEvent) => {
     e.preventDefault();
     fn();
@@ -370,16 +349,25 @@ export default function TemplateEditor({
 
   const openPreview = useCallback(() => {
     if (!editor) return;
-
     try {
-      setPreviewHtml(generateHTML(editor.getJSON(), [StarterKit, Placeholder, ...ComponentExtensions]));
+      setPreviewHtml(generateHTML(editor.getJSON(), [
+        StarterKit, Underline, TextAlign.configure({ types: ['heading', 'paragraph'] }),
+        TextStyle, Color, Table, TableRow, TableHeader, TableCell,
+        TiptapPlaceholder, Placeholder, ...ComponentExtensions,
+      ]));
     } catch {
       setPreviewHtml('<p>Unable to render preview.</p>');
     }
-
     setIsPreviewOpen(true);
   }, [editor]);
 
+  // ── Insert table inline via grid picker ─────────────────────────────────
+  const insertTable = useCallback((rows: number, cols: number) => {
+    editor?.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
+    setShowTablePicker(false);
+  }, [editor]);
+
+  // ── Insert typed placeholder ─────────────────────────────────────────────
   const insertTypedPlaceholder = useCallback(() => {
     const key = phKey.trim().replace(/\s+/g, '_');
     if (!key || !KEY_RE.test(key)) {
@@ -387,11 +375,7 @@ export default function TemplateEditor({
       return;
     }
 
-    const attrs: Record<string, unknown> = {
-      key,
-      kind: phKind,
-      value: '',
-    };
+    const attrs: Record<string, unknown> = { key, kind: phKind, value: '' };
 
     if (phKind === 'list') {
       attrs.style = normalizeListStyle(phListStyle);
@@ -401,51 +385,31 @@ export default function TemplateEditor({
     if (phKind === 'container') {
       const slots = Number(phContainerSlots);
       const count = Number.isFinite(slots) && slots > 0 ? Math.floor(slots) : 2;
-      attrs.component_kinds = Array.from({ length: count }, (_, index) => phContainerKinds[index] || 'string');
-    }
-
-    if (phKind === 'table' && parseCommaSeparated(phTableHeaders).length === 0) {
-      setInsertError('Table placeholders require at least one header.');
-      return;
+      attrs.component_kinds = Array.from({ length: count }, (_, i) => phContainerKinds[i] || 'string');
     }
 
     if (phKind === 'table') {
+      if (parseCommaSeparated(phTableHeaders).length === 0) {
+        setInsertError('Table placeholders require at least one header.');
+        return;
+      }
       const headers = parseCommaSeparated(phTableHeaders);
       attrs.mode = phTableMode;
       attrs.headers = headers;
-
       if (phTableMode === 'row_data') {
-        attrs.column_types = Object.fromEntries(
-          headers.map((header) => [
-            header,
-            defaultSchemaForKind(phTableColumnKinds[header] || 'string'),
-          ])
-        );
+        attrs.column_types = Object.fromEntries(headers.map(h => [h, defaultSchemaForKind(phTableColumnKinds[h] || 'string')]));
       } else {
-        attrs.row_types = Object.fromEntries(
-          headers.map((header) => [
-            header,
-            defaultSchemaForKind(phTableRowKinds[header] || 'string'),
-          ])
-        );
+        attrs.row_types = Object.fromEntries(headers.map(h => [h, defaultSchemaForKind(phTableRowKinds[h] || 'string')]));
       }
     }
 
-    const result = editor
-      ?.chain()
-      .focus()
-      .insertContent({
-        type: 'placeholder',
-        attrs,
-        content: [{ type: 'text', text: key }],
-      })
-      .run();
+    const result = editor?.chain().focus().insertContent({
+      type: 'placeholder',
+      attrs,
+      content: [{ type: 'text', text: key }],
+    }).run();
 
-    if (!result) {
-      setInsertError('Failed to insert placeholder.');
-      return;
-    }
-
+    if (!result) { setInsertError('Failed to insert placeholder.'); return; }
     setInsertError('');
     setPhKey('');
     setInsertPanel(null);
@@ -453,13 +417,7 @@ export default function TemplateEditor({
 
   const insertImageComponent = useCallback(() => {
     try {
-      const node = createImageComponent(
-        {
-          src: imageSrc.trim(),
-          alt: imageAlt.trim(),
-        },
-        {}
-      );
+      const node = createImageComponent({ src: imageSrc.trim(), alt: imageAlt.trim() }, {});
       editor?.chain().focus().insertContent(node as any).run();
       setInsertError('');
       setInsertPanel(null);
@@ -470,13 +428,7 @@ export default function TemplateEditor({
 
   const insertHyperlinkComponent = useCallback(() => {
     try {
-      const node = createHyperlinkComponent(
-        {
-          alias: linkAlias.trim(),
-          url: linkUrl.trim(),
-        },
-        {}
-      );
+      const node = createHyperlinkComponent({ alias: linkAlias.trim(), url: linkUrl.trim() }, {});
       editor?.chain().focus().insertContent(node as any).run();
       setInsertError('');
       setInsertPanel(null);
@@ -485,9 +437,7 @@ export default function TemplateEditor({
     }
   }, [editor, linkAlias, linkUrl]);
 
-  // Legacy inline list/table components handled by the full modal stack
-
-  /** ── Modal stack helpers ─────────────────────────────────── */
+  // ── Modal stack helpers ──────────────────────────────────────────────────
   const topModal = modalStack.length > 0 ? modalStack[modalStack.length - 1] : null;
   const submodalOpen = modalStack.length > 0;
 
@@ -541,8 +491,9 @@ export default function TemplateEditor({
             const node = createFooterComponent({ components }, { component_types: componentTypes });
             editor?.chain().focus().insertContent(node as any).run();
           } else if (target === 'list') {
+            // FIX: Correct list insertion (was duplicated and incorrect)
             const items = components;
-            const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' };
+            const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' as const };
             const node = createListComponent(
               { items, style: (extra?.listStyle as ListStyle) || 'bulleted' } as any,
               { item_type: itemSchema as ComponentTypeSchema }
@@ -552,64 +503,31 @@ export default function TemplateEditor({
             const tableMode = (extra?.tableMode as TableMode) ?? 'row_data';
             const tableCaption = extra?.tableCaption as string | undefined;
             if (tableMode === 'row_data') {
-              const headers = (extra?.tableRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
+              const headers = (extra?.tableRowHeaders as string[] ?? []).map(h => h.trim()).filter(Boolean);
               const rowRows = extra?.tableRowRows as string[][] ?? [];
-              const rows = rowRows.map((row) => {
-                const rowObj: Record<string, unknown> = {};
-                headers.forEach((header, index) => { rowObj[header] = row[index] ?? ''; });
-                return rowObj;
+              const rows = rowRows.map(row => {
+                const obj: Record<string, unknown> = {};
+                headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
+                return obj;
               });
               const node = createTableComponent({ mode: 'row_data', rows, caption: tableCaption } as any, { headers });
               editor?.chain().focus().insertContent(node as any).run();
             } else {
-              const headers = (extra?.tableColRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
+              const headers = (extra?.tableColRowHeaders as string[] ?? []).map(h => h.trim()).filter(Boolean);
               const colNames = extra?.tableColNames as string[] ?? [];
               const colMatrix = extra?.tableColMatrix as string[][] ?? [];
               const columns = colNames.map((name, colIdx) => {
-                const vals = colMatrix.map((row) => row[colIdx] ?? '');
+                const vals = colMatrix.map(row => row[colIdx] ?? '');
                 return [name, ...vals];
               });
               const node = createTableComponent({ mode: 'column_data', columns, caption: tableCaption } as any, { headers });
               editor?.chain().focus().insertContent(node as any).run();
             }
-          } else if (target === 'list') {
-            const items = children.map((c) => childToComponentValue(c));
-            const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' };
-            const node = createListComponent(
-              { items, style: (extra?.listStyle as ListStyle) || 'bulleted' },
-              { item_type: itemSchema as ComponentTypeSchema }
-            );
-            editor?.chain().focus().insertContent(node as any).run();
-          } else if (target === 'table') {
-            const tableMode = extra?.tableMode as TableMode ?? 'row_data';
-            const tableCaption = extra?.tableCaption as string | undefined;
-            if (tableMode === 'row_data') {
-              const headers = (extra?.tableRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
-              const rowRows = extra?.tableRowRows as string[][] ?? [];
-              const rows = rowRows.map((row) => {
-                const rowObj: Record<string, unknown> = {};
-                headers.forEach((header, index) => { rowObj[header] = row[index] ?? ''; });
-                return rowObj;
-              });
-              const node = createTableComponent({ mode: 'row_data', rows, caption: tableCaption }, { headers });
-              editor?.chain().focus().insertContent(node as any).run();
-            } else {
-              const headers = (extra?.tableColRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
-              const colNames = extra?.tableColNames as string[] ?? [];
-              const colMatrix = extra?.tableColMatrix as string[][] ?? [];
-              const columns = colNames.map((name, colIdx) => {
-                const vals = colMatrix.map((row) => row[colIdx] ?? '');
-                return [name, ...vals];
-              });
-              const node = createTableComponent({ mode: 'column_data', columns, caption: tableCaption }, { headers });
-              editor?.chain().focus().insertContent(node as any).run();
-            }
           }
-        } catch (err) {
+        } catch {
           // error handled at modal level
         }
       },
-      // extra initial state per target
       ...(target === 'page' ? { pageSize: 'A4', pageOrientation: 'portrait' as const, pageNumber: 1 } : {}),
       ...(target === 'list' ? { listStyle: 'bulleted' as const, listItemType: 'string' as const } : {}),
       ...(target === 'table' ? {
@@ -624,37 +542,26 @@ export default function TemplateEditor({
     });
   }, [editor, pushModal]);
 
-  const closeSubmodal = useCallback(() => {
-    setModalStack([]);
-  }, []);
+  const closeSubmodal = useCallback(() => { setModalStack([]); }, []);
 
   const addPrimitiveChild = useCallback(() => {
     let value: unknown;
     let schema: ComponentTypeSchema;
 
     if (addChildType === 'string' || addChildType === 'integer') {
-      if (!addChildValue.trim()) {
-        updateTopModal(m => ({ ...m, error: 'Value cannot be empty.' }));
-        return;
-      }
+      if (!addChildValue.trim()) { updateTopModal(m => ({ ...m, error: 'Value cannot be empty.' })); return; }
       value = addChildValue.trim();
       schema = { kind: addChildType } as ComponentTypeSchema;
     } else if (addChildType === 'image') {
-      if (!addChildImageSrc.trim()) {
-        updateTopModal(m => ({ ...m, error: 'Image URL cannot be empty.' }));
-        return;
-      }
+      if (!addChildImageSrc.trim()) { updateTopModal(m => ({ ...m, error: 'Image URL cannot be empty.' })); return; }
       value = { src: addChildImageSrc.trim(), alt: addChildImageAlt.trim() };
       schema = { kind: 'image' };
     } else if (addChildType === 'hyperlink') {
-      if (!addChildLinkUrl.trim()) {
-        updateTopModal(m => ({ ...m, error: 'Link URL cannot be empty.' }));
-        return;
-      }
+      if (!addChildLinkUrl.trim()) { updateTopModal(m => ({ ...m, error: 'Link URL cannot be empty.' })); return; }
       value = { alias: addChildLinkAlias.trim(), url: addChildLinkUrl.trim() };
       schema = { kind: 'hyperlink' };
     } else {
-      return; // complex types handled by pushing a new modal
+      return;
     }
 
     updateTopModal(m => ({
@@ -688,40 +595,28 @@ export default function TemplateEditor({
         },
       });
     } else if (type === 'list') {
-      // For list: push a modal that collects list items
+      // FIX #3: Correct list child modal — was referencing `extra` (out of scope) and creating a table child
       pushModal({
-        target: 'container', // reuse container-like UI for collecting items
+        target: 'list',
         label: `${parentLabel} > List #${childIdx}`,
-        onConfirm: (children) => {
+        listStyle: 'bulleted',
+        onConfirm: (children, extra) => {
           const items = children.map(c => childToComponentValue(c));
           const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' as const };
-          const tableMode = children[0]?.value && typeof children[0].value === 'object' && 'mode' in children[0].value ? (children[0].value as any).mode : 'row_data';
-
-          let tableValue: unknown;
-          if (tableMode === 'row_data') {
-            const headers = extra?.tableRowHeaders as string[] ?? [];
-            const rowRows = extra?.tableRowRows as string[][] ?? [];
-            const rows = rowRows.map((row) => {
-              const rowObj: Record<string, unknown> = {};
-              headers.forEach((h, i) => { rowObj[h] = row[i] ?? ''; });
-              return rowObj;
-            });
-            tableValue = { rows, mode: 'row_data', caption: extra?.tableCaption };
-          } else {
-            const headers = extra?.tableColRowHeaders as string[] ?? [];
-            const colNames = extra?.tableColNames as string[] ?? [];
-            const colMatrix = extra?.tableColMatrix as string[][] ?? [];
-            const columns = colNames.map((name, colIdx) => [name, ...colMatrix.map(r => r[colIdx] ?? '')]);
-            tableValue = { columns, mode: 'column_data', caption: extra?.tableCaption };
-          }
-
+          const listValue = { items, style: (extra?.listStyle as ListStyle) || 'bulleted' };
           updateTopModal(m => ({
             ...m,
-            children: [...m.children, { id: m.nextChildId, type: 'table', value: tableValue, schema: { kind: 'table' } }],
+            children: [...m.children, { id: m.nextChildId, type: 'list', value: listValue, schema: { kind: 'list', item_type: itemSchema as ComponentTypeSchema } }],
             nextChildId: m.nextChildId + 1,
             error: '',
           }));
         },
+      });
+    } else if (type === 'table') {
+      // FIX #12: Table case was completely missing from addComplexChild
+      pushModal({
+        target: 'table',
+        label: `${parentLabel} > Table #${childIdx}`,
         tableMode: 'row_data',
         tableCaption: '',
         tableRowHeaders: ['Item', 'Qty'],
@@ -729,6 +624,33 @@ export default function TemplateEditor({
         tableColRowHeaders: ['Q1', 'Q2'],
         tableColNames: ['Sales'],
         tableColMatrix: [['10'], ['12']],
+        onConfirm: (_, extra) => {
+          const tableMode = (extra?.tableMode as TableMode) ?? 'row_data';
+          const tableCaption = extra?.tableCaption as string | undefined;
+          let tableValue: unknown;
+          if (tableMode === 'row_data') {
+            const headers = (extra?.tableRowHeaders as string[] ?? []).map(h => h.trim()).filter(Boolean);
+            const rowRows = extra?.tableRowRows as string[][] ?? [];
+            const rows = rowRows.map(row => {
+              const obj: Record<string, unknown> = {};
+              headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
+              return obj;
+            });
+            tableValue = { rows, mode: 'row_data', caption: tableCaption };
+          } else {
+            const headers = extra?.tableColRowHeaders as string[] ?? [];
+            const colNames = extra?.tableColNames as string[] ?? [];
+            const colMatrix = extra?.tableColMatrix as string[][] ?? [];
+            const columns = colNames.map((name, colIdx) => [name, ...colMatrix.map(r => r[colIdx] ?? '')]);
+            tableValue = { columns, mode: 'column_data', caption: tableCaption };
+          }
+          updateTopModal(m => ({
+            ...m,
+            children: [...m.children, { id: m.nextChildId, type: 'table', value: tableValue, schema: { kind: 'table' } }],
+            nextChildId: m.nextChildId + 1,
+            error: '',
+          }));
+        },
       });
     }
   }, [topModal, pushModal, updateTopModal]);
@@ -751,7 +673,9 @@ export default function TemplateEditor({
 
   const confirmTopModal = useCallback(() => {
     if (!topModal) return;
-    if (topModal.children.length === 0) {
+    // FIX #27: Only require children for container/list — page/header/footer can be empty
+    const requiresChildren = topModal.target === 'container' || topModal.target === 'list';
+    if (requiresChildren && topModal.children.length === 0) {
       updateTopModal(m => ({ ...m, error: 'Add at least one component.' }));
       return;
     }
@@ -778,10 +702,8 @@ export default function TemplateEditor({
     editor?.chain().focus().insertContent({ type: 'pageBreakComponent' }).run();
   }, [editor]);
 
-  /** Extracts the set of placeholder keys present in the current editor state. */
   const placeholderKeys = useMemo(() => {
     if (!editor) return [] as string[];
-
     const found = new Set<string>();
     const json = editor.getJSON() as Record<string, any>;
     walkTiptapJson(json, (node) => {
@@ -789,158 +711,216 @@ export default function TemplateEditor({
         found.add(node.attrs.key);
       }
     });
-
     return Array.from(found);
   }, [editor?.state]);
 
-  // Legacy inline spreadsheet helpers removed in favor of topModal updates
+  // Word count
+  const wordCount = useMemo(() => {
+    if (!editor) return 0;
+    const text = editor.getText();
+    if (!text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  }, [editor?.state]);
 
   return (
     <div className={`pg-tiptap-wrapper${hasError ? ' pg-tiptap-error' : ''}`}>
+      {/* ── Toolbar ─────────────────────────────────────────── */}
       <div className="pg-tiptap-toolbar" role="toolbar" aria-label="Editor toolbar">
-        <button
-          type="button"
-          className={`pg-tb-btn${active('bold')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleBold().run())}
-          title="Bold"
-        >
-          <Bold size={16} />
+        {/* Text formatting group */}
+        <button type="button" className={`pg-tb-btn${active('bold')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleBold().run())} title="Bold (Ctrl+B)">
+          <Bold size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('italic')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleItalic().run())} title="Italic (Ctrl+I)">
+          <Italic size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('underline')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleUnderline().run())} title="Underline (Ctrl+U)">
+          <UnderlineIcon size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('strike')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleStrike().run())} title="Strikethrough">
+          <Strikethrough size={15} />
         </button>
 
-        <button
-          type="button"
-          className={`pg-tb-btn${active('italic')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleItalic().run())}
-          title="Italic"
-        >
-          <Italic size={16} />
-        </button>
+        {/* Text color */}
+        <div className="pg-color-btn-strip" ref={colorBtnRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className="pg-tb-btn"
+            onMouseDown={(e) => { e.preventDefault(); setShowColorPicker(v => !v); }}
+            title="Text color"
+          >
+            <Baseline size={15} />
+            <span className="pg-tb-color-bar" style={{ background: activeColor }} />
+          </button>
+          {showColorPicker && (
+            <div className="pg-color-panel">
+              <div className="pg-color-grid">
+                {COLOR_PALETTE.map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    className="pg-color-swatch"
+                    style={{ background: color }}
+                    title={color}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setActiveColor(color);
+                      editor?.chain().focus().setColor(color).run();
+                      setShowColorPicker(false);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
-        <button
-          type="button"
-          className={`pg-tb-btn${active('strike')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleStrike().run())}
-          title="Strikethrough"
-        >
-          <Strikethrough size={16} />
+        <span className="pg-tb-sep" aria-hidden="true" />
+
+        {/* Heading group */}
+        <button type="button" className={`pg-tb-btn${active('heading', { level: 1 })}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())} title="Heading 1">
+          <Heading1 size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('heading', { level: 2 })}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())} title="Heading 2">
+          <Heading2 size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('heading', { level: 3 })}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 3 }).run())} title="Heading 3">
+          <Heading3 size={15} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          className={`pg-tb-btn${active('heading', { level: 1 })}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())}
-          title="Heading 1"
-        >
-          <Heading1 size={16} />
+        {/* Alignment group */}
+        <button type="button" className={`pg-tb-btn${active('textAlign', { textAlign: 'left' })}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('left').run())} title="Align left">
+          <AlignLeft size={15} />
         </button>
-
-        <button
-          type="button"
-          className={`pg-tb-btn${active('heading', { level: 2 })}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())}
-          title="Heading 2"
-        >
-          <Heading2 size={16} />
+        <button type="button" className={`pg-tb-btn${active('textAlign', { textAlign: 'center' })}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('center').run())} title="Align center">
+          <AlignCenter size={15} />
         </button>
-
-        <button
-          type="button"
-          className={`pg-tb-btn${active('bulletList')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleBulletList().run())}
-          title="Bullet list"
-        >
-          <List size={16} />
+        <button type="button" className={`pg-tb-btn${active('textAlign', { textAlign: 'right' })}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('right').run())} title="Align right">
+          <AlignRight size={15} />
         </button>
-
-        <button
-          type="button"
-          className={`pg-tb-btn${active('orderedList')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())}
-          title="Ordered list"
-        >
-          <ListOrdered size={16} />
+        <button type="button" className={`pg-tb-btn${active('textAlign', { textAlign: 'justify' })}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('justify').run())} title="Justify">
+          <AlignJustify size={15} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          className="pg-tb-btn"
-          onMouseDown={cmd(() => editor?.chain().focus().undo().run())}
-          title="Undo"
-          disabled={!editor?.can().undo()}
-        >
-          <Undo size={16} />
+        {/* List group */}
+        <button type="button" className={`pg-tb-btn${active('bulletList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleBulletList().run())} title="Bullet list">
+          <List size={15} />
         </button>
-
-        <button
-          type="button"
-          className="pg-tb-btn"
-          onMouseDown={cmd(() => editor?.chain().focus().redo().run())}
-          title="Redo"
-          disabled={!editor?.can().redo()}
-        >
-          <Redo size={16} />
+        <button type="button" className={`pg-tb-btn${active('orderedList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())} title="Ordered list">
+          <ListOrdered size={15} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button type="button" className={`pg-tb-btn pg-tb-btn--accent${insertPanel === 'placeholder' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'placeholder' ? null : 'placeholder'); }} title="Insert typed placeholder">
-          <Braces size={16} />
+        {/* Undo / Redo */}
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(() => editor?.chain().focus().undo().run())} title="Undo (Ctrl+Z)" disabled={!editor?.can().undo()}>
+          <Undo size={15} />
         </button>
-
-        <button type="button" className={`pg-tb-btn${insertPanel === 'image' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'image' ? null : 'image'); }} title="Insert image component">
-          <ImageIcon size={16} />
-        </button>
-
-        <button type="button" className={`pg-tb-btn${insertPanel === 'hyperlink' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'hyperlink' ? null : 'hyperlink'); }} title="Insert hyperlink component">
-          <Link size={16} />
-        </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'list' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('list')} title="Insert list component">
-          <Box size={16} />
-        </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'container' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('container')} title="Insert container component">
-          <Layers size={16} />
-        </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'table' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('table')} title="Insert table component">
-          <Table size={16} />
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(() => editor?.chain().focus().redo().run())} title="Redo (Ctrl+Y)" disabled={!editor?.can().redo()}>
+          <Redo size={15} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'page' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('page')} title="Insert page element">
-          <File size={16} />
+        {/* Insert inline table via Google-Docs-style grid picker */}
+        <div ref={tableBtnRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className="pg-tb-btn"
+            onMouseDown={(e) => { e.preventDefault(); setShowTablePicker(v => !v); }}
+            title="Insert table"
+          >
+            <Grid size={15} />
+          </button>
+          {showTablePicker && (
+            <div className="pg-table-picker">
+              <div className="pg-table-grid">
+                {Array.from({ length: 6 }, (_, r) =>
+                  Array.from({ length: 8 }, (_, c) => (
+                    <button
+                      key={`${r}-${c}`}
+                      type="button"
+                      className={`pg-table-cell${tableHover.rows > r && tableHover.cols > c ? ' hovered' : ''}`}
+                      onMouseEnter={() => setTableHover({ rows: r + 1, cols: c + 1 })}
+                      onMouseLeave={() => setTableHover({ rows: 0, cols: 0 })}
+                      onMouseDown={(e) => { e.preventDefault(); insertTable(r + 1, c + 1); }}
+                    />
+                  ))
+                )}
+              </div>
+              <div className="pg-table-picker-label">
+                {tableHover.rows > 0 ? `${tableHover.rows} × ${tableHover.cols}` : 'Hover to select size'}
+              </div>
+              {/* Table editing commands if cursor is inside a table */}
+              {editor?.isActive('table') && (
+                <div style={{ borderTop: '1px solid var(--pg-border)', marginTop: 6, paddingTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <button type="button" className="pg-tb-btn" style={{ fontSize: 10, height: 24 }} onMouseDown={cmd(() => editor.chain().focus().addRowAfter().run())} title="Add row below">+ Row</button>
+                  <button type="button" className="pg-tb-btn" style={{ fontSize: 10, height: 24 }} onMouseDown={cmd(() => editor.chain().focus().addColumnAfter().run())} title="Add column right">+ Col</button>
+                  <button type="button" className="pg-tb-btn" style={{ fontSize: 10, height: 24, color: 'var(--pg-danger)' }} onMouseDown={cmd(() => editor.chain().focus().deleteRow().run())} title="Delete row">−Row</button>
+                  <button type="button" className="pg-tb-btn" style={{ fontSize: 10, height: 24, color: 'var(--pg-danger)' }} onMouseDown={cmd(() => editor.chain().focus().deleteColumn().run())} title="Delete column">−Col</button>
+                  <button type="button" className="pg-tb-btn" style={{ fontSize: 10, height: 24, color: 'var(--pg-danger)' }} onMouseDown={cmd(() => editor.chain().focus().deleteTable().run())} title="Delete table">Del Table</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <span className="pg-tb-sep" aria-hidden="true" />
+
+        {/* Insert component buttons */}
+        <button type="button" className={`pg-tb-btn pg-tb-btn--accent${insertPanel === 'placeholder' ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); setInsertError(''); setInsertPanel(insertPanel === 'placeholder' ? null : 'placeholder'); }} title="Insert placeholder field">
+          <Braces size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${insertPanel === 'image' ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); setInsertError(''); setInsertPanel(insertPanel === 'image' ? null : 'image'); }} title="Insert image component">
+          <ImageIcon size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${insertPanel === 'hyperlink' ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); setInsertError(''); setInsertPanel(insertPanel === 'hyperlink' ? null : 'hyperlink'); }} title="Insert hyperlink component">
+          <Link size={15} />
         </button>
 
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'header' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('header')} title="Insert header element">
-          <PanelTop size={16} />
+        {/* FIX #11: Use ListChecks icon for list component, not Box */}
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'list' && modalStack.length === 1 ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); openSubmodal('list'); }} title="Insert list component (template)">
+          <ListChecks size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'container' && modalStack.length === 1 ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); openSubmodal('container'); }} title="Insert container component">
+          <Layers size={15} />
         </button>
 
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'footer' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('footer')} title="Insert footer element">
-          <PanelBottom size={16} />
-        </button>
+        <span className="pg-tb-sep" aria-hidden="true" />
 
+        {/* Structural components group */}
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'page' && modalStack.length === 1 ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); openSubmodal('page'); }} title="Insert page element">
+          <File size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'header' && modalStack.length === 1 ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); openSubmodal('header'); }} title="Insert header element">
+          <PanelTop size={15} />
+        </button>
+        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'footer' && modalStack.length === 1 ? ' pg-tb-active' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); openSubmodal('footer'); }} title="Insert footer element">
+          <PanelBottom size={15} />
+        </button>
         <button type="button" className="pg-tb-btn" onMouseDown={cmd(insertPageBreak)} title="Insert page break">
-          <SeparatorHorizontal size={16} />
+          <SeparatorHorizontal size={15} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          className="pg-tb-btn pg-tb-btn--accent"
-          onMouseDown={cmd(openPreview)}
-          title="Preview document"
-        >
+        <button type="button" className="pg-tb-btn pg-tb-btn--accent" onMouseDown={cmd(openPreview)} title="Preview document">
           Preview
         </button>
       </div>
 
+      {/* ── Insert panels ───────────────────────────────────── */}
       {insertPanel && (
         <div className="pg-insert-panel">
           {insertPanel === 'placeholder' && (
@@ -990,14 +970,10 @@ export default function TemplateEditor({
                     <label className="pg-label">Container slots</label>
                     <input className="pg-input" value={phContainerSlots} onChange={(e) => setPhContainerSlots(e.target.value)} placeholder="2" />
                   </div>
-                  {Array.from({ length: Number.isFinite(Number(phContainerSlots)) && Number(phContainerSlots) > 0 ? Math.floor(Number(phContainerSlots)) : 2 }, (_, index) => (
-                    <div className="pg-insert-row" key={`container-kind-${index}`}>
-                      <label className="pg-label">Slot {index + 1} kind</label>
-                      <select
-                        className="pg-input"
-                        value={phContainerKinds[index] || 'string'}
-                        onChange={(e) => setPhContainerKinds((prev) => ({ ...prev, [index]: e.target.value as PlaceholderKind }))}
-                      >
+                  {Array.from({ length: Number.isFinite(Number(phContainerSlots)) && Number(phContainerSlots) > 0 ? Math.floor(Number(phContainerSlots)) : 2 }, (_, i) => (
+                    <div className="pg-insert-row" key={`ck-${i}`}>
+                      <label className="pg-label">Slot {i + 1} kind</label>
+                      <select className="pg-input" value={phContainerKinds[i] || 'string'} onChange={(e) => setPhContainerKinds(prev => ({ ...prev, [i]: e.target.value as PlaceholderKind }))}>
                         <option value="string">string</option>
                         <option value="integer">integer</option>
                         <option value="image">image</option>
@@ -1021,44 +997,24 @@ export default function TemplateEditor({
                     <label className="pg-label">Headers (comma separated)</label>
                     <input className="pg-input" value={phTableHeaders} onChange={(e) => setPhTableHeaders(e.target.value)} placeholder="Item,Qty" />
                   </div>
-
                   {parseCommaSeparated(phTableHeaders).length > 0 && (
                     <div className="pg-sheet-wrap" style={{ marginTop: 8 }}>
-                      <div className="pg-sheet-toolbar">
-                        <strong>
-                          {phTableMode === 'row_data'
-                            ? 'Column type for each header'
-                            : 'Row type for each header'}
-                        </strong>
-                      </div>
                       <table className="pg-sheet-table">
-                        <thead>
-                          <tr>
-                            <th>Header</th>
-                            <th>Type</th>
-                          </tr>
-                        </thead>
+                        <thead><tr><th>Header</th><th>Type</th></tr></thead>
                         <tbody>
-                          {parseCommaSeparated(phTableHeaders).map((header) => (
+                          {parseCommaSeparated(phTableHeaders).map(header => (
                             <tr key={header}>
                               <td>{header}</td>
                               <td>
-                                <select
-                                  className="pg-input"
-                                  value={
-                                    phTableMode === 'row_data'
-                                      ? (phTableColumnKinds[header] || 'string')
-                                      : (phTableRowKinds[header] || 'string')
-                                  }
+                                <select className="pg-input" value={phTableMode === 'row_data' ? (phTableColumnKinds[header] || 'string') : (phTableRowKinds[header] || 'string')}
                                   onChange={(e) => {
                                     const kind = e.target.value as PlaceholderKind;
                                     if (phTableMode === 'row_data') {
-                                      setPhTableColumnKinds((prev) => ({ ...prev, [header]: kind }));
+                                      setPhTableColumnKinds(prev => ({ ...prev, [header]: kind }));
                                     } else {
-                                      setPhTableRowKinds((prev) => ({ ...prev, [header]: kind }));
+                                      setPhTableRowKinds(prev => ({ ...prev, [header]: kind }));
                                     }
-                                  }}
-                                >
+                                  }}>
                                   <option value="string">string</option>
                                   <option value="integer">integer</option>
                                   <option value="image">image</option>
@@ -1088,12 +1044,24 @@ export default function TemplateEditor({
             <>
               <div className="pg-insert-row">
                 <label className="pg-label">Image URL</label>
-                <input className="pg-input" value={imageSrc} onChange={(e) => setImageSrc(e.target.value)} />
+                <input className="pg-input" value={imageSrc} onChange={(e) => { setImageSrc(e.target.value); setImagePreviewError(false); }} />
               </div>
               <div className="pg-insert-row">
                 <label className="pg-label">Alt text</label>
                 <input className="pg-input" value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} />
               </div>
+              {/* FIX #29: Image preview */}
+              {imageSrc.trim() && !imagePreviewError && (
+                <div style={{ marginTop: 4 }}>
+                  <img
+                    src={imageSrc.trim()}
+                    alt={imageAlt}
+                    onError={() => setImagePreviewError(true)}
+                    style={{ maxHeight: 80, maxWidth: '100%', borderRadius: 4, border: '1px solid var(--pg-border)', objectFit: 'contain', display: 'block' }}
+                  />
+                </div>
+              )}
+              {imagePreviewError && <p className="pg-field-error">Image URL could not be loaded for preview.</p>}
               <div className="pg-insert-actions">
                 <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
                 <button type="button" className="pg-btn-primary" onClick={insertImageComponent}>Insert Image</button>
@@ -1109,8 +1077,12 @@ export default function TemplateEditor({
               </div>
               <div className="pg-insert-row">
                 <label className="pg-label">URL</label>
-                <input className="pg-input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
+                <input className="pg-input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
               </div>
+              {/* FIX #30: URL validation feedback */}
+              {linkUrl.trim() && !/^https?:\/\/.+/.test(linkUrl.trim()) && (
+                <p className="pg-field-error">URL must start with http:// or https://</p>
+              )}
               <div className="pg-insert-actions">
                 <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
                 <button type="button" className="pg-btn-primary" onClick={insertHyperlinkComponent}>Insert Hyperlink</button>
@@ -1118,23 +1090,20 @@ export default function TemplateEditor({
             </>
           )}
 
-          {/* Legacy inline insert panels removed. */}
-
           {insertError && <p className="pg-field-error">{insertError}</p>}
         </div>
       )}
 
+      {/* ── Editor canvas ─────────────────────────────────── */}
       <div className="pg-editor-layout">
         <div className="pg-editor-pane">
           <EditorContent editor={editor} className="pg-tiptap-content" />
         </div>
       </div>
 
+      {/* ── Preview modal ─────────────────────────────────── */}
       {isPreviewOpen && (
-        <div
-          className="pg-overlay"
-          onClick={(e) => e.target === e.currentTarget && setIsPreviewOpen(false)}
-        >
+        <div className="pg-overlay" onClick={(e) => e.target === e.currentTarget && setIsPreviewOpen(false)}>
           <div className="pg-modal pg-modal-xl" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
             <div className="pg-modal-header">
               <div>
@@ -1149,26 +1118,19 @@ export default function TemplateEditor({
         </div>
       )}
 
-      {/* ── Recursive Modal Stack ────────────────────────── */}
+      {/* ── Recursive Modal Stack ─────────────────────────── */}
       {topModal && (
-        <div
-          className="pg-submodal-overlay"
-          onClick={(e) => e.target === e.currentTarget && (modalStack.length === 1 ? closeSubmodal() : popModal())}
-        >
+        <div className="pg-submodal-overlay" onClick={(e) => e.target === e.currentTarget && (modalStack.length === 1 ? closeSubmodal() : popModal())}>
           <div className="pg-submodal" role="dialog" aria-modal="true" aria-labelledby="submodal-title">
             <div className="pg-submodal-header">
               <div>
-                <h2 className="pg-submodal-title" id="submodal-title">
-                  Edit {topModal.label} Components
-                </h2>
+                <h2 className="pg-submodal-title" id="submodal-title">Edit {topModal.label} Components</h2>
                 {modalStack.length > 1 && (
                   <p className="pg-submodal-subtitle" style={{ fontFamily: 'var(--pg-font-mono)', fontSize: '11px', color: 'var(--pg-accent)' }}>
                     {modalStack.map(m => m.label).join(' › ')}
                   </p>
                 )}
-                <p className="pg-submodal-subtitle">
-                  Add and arrange child components. Complex types open nested editors.
-                </p>
+                <p className="pg-submodal-subtitle">Add and arrange child components. Complex types open nested editors.</p>
               </div>
               <button className="pg-modal-close" onClick={() => modalStack.length === 1 ? closeSubmodal() : popModal()} aria-label="Close">✕</button>
             </div>
@@ -1196,6 +1158,18 @@ export default function TemplateEditor({
                       <option value="landscape">Landscape</option>
                     </select>
                   </div>
+                </div>
+              )}
+
+              {/* List style field */}
+              {topModal.target === 'list' && (
+                <div className="pg-insert-row" style={{ marginBottom: 12 }}>
+                  <label className="pg-label">List Style</label>
+                  <select className="pg-input" value={topModal.listStyle ?? 'bulleted'} onChange={(e) => updateTopModal(m => ({ ...m, listStyle: e.target.value as ListStyle }))}>
+                    <option value="bulleted">Bulleted</option>
+                    <option value="numbered">Numbered</option>
+                    <option value="plain">Plain</option>
+                  </select>
                 </div>
               )}
 
@@ -1231,9 +1205,7 @@ export default function TemplateEditor({
                   <Plus size={14} />
                   <label className="pg-label">Type</label>
                   <select className="pg-input" value={addChildType} onChange={(e) => { setAddChildType(e.target.value as AnyChildType); updateTopModal(m => ({ ...m, error: '' })); }} style={{ maxWidth: 160 }}>
-                    {ALL_CHILD_TYPES.map(t => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
+                    {ALL_CHILD_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </div>
                 <div className="pg-add-child-body">
@@ -1291,29 +1263,27 @@ export default function TemplateEditor({
                 {modalStack.length === 1 ? 'Cancel' : '← Back'}
               </button>
               <button type="button" className="pg-btn-primary" onClick={confirmTopModal}>
-                {modalStack.length === 1
-                  ? `Insert ${topModal.label}`
-                  : `Confirm ${topModal.label}`}
+                {modalStack.length === 1 ? `Insert ${topModal.label}` : `Confirm ${topModal.label}`}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* ── Footer: placeholder keys + word count ─────────── */}
       <div className="pg-tiptap-footer">
         <span className="pg-tiptap-footer-label">Placeholders:</span>
         {placeholderKeys.length === 0 && <span style={{ color: 'var(--pg-text-muted)', fontSize: '11px' }}>none</span>}
-        {placeholderKeys.map((k) => (
-          <span key={k} className="pg-key-chip">{`{{${k}}}`}</span>
-        ))}
+        {placeholderKeys.map(k => <span key={k} className="pg-key-chip">{`{{${k}}}`}</span>)}
+        <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--pg-text-muted)', whiteSpace: 'nowrap' }}>
+          {wordCount} word{wordCount !== 1 ? 's' : ''}
+        </span>
       </div>
 
       {validationErrors.length > 0 && (
         <div className="pg-validation-summary">
           <p className="pg-validation-title">Validation summary</p>
-          {validationErrors.map((error, index) => (
-            <p key={`ve-${index}`} className="pg-validation-item">{error}</p>
-          ))}
+          {validationErrors.map((error, i) => <p key={`ve-${i}`} className="pg-validation-item">{error}</p>)}
         </div>
       )}
     </div>

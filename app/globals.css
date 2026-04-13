@@ -910,65 +910,95 @@ select.pg-input option {
 
 /* ─── ProseMirror editor canvas ──────────────────────────── */
 .pg-tiptap-content {
-  background: var(--pg-code-bg);
+  background: #1a1810;
+  padding: 24px 16px;
+  min-height: 560px;
 }
 
 .pg-prosemirror {
-  min-height: 200px;
-  max-height: 380px;
-  overflow-y: auto;
-  padding: 16px 18px;
-  color: var(--pg-text);
-  font-family: var(--pg-font-mono);
+  /* A4 paper feel inside the dark editor */
+  background: #ffffff;
+  color: #1a1a1a;
+  font-family: 'Arial', 'Helvetica Neue', sans-serif;
   font-size: 13px;
-  line-height: 1.9;
+  line-height: 1.75;
   outline: none;
+  min-height: 560px;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 56px 64px;
+  border-radius: 2px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.12);
 }
 
-/* Typography inside editor */
+/* Typography inside editor (white paper look) */
 .pg-prosemirror h1 {
-  font-family: var(--pg-font-serif);
-  font-size: 22px;
-  font-style: italic;
-  margin-bottom: 8px;
-  color: var(--pg-text);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  margin: 16px 0 8px;
+  color: #111111;
+  line-height: 1.3;
 }
 
 .pg-prosemirror h2 {
-  font-family: var(--pg-font-serif);
-  font-size: 17px;
-  font-style: italic;
-  margin-bottom: 6px;
-  color: var(--pg-text);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  margin: 14px 0 6px;
+  color: #1a1a1a;
+  line-height: 1.35;
+}
+
+.pg-prosemirror h3 {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 12px 0 4px;
+  color: #222222;
+  line-height: 1.4;
 }
 
 .pg-prosemirror p {
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  color: #1a1a1a;
 }
 
 .pg-prosemirror ul,
 .pg-prosemirror ol {
-  padding-left: 22px;
-  margin-bottom: 6px;
+  padding-left: 28px;
+  margin-bottom: 8px;
 }
 
 .pg-prosemirror li {
-  margin-bottom: 2px;
+  margin-bottom: 3px;
+  color: #1a1a1a;
 }
 
 .pg-prosemirror strong {
-  color: var(--pg-text);
+  color: #111111;
 }
 
 .pg-prosemirror em {
-  color: var(--pg-text-muted);
+  color: #333333;
 }
 
-/* Placeholder cursor caret indicator */
-.pg-prosemirror p.is-editor-empty:first-child::before {
+.pg-prosemirror u {
+  text-decoration: underline;
+}
+
+/* Text alignment classes injected by extension-text-align */
+.pg-prosemirror .is-text-align-left   { text-align: left; }
+.pg-prosemirror .is-text-align-center { text-align: center; }
+.pg-prosemirror .is-text-align-right  { text-align: right; }
+.pg-prosemirror .is-text-align-justify { text-align: justify; }
+
+/* Placeholder hint text when editor is empty */
+.pg-prosemirror p.is-empty.is-editor-empty:first-child::before,
+.pg-prosemirror p.is-empty:only-child::before {
   content: attr(data-placeholder);
   float: left;
-  color: var(--pg-text-muted);
+  color: #aaaaaa;
   pointer-events: none;
   height: 0;
   font-style: italic;
@@ -979,12 +1009,12 @@ select.pg-input option {
 .pg-prosemirror span[data-placeholder='true'] {
   display: inline-flex;
   align-items: center;
-  background: var(--pg-accent-dim);
-  color: var(--pg-accent);
-  border: 1px solid rgba(232, 184, 75, 0.28);
+  background: rgba(232, 184, 75, 0.15);
+  color: #9a6b00;
+  border: 1px solid rgba(232, 184, 75, 0.4);
   border-radius: 4px;
   padding: 0px 7px 1px;
-  font-family: var(--pg-font-mono);
+  font-family: 'DM Mono', 'Courier New', monospace;
   font-size: 11.5px;
   font-weight: 500;
   line-height: 1.7;
@@ -993,7 +1023,6 @@ select.pg-input option {
   vertical-align: baseline;
   position: relative;
   top: -1px;
-  /* Add {{ }} wrapper visually via pseudo-elements */
 }
 
 .pg-prosemirror span[data-placeholder='true']::before {
@@ -1059,12 +1088,12 @@ select.pg-input option {
 
 .pg-editor-layout {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
-  min-height: 360px;
+  grid-template-columns: 1fr;
+  min-height: 560px;
 }
 
 .pg-editor-pane {
-  border-right: 1px solid var(--pg-border);
+  /* no border — single pane layout */
 }
 
 .pg-preview-pane {
@@ -1438,12 +1467,199 @@ select.pg-input option {
     max-width: 94vw;
   }
 
-  .pg-editor-layout {
-    grid-template-columns: 1fr;
+  .pg-prosemirror {
+    padding: 32px 24px;
   }
+}
 
-  .pg-editor-pane {
-    border-right: none;
-    border-bottom: 1px solid var(--pg-border);
-  }
+/* ─── Real Tiptap Table Styles ───────────────────────────── */
+.pg-prosemirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 8px 0;
+  overflow: hidden;
+  border-radius: 2px;
+}
+
+.pg-prosemirror table td,
+.pg-prosemirror table th {
+  border: 1px solid #c8c8c8;
+  padding: 6px 10px;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+  min-width: 48px;
+}
+
+.pg-prosemirror table th {
+  background: #f5f5f5;
+  font-weight: 600;
+  text-align: left;
+  color: #333;
+}
+
+.pg-prosemirror table .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(66, 133, 244, 0.15);
+  pointer-events: none;
+}
+
+.pg-prosemirror table .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #4285f4;
+  cursor: col-resize;
+  z-index: 20;
+}
+
+.tableWrapper {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.resize-cursor {
+  cursor: col-resize;
+}
+
+/* ─── Component atom blocks inside paper ─────────────────── */
+.pg-prosemirror div[data-component] {
+  border: 1px dashed rgba(66, 133, 244, 0.4);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: rgba(66, 133, 244, 0.04);
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: #4285f4;
+}
+
+.pg-prosemirror div[data-component='page'] {
+  border-color: rgba(232, 184, 75, 0.5);
+  background: rgba(232, 184, 75, 0.04);
+  color: #9a6b00;
+}
+
+.pg-prosemirror header[data-component='header'] {
+  border-color: rgba(90, 173, 122, 0.5);
+  background: rgba(90, 173, 122, 0.04);
+  color: #2a7a4a;
+}
+
+.pg-prosemirror footer[data-component='footer'] {
+  border-color: rgba(90, 173, 122, 0.5);
+  background: rgba(90, 173, 122, 0.04);
+  color: #2a7a4a;
+}
+
+.pg-prosemirror span[data-component='hyperlink'] {
+  color: #1a73e8;
+  text-decoration: underline;
+}
+
+.pg-prosemirror img[data-component='image'] {
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+}
+
+.pg-prosemirror div[data-component-error] {
+  border: 1px dashed rgba(224, 84, 84, 0.6);
+  background: rgba(224, 84, 84, 0.05);
+  color: #c44;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+/* ─── Color picker swatch grid ───────────────────────────── */
+.pg-color-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 22px);
+  gap: 3px;
+  padding: 6px;
+  background: var(--pg-surface-raise);
+  border: 1px solid var(--pg-border);
+  border-radius: var(--pg-radius);
+  box-shadow: var(--pg-shadow);
+}
+
+.pg-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.1s;
+}
+
+.pg-color-swatch:hover {
+  border-color: rgba(255,255,255,0.5);
+  transform: scale(1.1);
+}
+
+.pg-color-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 500;
+}
+
+.pg-color-btn-strip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pg-tb-color-bar {
+  display: block;
+  width: 14px;
+  height: 3px;
+  border-radius: 1px;
+  margin-top: 2px;
+}
+
+/* ─── Insert-table grid picker ───────────────────────────── */
+.pg-table-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 500;
+  background: var(--pg-surface-raise);
+  border: 1px solid var(--pg-border);
+  border-radius: var(--pg-radius);
+  box-shadow: var(--pg-shadow);
+  padding: 8px;
+}
+
+.pg-table-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 20px);
+  gap: 2px;
+}
+
+.pg-table-cell {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--pg-border);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.pg-table-cell.hovered {
+  background: var(--pg-accent-dim);
+  border-color: var(--pg-accent);
+}
+
+.pg-table-picker-label {
+  text-align: center;
+  font-size: 11px;
+  color: var(--pg-text-muted);
+  margin-top: 6px;
 }
