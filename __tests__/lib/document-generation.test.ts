@@ -127,7 +127,8 @@ describe('document-generation typed placeholders', () => {
       }
     );
 
-    expect(result.invalid.length).toBe(0);
+    expect(result.invalid.length).toBe(1);
+    expect(result.invalid[0]).toContain("report.rows[1] missing header 'Qty'");
   });
 
   it('replaces multi-key tokens inside placeholder content', () => {

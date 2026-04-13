@@ -28,11 +28,65 @@ export interface HyperlinkTypeSchema extends BaseTypeSchema {
 export interface ListTypeSchema extends BaseTypeSchema {
   kind: 'list';
   item_type: ComponentTypeSchema;
+  style?: ListStyle;
+  min_items?: number;
+  max_items?: number;
 }
 
 export interface ContainerTypeSchema extends BaseTypeSchema {
   kind: 'container';
-  component_types: ComponentTypeSchema[];
+  mode?: 'tuple' | 'repeat';
+  component_types?: ComponentTypeSchema[];
+  item_type?: ComponentTypeSchema;
+  min_items?: number;
+  max_items?: number;
+}
+
+export interface RepeatTypeSchema extends BaseTypeSchema {
+  kind: 'repeat';
+  item_type: ComponentTypeSchema;
+  min_items?: number;
+  max_items?: number;
+  base_variable?: string;
+  layout_template?: string;
+}
+
+export interface CustomLayoutTextNode {
+  kind: 'text';
+  value: string;
+}
+
+export interface CustomLayoutTokenNode {
+  kind: 'token';
+  token_id: string;
+  prefix?: string;
+  suffix?: string;
+}
+
+export interface CustomLayoutNewlineNode {
+  kind: 'newline';
+}
+
+export type CustomLayoutNode =
+  | CustomLayoutTextNode
+  | CustomLayoutTokenNode
+  | CustomLayoutNewlineNode;
+
+export interface CustomTokenDefinition {
+  id: string;
+  label?: string;
+  schema: ComponentTypeSchema;
+}
+
+export interface CustomTypeSchema extends BaseTypeSchema {
+  kind: 'custom';
+  base_variable: string;
+  value_type: ComponentTypeSchema;
+  layout_template: string;
+  repeat?: boolean;
+  token_registry?: Record<string, ComponentTypeSchema>;
+  token_labels?: Record<string, string>;
+  layout_nodes?: CustomLayoutNode[];
 }
 
 export interface PageTypeSchema extends BaseTypeSchema {
@@ -56,6 +110,11 @@ export interface PageBreakTypeSchema extends BaseTypeSchema {
 
 export interface TableTypeSchema extends BaseTypeSchema {
   kind: 'table';
+  mode?: TableMode;
+  headers?: string[];
+  dynamic_headers?: boolean;
+  column_types?: Record<string, ComponentTypeSchema>;
+  row_types?: Record<string, ComponentTypeSchema>;
   caption?: ComponentTypeSchema;
 }
 
@@ -67,6 +126,8 @@ export type ComponentTypeSchema =
   | HyperlinkTypeSchema
   | ListTypeSchema
   | ContainerTypeSchema
+  | RepeatTypeSchema
+  | CustomTypeSchema
   | PageTypeSchema
   | HeaderTypeSchema
   | FooterTypeSchema
@@ -80,6 +141,9 @@ export type PlaceholderKeyTypeMap = Record<string, ComponentTypeSchema>;
 export interface ImageValue {
   src: string;
   alt: string;
+  source?: 'url' | 'file';
+  mime_type?: string;
+  file_name?: string;
 }
 
 /** Payload for hyperlink placeholders. */
@@ -120,6 +184,15 @@ export interface FooterValue {
 /** Composite payload for list placeholders. */
 export interface ListValue {
   items: ComponentValue[];
+  style?: ListStyle;
+}
+
+export interface RepeatValue {
+  items: ComponentValue[];
+}
+
+export interface CustomValue {
+  data: unknown;
 }
 
 /** Primitive values that can appear inside typed composite payloads. */
@@ -132,6 +205,8 @@ export type ComponentValue =
   | HyperlinkValue
   | ListValue
   | ContainerValue
+  | RepeatValue
+  | CustomValue
   | PageValue
   | HeaderValue
   | FooterValue

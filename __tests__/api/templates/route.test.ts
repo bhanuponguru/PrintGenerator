@@ -285,7 +285,7 @@ describe('POST /api/templates', () => {
     expect(data.data.created_on).toBe(data.data.updated_on);
   });
 
-  it('should create template with placeholder that has derived schema from structure', async () => {
+  it('should create template with placeholder schema', async () => {
     const request = new NextRequest('http://localhost:3000/api/templates', {
       method: 'POST',
       body: JSON.stringify({
@@ -299,11 +299,18 @@ describe('POST /api/templates', () => {
               content: [
                 {
                   type: 'placeholder',
-                  attrs: { key: 'name', kind: 'list', style: 'bulleted', item_kind: 'string' },
+                  attrs: {
+                    key: 'name',
+                    schema: {
+                      kind: 'list',
+                      style: 'bulleted',
+                      item_type: { kind: 'string' },
+                    },
+                  },
                   content: [
                     {
                       type: 'placeholder',
-                      attrs: { key: 'student', kind: 'string' },
+                      attrs: { key: 'student', schema: { kind: 'string' } },
                       content: [{ type: 'text', text: 'Name' }],
                     },
                   ],
@@ -323,7 +330,7 @@ describe('POST /api/templates', () => {
     expect(data.data._id).toBeDefined();
   });
 
-  it('should return 400 for placeholder missing kind', async () => {
+  it('should return 400 for placeholder missing schema', async () => {
     const request = new NextRequest('http://localhost:3000/api/templates', {
       method: 'POST',
       body: JSON.stringify({
@@ -352,7 +359,7 @@ describe('POST /api/templates', () => {
 
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
-    expect(data.error).toContain('kind');
+    expect(data.error).toContain('placeholder.attrs.schema');
   });
 
   it('should return 400 for invalid hyperlinkComponent attrs', async () => {

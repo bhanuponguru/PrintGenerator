@@ -1,29 +1,38 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { Template } from '../page';
 import type { ComponentTypeSchema } from '@/types/template';
 import { deriveSchemaFromChildren } from '@/lib/tiptap/extensions';
+import { fileToDataUrl } from '@/lib/image-utils';
 
 interface GenerateModalProps {
   template: Template;
-  onClose:  () => void;
-  onError:  (msg: string) => void;
+  onClose: () => void;
+  onError: (msg: string) => void;
 }
 
 interface PlaceholderInfo {
   key: string;
   schema: ComponentTypeSchema | null;
-  style?: 'bulleted' | 'numbered' | 'plain';
-  mode?: 'row_data' | 'column_data';
-  headers?: string[];
-  column_types?: Record<string, ComponentTypeSchema>;
-  row_types?: Record<string, ComponentTypeSchema>;
-  caption?: ComponentTypeSchema;
 }
+
+type RenderSchemaEditor = (
+  schema: ComponentTypeSchema | null,
+  value: unknown,
+  onChange: (next: unknown) => void,
+  label: string
+) => JSX.Element;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function walkTiptapJson(node: Record<string, any>, visit: (n: Record<string, any>) => void) {
+  visit(node);
+  if (Array.isArray(node.content)) {
+    node.content.forEach((child: Record<string, any>) => walkTiptapJson(child, visit));
+  }
 }
 
 function collectPlaceholderDerivedSchemaMap(template: Record<string, any>): Record<string, ComponentTypeSchema> {
@@ -42,224 +51,675 @@ function collectPlaceholderDerivedSchemaMap(template: Record<string, any>): Reco
     if (node.type === 'placeholder') {
       const attrs = isRecord(node.attrs) ? node.attrs : {};
       const key = typeof attrs.key === 'string' ? attrs.key.trim() : '';
-
       if (key) {
-        const kind = typeof attrs.kind === 'string' ? attrs.kind : 'string';
+        const kind = typeof attrs.schema?.kind === 'string'
+          ? attrs.schema.kind
+          : (typeof attrs.kind === 'string' ? attrs.kind : 'string');
         map[key] = deriveSchemaFromChildren(kind, attrs, node.content);
       }
     }
 
-    if (node.attrs) {
-      walk(node.attrs);
-    }
-
-    if (node.content) {
-      walk(node.content);
-    }
+    if (node.attrs) walk(node.attrs);
+    if (node.content) walk(node.content);
   };
 
   walk(template);
   return map;
 }
 
-/**
- * Extracts placeholder definitions from a structured Tiptap template and
- * prepares the schema metadata needed to build example payloads.
- * @param template The structured document template to traverse for placeholders.
- * @returns An array of placeholder info objects with key and optional schema.
- */
 function extractPlaceholders(template: Record<string, any>): PlaceholderInfo[] {
   const placeholders = new Map<string, PlaceholderInfo>();
 
   if (template?.type !== 'doc') {
-    return Array.from(placeholders.values());
+    return [];
   }
 
   const derivedSchemaMap = collectPlaceholderDerivedSchemaMap(template);
 
   walkTiptapJson(template, (node) => {
-    if (node.type === 'placeholder' && typeof node.attrs?.key === 'string' && node.attrs.key) {
-      const key = node.attrs.key;
-      if (!placeholders.has(key)) {
-        const schema = derivedSchemaMap[key] || null;
-
-        placeholders.set(key, {
-          key,
-          schema,
-          style: node.attrs.style,
-          mode: node.attrs.mode,
-          headers: Array.isArray(node.attrs.headers)
-            ? node.attrs.headers
-            : undefined,
-          column_types: node.attrs.column_types,
-          row_types: node.attrs.row_types,
-          caption: node.attrs.caption ?? null,
-        });
-      }
-    }
+    if (node.type !== 'placeholder' || typeof node.attrs?.key !== 'string' || !node.attrs.key) return;
+    const key = node.attrs.key;
+    if (placeholders.has(key)) return;
+    placeholders.set(key, { key, schema: derivedSchemaMap[key] || null });
   });
 
   return Array.from(placeholders.values());
 }
 
-/**
- * Specifically traverses a complex TipTap node tree deeply executing a visitor sequence.
- * @param node The current document JSON node element under traversal check.
- * @param visit The callback function executing operations on matching node instances.
- */
-function walkTiptapJson(
-  node: Record<string, any>,
-  visit: (n: Record<string, any>) => void
-) {
-  visit(node);
-  if (Array.isArray(node.content)) {
-    node.content.forEach((child: Record<string, any>) => walkTiptapJson(child, visit));
-  }
-}
-
-/**
- * Generates a realistic example value based on a placeholder's type schema.
- * @param schema The ComponentTypeSchema defining the expected data type.
- * @param templateConfig Template-specific configuration (style, mode, headers, etc.)
- * @returns An example value matching the schema type.
- */
-/** Builds a representative example value for each supported placeholder schema. */
-function generateExampleValue(
-  schema: ComponentTypeSchema | null,
-  templateConfig?: Partial<PlaceholderInfo>
-): unknown {
-  if (!schema) return 'Example value';
+function generateExampleValue(schema: ComponentTypeSchema | null): unknown {
+  if (!schema) return 'Sample text';
 
   switch (schema.kind) {
     case 'string':
       return 'Sample text';
-
     case 'integer':
       return 42;
-
     case 'image':
-      return {
-        src: 'https://via.placeholder.com/300x200?text=Example',
-        alt: 'Example image',
-      };
-
+      return { src: 'https://via.placeholder.com/300x200?text=Example', alt: 'Example image' };
     case 'hyperlink':
-      return {
-        url: 'https://example.com',
-        alias: 'Example Link',
-      };
-
-    case 'list': {
-      const itemExample = generateExampleValue(schema.item_type);
-      return [itemExample, itemExample];
-    }
-
-    case 'container': {
-      return {
-        components: schema.component_types.map((componentSchema) =>
-          generateExampleValue(componentSchema)
-        ),
-      };
-    }
-
+      return { alias: 'Example Link', url: 'https://example.com' };
+    case 'list':
+      return { items: [generateExampleValue(schema.item_type), generateExampleValue(schema.item_type)], style: schema.style || 'bulleted' };
+    case 'repeat':
+      return { items: [generateExampleValue(schema.item_type), generateExampleValue(schema.item_type)] };
     case 'table': {
-      const headers = templateConfig?.headers || ['Column 1', 'Column 2'];
-      const mode = templateConfig?.mode || 'row_data';
-      const columnTypes = templateConfig?.column_types || {};
-      const rowTypes = templateConfig?.row_types || {};
-
-      if (mode === 'row_data') {
-        const makeRow = (label: string) => Object.fromEntries(
-          headers.map((h) => [
-            h,
-            generateExampleValue(columnTypes[h] || { kind: 'string' }),
-          ])
-        );
+      if (schema.mode === 'column_data') {
+        const headers = schema.headers || ['Row 1', 'Row 2'];
         return {
-          rows: [
-            makeRow('Row 1'),
-            makeRow('Row 2'),
-          ],
-        };
-      } else {
-        const columnNames = ['Column 1', 'Column 2'];
-        return {
-          columns: Object.fromEntries(
-            columnNames.map((columnName) => [
-              columnName,
-              Object.fromEntries(
-                headers.map((rowHeader) => [
-                  rowHeader,
-                  generateExampleValue(rowTypes[rowHeader] || { kind: 'string' }),
-                ])
-              ),
-            ])
-          ),
+          columns: {
+            'Column 1': Object.fromEntries(headers.map((h) => [h, 'Value'])),
+            'Column 2': Object.fromEntries(headers.map((h) => [h, 'Value'])),
+          },
         };
       }
+      const headers = schema.headers || ['Column 1', 'Column 2'];
+      return {
+        rows: [
+          Object.fromEntries(headers.map((h) => [h, 'Value 1'])),
+          Object.fromEntries(headers.map((h) => [h, 'Value 2'])),
+        ],
+      };
     }
-
+    case 'custom': {
+      if (isRecord(schema.token_registry)) {
+        const tokenData = Object.fromEntries(
+          Object.entries(schema.token_registry).map(([tokenId, tokenSchema]) => [tokenId, generateExampleValue(tokenSchema)])
+        );
+        if (schema.repeat) {
+          return { data: { items: [tokenData, tokenData] } };
+        }
+        return { data: tokenData };
+      }
+      if (schema.repeat) {
+        return { data: { items: [generateExampleValue(schema.value_type), generateExampleValue(schema.value_type)] } };
+      }
+      return { data: generateExampleValue(schema.value_type) };
+    }
     default:
-      return 'Example value';
+      return 'Sample text';
   }
 }
 
-/* ─── Skeleton builder ───────────────────────────────────── */
-/**
- * Generates example datapoints based on placeholder schemas.
- * @param placeholders Array of placeholder info with key, schema, and template config.
- * @returns A JSON stringified array containing example datapoint template structures.
- */
-function buildDefaultDatapoints(placeholders: PlaceholderInfo[]): string {
-  if (placeholders.length === 0) return JSON.stringify([{}], null, 2);
+function buildDefaultDataPoints(placeholders: PlaceholderInfo[]): Array<Record<string, unknown>> {
+  if (placeholders.length === 0) return [{}];
 
-  const firstExample: Record<string, unknown> = {};
-  const secondExample: Record<string, unknown> = {};
+  const first: Record<string, unknown> = {};
+  const second: Record<string, unknown> = {};
 
   placeholders.forEach((placeholder) => {
-    const example = generateExampleValue(placeholder.schema, placeholder);
-    firstExample[placeholder.key] = example;
-    // For second example, vary some values if possible
-    if (
-      placeholder.schema?.kind === 'string' ||
-      placeholder.schema?.kind === 'integer'
-    ) {
-      secondExample[placeholder.key] =
-        placeholder.schema.kind === 'integer' ? 99 : 'Another example';
-    } else {
-      secondExample[placeholder.key] = example;
-    }
+    const sample = generateExampleValue(placeholder.schema);
+    first[placeholder.key] = sample;
+    second[placeholder.key] = sample;
   });
 
-  return JSON.stringify([firstExample, secondExample], null, 2);
+  return [first, second];
 }
 
+function parseInputJson(text: string): { ok: true; value: Array<Record<string, unknown>> } | { ok: false; error: string } {
+  try {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) {
+      return { ok: false, error: 'JSON must be an array of objects.' };
+    }
+    const points = parsed.map((entry) => (isRecord(entry) ? entry : {}));
+    return { ok: true, value: points };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Invalid JSON' };
+  }
+}
 
-/* ─── Component ──────────────────────────────────────────── */
-/**
- * Presentational and operational Modal Dialog handling batch PDF creation jobs.
- * Permits users to supply data points via a JSON text field which are then mapped
- * out to a zip file full of distinctly mapped PDF iterations of the parent Template.
- * @param template The driving Template data object specifying layouts and structure.
- * @param onClose Control callback dismissing this modal window manually.
- * @param onError Exception piping mechanism reporting failure states outwards.
- */
-export default function GenerateModal({ template, onClose, onError }: GenerateModalProps) {
-  /** Cached placeholder metadata derived from the current template. */
-  const placeholders = useMemo(
-    () => extractPlaceholders(template.template),
-    [template.template]
+function prettyJson(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function ImageValueEditor({
+  value,
+  label,
+  onChange,
+}: {
+  value: unknown;
+  label: string;
+  onChange: (next: unknown) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const image = isRecord(value) ? value : {};
+  const src = typeof image.src === 'string' ? image.src : '';
+  const alt = typeof image.alt === 'string' ? image.alt : '';
+  const source = typeof image.source === 'string' ? image.source : (src.startsWith('data:') ? 'file' : 'url');
+
+  const handleFileChange = async (file: File | undefined) => {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    onChange({
+      ...image,
+      src: dataUrl,
+      alt,
+      source: 'file',
+      mime_type: file.type,
+      file_name: file.name,
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  return (
+    <div className="pg-layout-composer" aria-label={label}>
+      <div className="pg-layout-composer-actions">
+        <button type="button" className={`pg-layout-pattern${source === 'url' ? ' pg-tb-active' : ''}`} onClick={() => onChange({ ...image, src, alt, source: 'url' })}>
+          Use URL
+        </button>
+        <button type="button" className={`pg-layout-pattern${source === 'file' ? ' pg-tb-active' : ''}`} onClick={() => fileInputRef.current?.click()}>
+          Upload File
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            handleFileChange(e.target.files?.[0]).catch(() => undefined);
+          }}
+        />
+      </div>
+      <input
+        className="pg-input"
+        value={src}
+        onChange={(e) => onChange({ ...image, src: e.target.value, alt, source: e.target.value.startsWith('data:') ? 'file' : 'url' })}
+        placeholder="https://example.com/image.png"
+      />
+      <input
+        className="pg-input"
+        value={alt}
+        onChange={(e) => onChange({ ...image, src, alt: e.target.value, source })}
+        placeholder="Alt text"
+      />
+      {src ? <div className="pg-layout-preview"><img src={src} alt={alt || label} style={{ maxWidth: '180px', height: 'auto', borderRadius: '12px' }} /></div> : null}
+    </div>
+  );
+}
+
+function CollectionEditor({
+  kind,
+  schema,
+  value,
+  onChange,
+  renderSchemaEditor,
+  label,
+}: {
+  kind: 'list' | 'repeat';
+  schema: Extract<ComponentTypeSchema, { kind: 'list' | 'repeat' }>;
+  value: unknown;
+  onChange: (next: unknown) => void;
+  renderSchemaEditor: RenderSchemaEditor;
+  label: string;
+}) {
+  const collection = isRecord(value) ? value : {};
+  const items = Array.isArray(value)
+    ? value
+    : Array.isArray(collection.items)
+      ? collection.items
+      : [];
+  const style = kind === 'list' && typeof collection.style === 'string'
+    ? collection.style
+    : kind === 'list'
+      ? schema.style || 'bulleted'
+      : undefined;
+
+  const emit = (nextItems: unknown[], nextStyle?: string) => {
+    if (kind === 'list') {
+      onChange({ items: nextItems, style: nextStyle || 'bulleted' });
+      return;
+    }
+    onChange({ items: nextItems });
+  };
+
+  return (
+    <div className="pg-layout-composer" aria-label={label}>
+      {kind === 'list' ? (
+        <div className="pg-insert-row">
+          <label className="pg-label">List Style</label>
+          <select
+            className="pg-input"
+            value={style || 'bulleted'}
+            onChange={(e) => emit(items, e.target.value)}
+          >
+            <option value="bulleted">bulleted</option>
+            <option value="numbered">numbered</option>
+            <option value="plain">plain</option>
+          </select>
+        </div>
+      ) : null}
+
+      {items.map((item, index) => (
+        <div className="pg-layout-composer" key={`${label}-item-${index}`}>
+          <div className="pg-layout-composer-actions">
+            <span className="pg-layout-token-assist-label">Item {index + 1}</span>
+            <button
+              type="button"
+              className="pg-layout-pattern"
+              onClick={() => {
+                const next = [...items];
+                if (index > 0) {
+                  [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                  emit(next, style);
+                }
+              }}
+              disabled={index === 0}
+            >
+              Move Up
+            </button>
+            <button
+              type="button"
+              className="pg-layout-pattern"
+              onClick={() => {
+                const next = [...items];
+                if (index < next.length - 1) {
+                  [next[index + 1], next[index]] = [next[index], next[index + 1]];
+                  emit(next, style);
+                }
+              }}
+              disabled={index === items.length - 1}
+            >
+              Move Down
+            </button>
+            <button
+              type="button"
+              className="pg-layout-pattern"
+              onClick={() => {
+                const next = items.filter((_, itemIndex) => itemIndex !== index);
+                emit(next, style);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+          {renderSchemaEditor(
+            schema.item_type,
+            item,
+            (nextItem) => {
+              const next = [...items];
+              next[index] = nextItem;
+              emit(next, style);
+            },
+            `${label} item ${index + 1}`
+          )}
+        </div>
+      ))}
+
+      <div className="pg-layout-composer-actions">
+        <button
+          type="button"
+          className="pg-layout-pattern"
+          onClick={() => emit([...items, generateExampleValue(schema.item_type)], style)}
+        >
+          + Add Item
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CompositeEditor({
+  schema,
+  value,
+  onChange,
+  renderSchemaEditor,
+  label,
+}: {
+  schema: Extract<ComponentTypeSchema, { kind: 'container' | 'page' | 'header' | 'footer' }>;
+  value: unknown;
+  onChange: (next: unknown) => void;
+  renderSchemaEditor: RenderSchemaEditor;
+  label: string;
+}) {
+  const composite = isRecord(value) ? value : {};
+  const components = Array.isArray(composite.components) ? composite.components : [];
+
+  if (schema.kind === 'container' && schema.mode === 'repeat') {
+    const itemType = schema.item_type || { kind: 'string' as const };
+    return (
+      <div className="pg-layout-composer" aria-label={label}>
+        {components.map((component, index) => (
+          <div className="pg-layout-composer" key={`${label}-component-${index}`}>
+            <div className="pg-layout-composer-actions">
+              <span className="pg-layout-token-assist-label">Component {index + 1}</span>
+              <button
+                type="button"
+                className="pg-layout-pattern"
+                onClick={() => {
+                  const next = components.filter((_, componentIndex) => componentIndex !== index);
+                  onChange({ components: next });
+                }}
+              >
+                Delete
+              </button>
+            </div>
+            {renderSchemaEditor(itemType, component, (nextComponent) => {
+              const next = [...components];
+              next[index] = nextComponent;
+              onChange({ components: next });
+            }, `${label} component ${index + 1}`)}
+          </div>
+        ))}
+        <div className="pg-layout-composer-actions">
+          <button
+            type="button"
+            className="pg-layout-pattern"
+            onClick={() => onChange({ components: [...components, generateExampleValue(itemType)] })}
+          >
+            + Add Component
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const componentTypes = Array.isArray(schema.component_types) ? schema.component_types : [];
+  const normalizedComponents = componentTypes.map((componentType, index) =>
+    index < components.length ? components[index] : generateExampleValue(componentType)
   );
 
+  return (
+    <div className="pg-layout-composer" aria-label={label}>
+      {componentTypes.map((componentType, index) => (
+        <div className="pg-insert-row" key={`${label}-tuple-${index}`}>
+          <label className="pg-label">Component {index + 1}</label>
+          {renderSchemaEditor(componentType, normalizedComponents[index], (nextComponent) => {
+            const next = [...normalizedComponents];
+            next[index] = nextComponent;
+            onChange({ components: next });
+          }, `${label} component ${index + 1}`)}
+        </div>
+      ))}
+      {componentTypes.length === 0 ? <span className="pg-field-hint">No component schema is defined for this placeholder.</span> : null}
+    </div>
+  );
+}
+
+function TableValueEditor({
+  schema,
+  value,
+  onChange,
+}: {
+  schema: Extract<ComponentTypeSchema, { kind: 'table' }>;
+  value: unknown;
+  onChange: (next: unknown) => void;
+}) {
+  const table = isRecord(value) ? value : {};
+  const mode = schema.mode === 'column_data' ? 'column_data' : 'row_data';
+  const caption = typeof table.caption === 'string' ? table.caption : '';
+
+  if (mode === 'column_data') {
+    const columns = isRecord(table.columns) ? table.columns : {};
+    const columnNames = Object.keys(columns);
+    const rowHeaders = Array.isArray(schema.headers) && schema.headers.length > 0
+      ? schema.headers
+      : Array.from(new Set(Object.values(columns).flatMap((col) => (isRecord(col) ? Object.keys(col) : []))));
+    const safeColumnNames = columnNames.length > 0 ? columnNames : ['Column 1'];
+    const safeRowHeaders = rowHeaders.length > 0 ? rowHeaders : ['Row 1'];
+
+    const emitColumns = (nextColumns: Record<string, Record<string, unknown>>, nextCaption?: string) => {
+      onChange({
+        columns: nextColumns,
+        ...(typeof nextCaption === 'string' && nextCaption.trim() !== '' ? { caption: nextCaption } : {}),
+      });
+    };
+
+    return (
+      <div className="pg-layout-composer">
+        <div className="pg-insert-row">
+          <label className="pg-label">Caption</label>
+          <input
+            className="pg-input"
+            value={caption}
+            onChange={(e) => emitColumns(columns as Record<string, Record<string, unknown>>, e.target.value)}
+            placeholder="Optional caption"
+          />
+        </div>
+        <div className="pg-sheet-wrap">
+          <table className="pg-sheet-table">
+            <thead>
+              <tr>
+                <th></th>
+                {safeColumnNames.map((columnName) => (
+                  <th key={`column-name-${columnName}`}>
+                    <input
+                      className="pg-input"
+                      value={columnName}
+                      onChange={(e) => {
+                        const nextName = e.target.value.trim();
+                        if (!nextName || nextName === columnName) return;
+                        const nextColumns: Record<string, Record<string, unknown>> = {};
+                        safeColumnNames.forEach((name) => {
+                          const data = isRecord(columns[name]) ? columns[name] : {};
+                          nextColumns[name === columnName ? nextName : name] = { ...data };
+                        });
+                        emitColumns(nextColumns, caption);
+                      }}
+                    />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {safeRowHeaders.map((rowHeader) => (
+                <tr key={`row-header-${rowHeader}`}>
+                  <th>{rowHeader}</th>
+                  {safeColumnNames.map((columnName) => {
+                    const columnData = isRecord(columns[columnName]) ? columns[columnName] : {};
+                    return (
+                      <td key={`${columnName}-${rowHeader}`}>
+                        <input
+                          className="pg-input"
+                          value={typeof columnData[rowHeader] === 'string' || typeof columnData[rowHeader] === 'number' ? String(columnData[rowHeader]) : ''}
+                          onChange={(e) => {
+                            const nextColumns: Record<string, Record<string, unknown>> = {};
+                            safeColumnNames.forEach((name) => {
+                              const current = isRecord(columns[name]) ? columns[name] : {};
+                              nextColumns[name] = { ...current };
+                            });
+                            nextColumns[columnName][rowHeader] = e.target.value;
+                            emitColumns(nextColumns, caption);
+                          }}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  const rows = Array.isArray(table.rows) ? table.rows : [];
+  const schemaHeaders = Array.isArray(schema.headers) && schema.headers.length > 0 ? schema.headers : [];
+  const inferredHeaders = Array.from(new Set(rows.flatMap((row) => (isRecord(row) ? Object.keys(row) : []))));
+  const headers = schemaHeaders.length > 0 ? schemaHeaders : (inferredHeaders.length > 0 ? inferredHeaders : ['Column 1']);
+
+  const emitRows = (nextRows: Array<Record<string, unknown>>, nextHeaders: string[], nextCaption?: string) => {
+    const normalizedRows = nextRows.map((row) => {
+      const normalized: Record<string, unknown> = {};
+      nextHeaders.forEach((header) => {
+        normalized[header] = row[header] ?? '';
+      });
+      return normalized;
+    });
+
+    onChange({
+      rows: normalizedRows,
+      ...(typeof nextCaption === 'string' && nextCaption.trim() !== '' ? { caption: nextCaption } : {}),
+    });
+  };
+
+  const safeRows = rows.length > 0
+    ? rows.map((row) => {
+      const normalized: Record<string, unknown> = {};
+      headers.forEach((header) => {
+        normalized[header] = isRecord(row) ? row[header] ?? '' : '';
+      });
+      return normalized;
+    })
+    : [Object.fromEntries(headers.map((header) => [header, '']))];
+
+  return (
+    <div className="pg-layout-composer">
+      <div className="pg-insert-row">
+        <label className="pg-label">Caption</label>
+        <input
+          className="pg-input"
+          value={caption}
+          onChange={(e) => emitRows(safeRows, headers, e.target.value)}
+          placeholder="Optional caption"
+        />
+      </div>
+      <div className="pg-layout-composer-actions">
+        <button
+          type="button"
+          className="pg-layout-pattern"
+          onClick={() => {
+            const nextHeader = `Column ${headers.length + 1}`;
+            const nextHeaders = [...headers, nextHeader];
+            emitRows(safeRows, nextHeaders, caption);
+          }}
+        >
+          + Add Column
+        </button>
+        <button
+          type="button"
+          className="pg-layout-pattern"
+          onClick={() => {
+            emitRows([...safeRows, Object.fromEntries(headers.map((header) => [header, '']))], headers, caption);
+          }}
+        >
+          + Add Row
+        </button>
+      </div>
+      <div className="pg-sheet-wrap">
+        <table className="pg-sheet-table">
+          <thead>
+            <tr>
+              {headers.map((header, headerIndex) => (
+                <th key={`header-${headerIndex}`}>
+                  <div className="pg-layout-composer-actions">
+                    <input
+                      className="pg-input"
+                      value={header}
+                      onChange={(e) => {
+                        const nextHeader = e.target.value.trim();
+                        if (!nextHeader || nextHeader === header) return;
+                        const nextHeaders = [...headers];
+                        nextHeaders[headerIndex] = nextHeader;
+                        const nextRows = safeRows.map((row) => {
+                          const nextRow = { ...row };
+                          nextRow[nextHeader] = nextRow[header] ?? '';
+                          delete nextRow[header];
+                          return nextRow;
+                        });
+                        emitRows(nextRows, nextHeaders, caption);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="pg-layout-segment-btn"
+                      onClick={() => {
+                        if (headers.length <= 1) return;
+                        const nextHeaders = headers.filter((_, index) => index !== headerIndex);
+                        const nextRows = safeRows.map((row) => {
+                          const nextRow = { ...row };
+                          delete nextRow[header];
+                          return nextRow;
+                        });
+                        emitRows(nextRows, nextHeaders, caption);
+                      }}
+                      disabled={headers.length <= 1}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </th>
+              ))}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {safeRows.map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {headers.map((header) => (
+                  <td key={`row-${rowIndex}-header-${header}`}>
+                    <input
+                      className="pg-input"
+                      value={typeof row[header] === 'string' || typeof row[header] === 'number' ? String(row[header]) : ''}
+                      onChange={(e) => {
+                        const nextRows = [...safeRows];
+                        nextRows[rowIndex] = { ...nextRows[rowIndex], [header]: e.target.value };
+                        emitRows(nextRows, headers, caption);
+                      }}
+                    />
+                  </td>
+                ))}
+                <td>
+                  <button
+                    type="button"
+                    className="pg-layout-segment-btn"
+                    onClick={() => {
+                      const nextRows = safeRows.filter((_, index) => index !== rowIndex);
+                      emitRows(nextRows.length > 0 ? nextRows : [Object.fromEntries(headers.map((header) => [header, '']))], headers, caption);
+                    }}
+                    disabled={safeRows.length === 1}
+                  >
+                    ×
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default function GenerateModal({ template, onClose, onError }: GenerateModalProps) {
+  const placeholders = useMemo(() => extractPlaceholders(template.template), [template.template]);
   const placeholderKeys = placeholders.map((p) => p.key);
 
-  const [dataPointsJson, setDataPointsJson] = useState(
-    buildDefaultDatapoints(placeholders)
-  );
-  const [jsonError,  setJsonError]  = useState('');
-  const [loading,    setLoading]    = useState(false);
+  const initialDataPoints = useMemo(() => buildDefaultDataPoints(placeholders), [placeholders]);
+
+  const [entryMode, setEntryMode] = useState<'visual' | 'json'>('visual');
+  const [dataPoints, setDataPoints] = useState<Array<Record<string, unknown>>>(initialDataPoints);
+  const [dataPointsJson, setDataPointsJson] = useState(prettyJson(initialDataPoints));
+  const [jsonError, setJsonError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const updateDataPointValue = (index: number, key: string, value: unknown) => {
+    setDataPoints((prev) => {
+      const next = [...prev];
+      const base = isRecord(next[index]) ? next[index] : {};
+      next[index] = { ...base, [key]: value };
+      const nextJson = prettyJson(next);
+      setDataPointsJson(nextJson);
+      setJsonError('');
+      setDownloaded(false);
+      return next;
+    });
+  };
+
+  const updateJsonAndSyncVisual = (nextJson: string) => {
+    setDataPointsJson(nextJson);
+    const parsed = parseInputJson(nextJson);
+    if (!parsed.ok) {
+      setJsonError(parsed.error);
+      return;
+    }
+    setJsonError('');
+    setDataPoints(parsed.value);
+    setDownloaded(false);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -267,55 +727,175 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      try {
-        const content = event.target?.result as string;
-        // Basic validation: attempt to parse
-        JSON.parse(content);
-        setDataPointsJson(content);
+      const content = String(event.target?.result || '');
+      const parsed = parseInputJson(content);
+      if (!parsed.ok) {
+        onError(`Invalid JSON file: ${parsed.error}`);
+      } else {
+        setDataPoints(parsed.value);
+        setDataPointsJson(prettyJson(parsed.value));
         setJsonError('');
         setDownloaded(false);
-      } catch (err) {
-        onError('Invalid JSON file format');
-      } finally {
-        // Reset input so the same file can be selected again
-        if (fileInputRef.current) fileInputRef.current.value = '';
       }
+      if (fileInputRef.current) fileInputRef.current.value = '';
     };
     reader.onerror = () => onError('Failed to read file');
     reader.readAsText(file);
   };
 
-  const handleClearDataPoints = () => {
-    setDataPointsJson('[]');
-    setJsonError('');
+  const handleExportJson = () => {
+    const blob = new Blob([dataPointsJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${template.name.toLowerCase().replace(/\s+/g, '-')}-data-points.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const addDataPoint = () => {
+    const next = [...dataPoints, {}];
+    setDataPoints(next);
+    setDataPointsJson(prettyJson(next));
     setDownloaded(false);
   };
 
-  /** Live parse count */
-  const parsedCount = useMemo(() => {
-    try {
-      const arr = JSON.parse(dataPointsJson);
-      return Array.isArray(arr) ? arr.length : null;
-    } catch {
-      return null;
+  const removeDataPoint = (index: number) => {
+    const next = dataPoints.filter((_, idx) => idx !== index);
+    const normalized = next.length > 0 ? next : [{}];
+    setDataPoints(normalized);
+    setDataPointsJson(prettyJson(normalized));
+    setDownloaded(false);
+  };
+
+  const cloneDataPoint = (index: number) => {
+    const copy = JSON.parse(JSON.stringify(dataPoints[index] || {})) as Record<string, unknown>;
+    const next = [...dataPoints];
+    next.splice(index + 1, 0, copy);
+    setDataPoints(next);
+    setDataPointsJson(prettyJson(next));
+    setDownloaded(false);
+  };
+
+  const renderSchemaEditor: RenderSchemaEditor = (
+    schema: ComponentTypeSchema | null,
+    value: unknown,
+    onChange: (next: unknown) => void,
+    label: string
+  ) => {
+    if (!schema || schema.kind === 'string') {
+      return <input className="pg-input" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} placeholder={label} />;
     }
-  }, [dataPointsJson]);
+
+    if (schema.kind === 'integer') {
+      return <input className="pg-input" type="number" value={typeof value === 'number' ? value : 0} onChange={(e) => onChange(Number(e.target.value))} placeholder={label} />;
+    }
+
+    if (schema.kind === 'image') {
+      return <ImageValueEditor value={value} label={label} onChange={onChange} />;
+    }
+
+    if (schema.kind === 'hyperlink') {
+      const link = isRecord(value) ? value : {};
+      return (
+        <div className="pg-layout-composer-actions">
+          <input className="pg-input" value={typeof link.alias === 'string' ? link.alias : ''} onChange={(e) => onChange({ ...link, alias: e.target.value })} placeholder="Alias" />
+          <input className="pg-input" value={typeof link.url === 'string' ? link.url : ''} onChange={(e) => onChange({ ...link, url: e.target.value })} placeholder="URL" />
+        </div>
+      );
+    }
+
+    if (schema.kind === 'custom' && isRecord(schema.token_registry)) {
+      const container = isRecord(value) ? value : {};
+      const customData = isRecord(container.data) ? container.data : {};
+      if (schema.repeat) {
+        const items = isRecord(customData) && Array.isArray(customData.items) ? customData.items : [{}];
+        return (
+          <div className="pg-layout-composer">
+            {items.map((item, itemIndex) => {
+              const row = isRecord(item) ? item : {};
+              return (
+                <div className="pg-layout-composer" key={`custom-item-${itemIndex}`}>
+                  <div className="pg-layout-token-assist-label">Item {itemIndex + 1}</div>
+                  {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
+                    <div className="pg-insert-row" key={`token-${tokenId}-${itemIndex}`}>
+                      <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                      {renderSchemaEditor(tokenSchema, row[tokenId], (nextTokenValue) => {
+                        const nextItems = [...items];
+                        const current = isRecord(nextItems[itemIndex]) ? nextItems[itemIndex] : {};
+                        nextItems[itemIndex] = { ...current, [tokenId]: nextTokenValue };
+                        onChange({ data: { items: nextItems } });
+                      }, tokenId)}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+            <div className="pg-layout-composer-actions">
+              <button type="button" className="pg-layout-pattern" onClick={() => onChange({ data: { items: [...items, {}] } })}>+ Item</button>
+              <button type="button" className="pg-layout-pattern" onClick={() => onChange({ data: { items: items.length > 1 ? items.slice(0, -1) : items } })}>- Item</button>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="pg-layout-composer">
+          {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
+            <div className="pg-insert-row" key={`token-${tokenId}`}>
+              <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+              {renderSchemaEditor(tokenSchema, customData[tokenId], (nextTokenValue) => {
+                onChange({ data: { ...customData, [tokenId]: nextTokenValue } });
+              }, tokenId)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (schema.kind === 'list' || schema.kind === 'repeat') {
+      return (
+        <CollectionEditor
+          kind={schema.kind}
+          schema={schema}
+          value={value}
+          onChange={onChange}
+          renderSchemaEditor={renderSchemaEditor}
+          label={label}
+        />
+      );
+    }
+
+    if (schema.kind === 'table') {
+      return (
+        <TableValueEditor
+          schema={schema}
+          value={value}
+          onChange={onChange}
+        />
+      );
+    }
+
+    if (schema.kind === 'container' || schema.kind === 'page' || schema.kind === 'header' || schema.kind === 'footer') {
+      return (
+        <CompositeEditor
+          schema={schema}
+          value={value}
+          onChange={onChange}
+          renderSchemaEditor={renderSchemaEditor}
+          label={label}
+        />
+      );
+    }
+
+    return <input className="pg-input" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} placeholder={label} />;
+  };
 
   const handleGenerate = async () => {
-    // Array holding parsed submission inputs mapped to template requirements
-    let dataPoints: unknown[];
-
-    try {
-      // Try to parse the user's manual string JSON payload
-      const parsed = JSON.parse(dataPointsJson);
-      // Validate the high-level struct conforming to array collections exclusively
-      if (!Array.isArray(parsed))  throw new Error('Must be a JSON array of objects');
-      if (parsed.length === 0)     throw new Error('Provide at least one data point object');
-      dataPoints = parsed;
-      setJsonError('');
-    } catch (e: any) {
-      // Isolate malformed JSON block syntax strings returning user friendly feedback
-      setJsonError(e.message ?? 'Invalid JSON');
+    if (dataPoints.length === 0) {
+      setJsonError('Provide at least one data point object');
       return;
     }
 
@@ -323,48 +903,37 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     setDownloaded(false);
 
     try {
-      // Fire raw generation request to backend microservice 
       const res = await fetch(`/api/templates/${template._id}/generate`, {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ dataPoints }),
+        body: JSON.stringify({ dataPoints }),
       });
 
       if (!res.ok) {
-        // Fallback generic HTTP error text wrapper
         let errMsg = `Server error (${res.status})`;
         try {
-          // Unpack custom API payload responses specifically isolating validation issues
           const data = await res.json();
           errMsg = data.error ?? errMsg;
-          // Dynamically map exact unsupplied variables to help users debug their own queries
           if (data.data?.invalidDataPoints) {
-            const details = (
-              data.data.invalidDataPoints as { index: number; missing: string[] }[]
-            )
+            const details = (data.data.invalidDataPoints as { index: number; missing: string[] }[])
               .map((p) => `Row ${p.index + 1}: missing ${p.missing.join(', ')}`)
               .join(' · ');
             errMsg = `${errMsg} — ${details}`;
           }
-        } catch { /* ignore */ }
+        } catch {
+          // no-op
+        }
         onError(errMsg);
         return;
       }
 
-      // Convert backend streaming ZIP archive blob into isolated object string
       const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      
-      // Implement an invisible DOM anchor technique simulating direct local user downloads
-      const a    = document.createElement('a');
-      a.href     = url;
-      // Sanitize standard file string name configurations formatting a safe zip property
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
       a.download = `${template.name.toLowerCase().replace(/\s+/g, '-')}-documents.zip`;
-      
       document.body.appendChild(a);
       a.click();
-      
-      // Immediately garbage collect the object string representation
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
@@ -378,30 +947,15 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
 
   const btnLabel = loading
     ? 'Generating…'
-    : parsedCount !== null
-    ? `Generate ${parsedCount} PDF${parsedCount !== 1 ? 's' : ''} ↓`
-    : 'Generate ↓';
+    : `Generate ${dataPoints.length} PDF${dataPoints.length !== 1 ? 's' : ''} ↓`;
 
   return (
-    <div
-      className="pg-overlay"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div
-        className="pg-modal pg-modal-lg"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="gen-modal-title"
-      >
+    <div className="pg-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="pg-modal pg-modal-lg" role="dialog" aria-modal="true" aria-labelledby="gen-modal-title">
         <div className="pg-modal-header">
           <div>
-            <h2 className="pg-modal-title" id="gen-modal-title">
-              Generate Documents
-            </h2>
-            <p
-              className="pg-modal-subtitle"
-              style={{ fontFamily: 'var(--pg-font-serif)', fontStyle: 'italic' }}
-            >
+            <h2 className="pg-modal-title" id="gen-modal-title">Generate Documents</h2>
+            <p className="pg-modal-subtitle" style={{ fontFamily: 'var(--pg-font-serif)', fontStyle: 'italic' }}>
               {template.name}&nbsp;·&nbsp;v{template.version}
             </p>
           </div>
@@ -409,7 +963,6 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
         </div>
 
         <div className="pg-modal-body">
-          {/* Detected placeholder chips */}
           {placeholderKeys.length > 0 ? (
             <div className="pg-field">
               <label className="pg-label">Detected Placeholders</label>
@@ -421,92 +974,77 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
             </div>
           ) : (
             <div className="pg-field">
-              <span className="pg-field-hint">
-                No placeholders detected — every generated PDF will be identical.
-              </span>
+              <span className="pg-field-hint">No placeholders detected — every generated PDF will be identical.</span>
             </div>
           )}
 
-          {/* Data-points JSON editor */}
           <div className="pg-field">
-            <label className="pg-label" htmlFor="g-dp" style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-              Data Points
-              <div style={{ display: 'inline-flex', gap: '8px', marginLeft: 'auto' }}>
-                <button
-                  className="pg-btn-ghost"
-                  style={{ fontSize: '12px', padding: '2px 6px', height: 'auto' }}
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Upload JSON file"
-                >
-                  Upload JSON
-                </button>
-                <button
-                  className="pg-btn-ghost"
-                  style={{ fontSize: '12px', padding: '2px 6px', height: 'auto' }}
-                  onClick={handleClearDataPoints}
-                  title="Clear all data points"
-                >
-                  Clear
-                </button>
-              </div>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                accept=".json,application/json"
-                style={{ display: 'none' }}
-              />
-              <span
-                style={{
-                  color: 'var(--pg-text-muted)',
-                  textTransform: 'none',
-                  letterSpacing: 0,
-                  marginLeft: 6,
-                  fontSize: '10px',
-                }}
-              >
-                — one object = one PDF in the ZIP
-              </span>
-            </label>
-            <textarea
-              id="g-dp"
-              className={`pg-textarea${jsonError ? ' error' : ''}`}
-              value={dataPointsJson}
-              onChange={(e) => {
-                setDataPointsJson(e.target.value);
-                setDownloaded(false);
-                if (jsonError) setJsonError('');
-              }}
-              rows={10}
-              spellCheck={false}
-              style={{ minHeight: '230px' }}
-            />
-            {jsonError ? (
-              <span className="pg-field-error">{jsonError}</span>
-            ) : (
-              <span className="pg-field-hint">
-                JSON array of objects. Each object must supply a value for every detected placeholder.
-              </span>
-            )}
+            <label className="pg-label">Input Mode</label>
+            <div className="pg-layout-composer-actions">
+              <button type="button" className={`pg-layout-pattern${entryMode === 'visual' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('visual')}>Visual Inserter</button>
+              <button type="button" className={`pg-layout-pattern${entryMode === 'json' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('json')}>JSON Workspace</button>
+              <button type="button" className="pg-layout-pattern" onClick={handleExportJson}>Export JSON</button>
+              <button type="button" className="pg-layout-pattern" onClick={() => fileInputRef.current?.click()}>Upload JSON</button>
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json,application/json" style={{ display: 'none' }} />
+            </div>
           </div>
 
-          {/* Download success */}
-          {downloaded && (
-            <div className="pg-download-ok">
-              ✓ ZIP downloaded — check your downloads folder
+          {entryMode === 'visual' ? (
+            <div className="pg-layout-composer">
+              {dataPoints.map((point, pointIndex) => (
+                <div key={`dp-${pointIndex}`} className="pg-layout-composer">
+                  <div className="pg-layout-composer-actions">
+                    <span className="pg-layout-token-assist-label">Data Point {pointIndex + 1}</span>
+                    <button type="button" className="pg-layout-pattern" onClick={() => cloneDataPoint(pointIndex)}>Clone</button>
+                    <button type="button" className="pg-layout-pattern" onClick={() => removeDataPoint(pointIndex)}>Delete</button>
+                  </div>
+
+                  {placeholders.map((placeholder) => (
+                    <div className="pg-insert-row" key={`dp-${pointIndex}-${placeholder.key}`}>
+                      <label className="pg-label">{placeholder.key}</label>
+                      {renderSchemaEditor(
+                        placeholder.schema,
+                        point[placeholder.key],
+                        (nextValue) => updateDataPointValue(pointIndex, placeholder.key, nextValue),
+                        placeholder.key
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+
+              <div className="pg-layout-composer-actions">
+                <button type="button" className="pg-layout-pattern" onClick={addDataPoint}>+ Add Data Point</button>
+              </div>
             </div>
+          ) : (
+            <div className="pg-field">
+              <label className="pg-label" htmlFor="g-dp-json">JSON Workspace</label>
+              <textarea
+                id="g-dp-json"
+                className={`pg-textarea${jsonError ? ' error' : ''}`}
+                value={dataPointsJson}
+                onChange={(e) => updateJsonAndSyncVisual(e.target.value)}
+                rows={12}
+                spellCheck={false}
+                style={{ minHeight: '260px' }}
+              />
+              {jsonError ? (
+                <span className="pg-field-error">{jsonError}</span>
+              ) : (
+                <span className="pg-field-hint">JSON is synced with visual inserter in real time.</span>
+              )}
+            </div>
+          )}
+
+          {downloaded && (
+            <div className="pg-download-ok">✓ ZIP downloaded — check your downloads folder</div>
           )}
         </div>
 
         <div className="pg-modal-footer">
-          <button className="pg-btn-ghost" onClick={onClose} disabled={loading}>
-            Close
-          </button>
-          <button
-            className="pg-btn-primary"
-            onClick={handleGenerate}
-            disabled={loading || parsedCount === null || parsedCount === 0}
-          >
+          <button className="pg-btn-ghost" onClick={onClose} disabled={loading}>Close</button>
+          <button className="pg-btn-primary" onClick={handleGenerate} disabled={loading || dataPoints.length === 0 || !!jsonError}>
             {btnLabel}
           </button>
         </div>

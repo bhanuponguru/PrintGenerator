@@ -443,4 +443,70 @@ describe('template filling pipeline equivalence coverage', () => {
     expect(html).toContain('data-component="list" data-list-style="numbered"');
     expect(html).toContain('data-component="list" data-list-style="plain"');
   });
+
+  it('validates custom values against token registry and renders tokenized layout', () => {
+    const keyTypeMap = {
+      profile: {
+        kind: 'custom',
+        base_variable: 'item',
+        value_type: { kind: 'string' },
+        layout_template: 'Name: {{item.name}} | URL: {{item.url}}',
+        token_registry: {
+          name: { kind: 'string' },
+          url: { kind: 'string' },
+        },
+      },
+    };
+
+    const valid = validateDataPointAgainstKeyTypeMap(
+      {
+        profile: {
+          data: {
+            name: 'Ada',
+            url: 'https://example.com',
+          },
+        },
+      },
+      keyTypeMap
+    );
+
+    expect(valid.missing).toEqual([]);
+    expect(valid.invalid).toEqual([]);
+
+    const invalid = validateDataPointAgainstKeyTypeMap(
+      {
+        profile: {
+          data: {
+            name: 'Ada',
+          },
+        },
+      },
+      keyTypeMap
+    );
+
+    expect(invalid.invalid).toHaveLength(1);
+    expect(invalid.invalid[0]).toContain('profile.data.url');
+
+    const template = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'placeholder',
+              attrs: {
+                key: 'profile',
+                kind: 'custom',
+                schema: keyTypeMap.profile,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const html = renderDocumentHtml(applyTemplateDataPoint(template, valid.normalizedDataPoint));
+    expect(html).toContain('Name: Ada | URL: https://example.com');
+  });
 });

@@ -2,155 +2,82 @@
 
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import TextAlign from '@tiptap/extension-text-align';
+import Highlight from '@tiptap/extension-highlight';
 import { generateHTML } from '@tiptap/html';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
   Bold,
-  Italic,
-  Strikethrough,
+  Braces,
+  FileImage,
   Heading1,
   Heading2,
+  Heading3,
+  Highlighter,
+  Italic,
+  Link as LinkIcon,
   List,
   ListOrdered,
-  Undo,
+  Minus,
   Redo,
-  Braces,
-  Image as ImageIcon,
-  Link,
-  Box,
-  Table,
-  Layers,
-  File,
-  PanelTop,
-  PanelBottom,
   SeparatorHorizontal,
-  ArrowUp,
-  ArrowDown,
-  X,
-  Plus,
+  Strikethrough,
+  Table,
+  Undo,
+  Underline as UnderlineIcon,
 } from 'lucide-react';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
   ComponentExtensions,
-  createContainerComponent,
   createHyperlinkComponent,
   createImageComponent,
-  createListComponent,
   createTableComponent,
-  createPageComponent,
-  createHeaderComponent,
-  createFooterComponent,
+  deriveSchemaFromChildren,
   validateContainerAttrs,
+  validateFooterAttrs,
+  validateHeaderAttrs,
   validateHyperlinkAttrs,
   validateImageAttrs,
   validateListAttrs,
+  validatePageAttrs,
   validatePlaceholderAttrs,
   validateTableAttrs,
-  validatePageAttrs,
-  validateHeaderAttrs,
-  validateFooterAttrs,
 } from '@/lib/tiptap/extensions';
+import { fileToDataUrl } from '@/lib/image-utils';
 import { ComponentTypeSchema, ListStyle, TableMode } from '@/types/template';
 
 interface TemplateEditorProps {
-  initialContent?: Record<string, any>;
-  onChange: (json: Record<string, any>) => void;
+  initialContent?: Record<string, unknown>;
+  onChange: (json: Record<string, unknown>) => void;
   onValidationChange?: (state: { isValid: boolean; errors: string[] }) => void;
   hasError?: boolean;
 }
 
-type InsertPanel = 'placeholder' | 'image' | 'hyperlink' | null;
+type InsertPanel = 'placeholder' | 'image' | 'hyperlink' | 'table' | null;
 type PlaceholderKind = ComponentTypeSchema['kind'];
-type SubmodalTarget = 'container' | 'page' | 'header' | 'footer' | 'list' | 'table';
-type AnyChildType = 'string' | 'integer' | 'image' | 'hyperlink' | 'container' | 'list' | 'table';
+type DynamicItemKind = 'string' | 'integer' | 'image' | 'hyperlink' | 'list' | 'table' | 'repeat' | 'custom';
+type CustomLayoutNodeKind = 'text' | 'token' | 'newline';
 
-interface ChildEntry {
-  id: number;
-  type: AnyChildType;
-  value: unknown; // string, {src,alt}, {alias,url}, {components:[]}, {items:[]}, table data
-  schema: ComponentTypeSchema; // the schema for this child
+interface CustomTokenDraft {
+  id: string;
+  label: string;
+  kind: DynamicItemKind;
 }
 
-interface ModalStackEntry {
-  id: number;
-  target: SubmodalTarget;
-  label: string; // breadcrumb
-  children: ChildEntry[];
-  nextChildId: number;
-  error: string;
-  // Page-specific
-  pageSize?: string;
-  pageOrientation?: 'portrait' | 'landscape';
-  pageNumber?: number;
-  // List-specific
-  listStyle?: ListStyle;
-  listItemType?: AnyChildType;
-  // Table-specific
-  tableMode?: TableMode;
-  tableCaption?: string;
-  tableRowHeaders?: string[];
-  tableRowRows?: string[][];
-  tableColRowHeaders?: string[];
-  tableColNames?: string[];
-  tableColMatrix?: string[][];
-  // Callback when this modal confirms
-  onConfirm: (children: ChildEntry[], extra?: Record<string, unknown>) => void;
+interface CustomLayoutNodeDraft {
+  id: string;
+  kind: CustomLayoutNodeKind;
+  value: string;
+  tokenId?: string;
+  prefix?: string;
+  suffix?: string;
 }
-
-function childPreview(child: ChildEntry): string {
-  const v = child.value;
-  if (v === null || v === undefined) return '(empty)';
-  if (typeof v === 'string') return v || '(empty)';
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'object' && 'src' in (v as any)) return (v as any).alt || (v as any).src || '(image)';
-  if (typeof v === 'object' && 'alias' in (v as any)) return (v as any).alias || (v as any).url || '(link)';
-  if (typeof v === 'object' && 'components' in (v as any)) {
-    const comps = (v as any).components as unknown[];
-    return `{${comps.length} component${comps.length !== 1 ? 's' : ''}}`;
-  }
-  if (typeof v === 'object' && 'items' in (v as any)) {
-    const items = (v as any).items as unknown[];
-    return `[${items.length} item${items.length !== 1 ? 's' : ''}]`;
-  }
-  if (typeof v === 'object' && ('rows' in (v as any) || 'columns' in (v as any))) return '(table)';
-  return JSON.stringify(v).slice(0, 40);
-}
-
-function childToComponentValue(child: ChildEntry): unknown {
-  return child.value;
-}
-
-function schemaForChildType(type: AnyChildType, childEntries?: ChildEntry[]): ComponentTypeSchema {
-  if (type === 'string' || type === 'integer' || type === 'image' || type === 'hyperlink') {
-    return { kind: type } as ComponentTypeSchema;
-  }
-  if (type === 'container' && childEntries) {
-    return { kind: 'container', component_types: childEntries.map(c => c.schema) };
-  }
-  if (type === 'list') return { kind: 'list', item_type: { kind: 'string' } };
-  if (type === 'table') return { kind: 'table' };
-  return { kind: type } as ComponentTypeSchema;
-}
-
-const ALL_CHILD_TYPES: { value: AnyChildType; label: string }[] = [
-  { value: 'string', label: 'string' },
-  { value: 'integer', label: 'integer' },
-  { value: 'image', label: 'image' },
-  { value: 'hyperlink', label: 'hyperlink' },
-  { value: 'container', label: 'container' },
-  { value: 'list', label: 'list' },
-  { value: 'table', label: 'table' },
-];
 
 const KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-/** Walks a TipTap document tree so validation can inspect every node. */
-function walkTiptapJson(node: Record<string, any>, visit: (n: Record<string, any>) => void) {
-  visit(node);
-  if (Array.isArray(node.content)) {
-    node.content.forEach((child: Record<string, any>) => walkTiptapJson(child, visit));
-  }
-}
 
 function unique(items: string[]): string[] {
   return Array.from(new Set(items));
@@ -170,37 +97,143 @@ function parseLineItems(input: string): string[] {
     .filter(Boolean);
 }
 
+function normalizeIdentifierDraft(input: string): string {
+  return input.trim().replace(/\s+/g, '_');
+}
+
+function defaultHeaderName(index: number): string {
+  return `Column_${index + 1}`;
+}
+
+function alignMatrixToHeaders(headers: string[], current: string[][]): string[][] {
+  if (headers.length === 0) return [];
+  if (current.length === 0) {
+    return [headers.map(() => '')];
+  }
+  return current.map((row) => {
+    const next = headers.map((_, idx) => row[idx] ?? '');
+    return next;
+  });
+}
+
 function normalizeListStyle(style: string): ListStyle {
   return style === 'numbered' || style === 'plain' ? style : 'bulleted';
 }
 
-/** Returns a sensible default schema for the selected placeholder kind. */
+function buildLayoutTokens(baseVariable: string, fields: string[]): string[] {
+  const safeBase = KEY_RE.test(baseVariable.trim()) ? baseVariable.trim() : 'item';
+  const normalizedFields = unique(fields.map((field) => normalizeIdentifierDraft(field)).filter(Boolean));
+  return unique([
+    `{{${safeBase}}}`,
+    ...normalizedFields.map((field) => `{{${safeBase}.${field}}}`),
+  ]);
+}
+
+function insertTokenIntoTemplate(current: string, token: string): string {
+  if (current.trim() === '') {
+    return token;
+  }
+
+  if (current.endsWith('\n')) {
+    return `${current}${token}`;
+  }
+
+  return `${current} ${token}`;
+}
+
+function createCustomLayoutNode(kind: CustomLayoutNodeKind, value: string, tokenId?: string): CustomLayoutNodeDraft {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    kind,
+    value,
+    tokenId,
+  };
+}
+
+function buildCustomLayoutTemplate(baseVariable: string, nodes: CustomLayoutNodeDraft[]): string {
+  const safeBase = KEY_RE.test(baseVariable.trim()) ? baseVariable.trim() : 'item';
+  return nodes
+    .map((node) => {
+      if (node.kind === 'newline') return '\n';
+      if (node.kind === 'text') return node.value;
+      if (!node.tokenId) return '';
+      const tokenPart = `{{${safeBase}.${node.tokenId}}}`;
+      return `${node.prefix || ''}${tokenPart}${node.suffix || ''}`;
+    })
+    .join('');
+}
+
+function toCustomLayoutSchemaNodes(nodes: CustomLayoutNodeDraft[]) {
+  return nodes.map((node) => {
+    if (node.kind === 'newline') return { kind: 'newline' as const };
+    if (node.kind === 'text') return { kind: 'text' as const, value: node.value };
+    return {
+      kind: 'token' as const,
+      token_id: node.tokenId || '',
+      ...(node.prefix ? { prefix: node.prefix } : {}),
+      ...(node.suffix ? { suffix: node.suffix } : {}),
+    };
+  });
+}
+
+function applyTemplatePreview(template: string, baseVariable: string, fields: string[]): string {
+  if (!template.trim()) {
+    return '';
+  }
+
+  const safeBase = KEY_RE.test(baseVariable.trim()) ? baseVariable.trim() : 'item';
+  const values = Object.fromEntries(fields.map((field, idx) => [field, `${field}_${idx + 1}`]));
+
+  return template.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_\.]*)\s*\}\}/g, (_, token: string) => {
+    if (token === safeBase) {
+      return JSON.stringify(values);
+    }
+
+    const prefix = `${safeBase}.`;
+    if (token.startsWith(prefix)) {
+      const key = token.slice(prefix.length);
+      return key in values ? String(values[key]) : '';
+    }
+
+    return '';
+  });
+}
+
 function defaultSchemaForKind(kind: PlaceholderKind): ComponentTypeSchema {
   if (kind === 'string' || kind === 'integer' || kind === 'image' || kind === 'hyperlink') {
     return { kind } as ComponentTypeSchema;
   }
 
   if (kind === 'list') {
-    return {
-      kind: 'list',
-      item_type: { kind: 'string' },
-    };
+    return { kind: 'list', item_type: { kind: 'string' } };
+  }
+
+  if (kind === 'repeat') {
+    return { kind: 'repeat', item_type: { kind: 'string' } };
   }
 
   if (kind === 'container') {
-    return {
-      kind: 'container',
-      component_types: [{ kind: 'string' }],
-    };
+    return { kind: 'container', component_types: [{ kind: 'string' }] };
+  }
+
+  if (kind === 'page_break') {
+    return { kind: 'page_break' };
   }
 
   return { kind: 'table' };
 }
 
+function walkTiptapJson(node: Record<string, any>, visit: (n: Record<string, any>) => void) {
+  visit(node);
+  if (Array.isArray(node.content)) {
+    node.content.forEach((child: Record<string, any>) => walkTiptapJson(child, visit));
+  }
+}
+
 function collectValidationErrors(documentJson: Record<string, any>): string[] {
   const errors: string[] = [];
+  const placeholderSchemaFingerprint = new Map<string, string>();
 
-  /** Enforce the structural contract for each inserted node type. */
   walkTiptapJson(documentJson, (node) => {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
 
@@ -208,21 +241,44 @@ function collectValidationErrors(documentJson: Record<string, any>): string[] {
 
     if (node.type === 'placeholder') {
       const err = validatePlaceholderAttrs(attrs);
-      if (err) {
-        errors.push(`placeholder: ${err}`);
-      }
+      if (err) errors.push(`placeholder: ${err}`);
 
-      if (attrs.kind === 'list' && (attrs.item_kind !== 'string' && attrs.item_kind !== 'integer' && attrs.item_kind !== 'image' && attrs.item_kind !== 'hyperlink')) {
-        errors.push('placeholder: list placeholders require item_kind');
-      }
-
-      if (attrs.kind === 'container' && (!Array.isArray(attrs.component_kinds) || attrs.component_kinds.length === 0)) {
-        errors.push('placeholder: container placeholders require component_kinds');
-      }
-
-      const key = typeof attrs.key === 'string' ? attrs.key : '';
+      const key = typeof attrs.key === 'string' ? attrs.key.trim() : '';
       if (!KEY_RE.test(key)) {
         errors.push(`placeholder: invalid key '${key}'`);
+      }
+
+      const kind = typeof attrs.kind === 'string'
+        ? attrs.kind
+        : (typeof attrs.schema === 'object' && attrs.schema && 'kind' in (attrs.schema as Record<string, unknown>)
+          ? String((attrs.schema as Record<string, unknown>).kind)
+          : 'string');
+
+      const schema = deriveSchemaFromChildren(kind, attrs, node.content);
+
+      if (schema.kind === 'list' && !schema.item_type) {
+        errors.push(`placeholder '${key}': list requires item_type`);
+      }
+
+      if (schema.kind === 'container' && schema.mode !== 'repeat' && (!Array.isArray(schema.component_types) || schema.component_types.length === 0)) {
+        errors.push(`placeholder '${key}': tuple container requires component_types`);
+      }
+
+      if (schema.kind === 'table' && schema.mode !== undefined && schema.mode !== 'row_data' && schema.mode !== 'column_data') {
+        errors.push(`placeholder '${key}': table mode must be row_data or column_data`);
+      }
+
+      const fingerprint = JSON.stringify({
+        kind,
+        schema,
+      });
+
+      if (key) {
+        const existing = placeholderSchemaFingerprint.get(key);
+        if (existing && existing !== fingerprint) {
+          errors.push(`placeholder '${key}': duplicate key with conflicting schema`);
+        }
+        placeholderSchemaFingerprint.set(key, fingerprint);
       }
     }
 
@@ -241,14 +297,14 @@ function collectValidationErrors(documentJson: Record<string, any>): string[] {
       if (err) errors.push(`listComponent: ${err}`);
     }
 
-    if (node.type === 'containerComponent') {
-      const err = validateContainerAttrs(attrs);
-      if (err) errors.push(`containerComponent: ${err}`);
-    }
-
     if (node.type === 'tableComponent') {
       const err = validateTableAttrs(attrs);
       if (err) errors.push(`tableComponent: ${err}`);
+    }
+
+    if (node.type === 'containerComponent') {
+      const err = validateContainerAttrs(attrs);
+      if (err) errors.push(`containerComponent: ${err}`);
     }
 
     if (node.type === 'pageComponent') {
@@ -276,78 +332,88 @@ export default function TemplateEditor({
   onValidationChange,
   hasError = false,
 }: TemplateEditorProps) {
-  /** Toolbar panel state for the various insert dialogs. */
   const [insertPanel, setInsertPanel] = useState<InsertPanel>(null);
-  /** Live validation state shown to the user and bubbled to the parent. */
+  const [insertError, setInsertError] = useState('');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [selectedBlockStyle, setSelectedBlockStyle] = useState<'paragraph' | 'h1' | 'h2' | 'h3'>('paragraph');
 
-  /** Placeholder insertion form state. */
   const [phKey, setPhKey] = useState('');
   const [phKind, setPhKind] = useState<PlaceholderKind>('string');
   const [phListStyle, setPhListStyle] = useState<ListStyle>('bulleted');
-  const [phListItemKind, setPhListItemKind] = useState<PlaceholderKind>('string');
+  const [phListItemKind, setPhListItemKind] = useState<DynamicItemKind>('string');
+  const [phRepeatItemKind, setPhRepeatItemKind] = useState<DynamicItemKind>('string');
+  const [phRepeatMinItems, setPhRepeatMinItems] = useState('');
+  const [phRepeatMaxItems, setPhRepeatMaxItems] = useState('');
+  const [phRepeatBaseVariable, setPhRepeatBaseVariable] = useState('item');
+  const [phRepeatLayoutTemplate, setPhRepeatLayoutTemplate] = useState('');
+  const [phRepeatLayoutFields, setPhRepeatLayoutFields] = useState<string[]>(['name', 'value']);
+  const [phRepeatLayoutFieldDraft, setPhRepeatLayoutFieldDraft] = useState('');
+  const [phCustomBaseVariable, setPhCustomBaseVariable] = useState('item');
+  const [phCustomValueKind, setPhCustomValueKind] = useState<DynamicItemKind>('string');
+  const [phCustomTokens, setPhCustomTokens] = useState<CustomTokenDraft[]>([]);
+  const [phCustomTokenIdDraft, setPhCustomTokenIdDraft] = useState('');
+  const [phCustomTokenLabelDraft, setPhCustomTokenLabelDraft] = useState('');
+  const [phCustomTokenKindDraft, setPhCustomTokenKindDraft] = useState<DynamicItemKind>('string');
+  const [phCustomLayoutNodes, setPhCustomLayoutNodes] = useState<CustomLayoutNodeDraft[]>([]);
+  const [phCustomRepeat, setPhCustomRepeat] = useState(false);
+  const customTokenDragRef = useRef<string | null>(null);
+
+  const repeatLayoutTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [phTableMode, setPhTableMode] = useState<TableMode>('row_data');
-  const [phTableHeaders, setPhTableHeaders] = useState('Item,Qty');
+  const [phTableHeaders, setPhTableHeaders] = useState<string[]>(['Item', 'Qty']);
+  const [phTableHeaderDraft, setPhTableHeaderDraft] = useState('');
   const [phTableColumnKinds, setPhTableColumnKinds] = useState<Record<string, PlaceholderKind>>({});
   const [phTableRowKinds, setPhTableRowKinds] = useState<Record<string, PlaceholderKind>>({});
-  const [phContainerSlots, setPhContainerSlots] = useState('2');
-  const [phContainerKinds, setPhContainerKinds] = useState<Record<number, PlaceholderKind>>({});
-  const [insertError, setInsertError] = useState('');
 
-  /** Component insertion form state. */
   const [imageSrc, setImageSrc] = useState('https://example.com/logo.png');
-  const [imageAlt, setImageAlt] = useState('Image');
+  const [imageAlt, setImageAlt] = useState('Logo');
 
-  const [linkAlias, setLinkAlias] = useState('Docs');
+  const [linkAlias, setLinkAlias] = useState('Documentation');
   const [linkUrl, setLinkUrl] = useState('https://example.com/docs');
 
-  /** Submodal state — modal stack for recursive editing. */
-  const [modalStack, setModalStack] = useState<ModalStackEntry[]>([]);
-  const [modalNextId, setModalNextId] = useState(1);
-  // Per-modal form state (for the primitive add-child form on the topmost modal)
-  const [addChildType, setAddChildType] = useState<AnyChildType>('string');
-  const [addChildValue, setAddChildValue] = useState('');
-  const [addChildImageSrc, setAddChildImageSrc] = useState('https://example.com/logo.png');
-  const [addChildImageAlt, setAddChildImageAlt] = useState('Image');
-  const [addChildLinkAlias, setAddChildLinkAlias] = useState('Link');
-  const [addChildLinkUrl, setAddChildLinkUrl] = useState('https://example.com');
-  // List-specific (when adding a list child)
-  const [addListItemType, setAddListItemType] = useState<AnyChildType>('string');
-  const [addListStyle, setAddListStyle] = useState<ListStyle>('bulleted');
+  const [tableMode, setTableMode] = useState<TableMode>('row_data');
+  const [tableCaption, setTableCaption] = useState('');
+  const [tableHeaders, setTableHeaders] = useState<string[]>(['Item', 'Qty']);
+  const [tableHeaderDraft, setTableHeaderDraft] = useState('');
+  const [tableRows, setTableRows] = useState<string[][]>([['Pen', '2'], ['Paper', '5']]);
+  const [tableColumnNames, setTableColumnNames] = useState<string[]>(['Sales']);
+  const [tableColumnNameDraft, setTableColumnNameDraft] = useState('');
+  const [tableColumnRowHeaders, setTableColumnRowHeaders] = useState<string[]>(['Q1', 'Q2']);
+  const [tableColumnRowHeaderDraft, setTableColumnRowHeaderDraft] = useState('');
+  const [tableColumnMatrix, setTableColumnMatrix] = useState<string[][]>([['1200'], ['2400']]);
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({
-        codeBlock: false,
-        blockquote: false,
-        horizontalRule: false,
-      }),
+      StarterKit.configure({ codeBlock: false }),
+      Highlight,
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Placeholder,
       ...ComponentExtensions,
     ],
     content: initialContent ?? {
       type: 'doc',
-      content: [
-        {
-          type: 'pageComponent',
-          attrs: {
-            pageNumber: 1,
-            size: 'A4',
-            orientation: 'portrait',
-            value: { components: [] }
-          }
-        }
-      ],
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Start writing your template…' }] }],
+    },
+    onCreate({ editor: ed }) {
+      const json = ed.getJSON();
+      onChange(json);
+      const errors = collectValidationErrors(json as Record<string, any>);
+      setValidationErrors(errors);
+      onValidationChange?.({ isValid: errors.length === 0, errors });
     },
     onUpdate({ editor: ed }) {
       const json = ed.getJSON();
       onChange(json);
-
       const errors = collectValidationErrors(json as Record<string, any>);
       setValidationErrors(errors);
       onValidationChange?.({ isValid: errors.length === 0, errors });
+
+      if (ed.isActive('heading', { level: 1 })) setSelectedBlockStyle('h1');
+      else if (ed.isActive('heading', { level: 2 })) setSelectedBlockStyle('h2');
+      else if (ed.isActive('heading', { level: 3 })) setSelectedBlockStyle('h3');
+      else setSelectedBlockStyle('paragraph');
     },
     immediatelyRender: false,
     editorProps: {
@@ -358,81 +424,417 @@ export default function TemplateEditor({
     },
   });
 
-  useEffect(() => () => { editor?.destroy(); }, [editor]);
+  useEffect(() => () => {
+    editor?.destroy();
+  }, [editor]);
 
-  const active = (name: string, opts?: object) =>
-    editor?.isActive(name, opts) ? ' pg-tb-active' : '';
+  const active = (name: string, opts?: object) => (editor?.isActive(name, opts) ? ' pg-tb-active' : '');
+  const activeAlign = (align: 'left' | 'center' | 'right' | 'justify') => (editor?.isActive({ textAlign: align }) ? ' pg-tb-active' : '');
 
   const cmd = (fn: () => void) => (e: React.MouseEvent) => {
     e.preventDefault();
     fn();
   };
 
+  const placeholderMeta = useMemo(() => {
+    if (!editor) return [] as Array<{ key: string; kind: string }>;
+    const result: Array<{ key: string; kind: string }> = [];
+    const seen = new Set<string>();
+    const json = editor.getJSON() as Record<string, any>;
+
+    walkTiptapJson(json, (node) => {
+      if (node.type !== 'placeholder') return;
+      const key = typeof node.attrs?.key === 'string' ? node.attrs.key : '';
+      const kind = typeof node.attrs?.schema?.kind === 'string'
+        ? node.attrs.schema.kind
+        : typeof node.attrs?.kind === 'string'
+          ? node.attrs.kind
+          : 'string';
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      result.push({ key, kind });
+    });
+
+    return result.sort((a, b) => a.key.localeCompare(b.key));
+  }, [editor?.state]);
+
+  const metrics = useMemo(() => {
+    if (!editor) return { words: 0, characters: 0 };
+    const text = editor.getText().trim();
+    const words = text ? text.split(/\s+/).length : 0;
+    return { words, characters: text.length };
+  }, [editor?.state]);
+
+  const repeatLayoutFields = useMemo(
+    () => unique(phRepeatLayoutFields.map((field) => normalizeIdentifierDraft(field)).filter(Boolean)),
+    [phRepeatLayoutFields]
+  );
+
+  const repeatLayoutTokens = useMemo(
+    () => buildLayoutTokens(phRepeatBaseVariable, repeatLayoutFields),
+    [phRepeatBaseVariable, repeatLayoutFields]
+  );
+
+  const repeatLayoutPreview = useMemo(
+    () => applyTemplatePreview(phRepeatLayoutTemplate, phRepeatBaseVariable, repeatLayoutFields),
+    [phRepeatLayoutTemplate, phRepeatBaseVariable, repeatLayoutFields]
+  );
+
+  const customLayoutFields = useMemo(
+    () => unique(phCustomTokens.map((token) => token.id)),
+    [phCustomTokens]
+  );
+
+  const customLayoutTokens = useMemo(
+    () => customLayoutFields.map((field) => `{{${phCustomBaseVariable}.${field}}}`),
+    [customLayoutFields, phCustomBaseVariable]
+  );
+
+  const customLayoutTemplate = useMemo(
+    () => buildCustomLayoutTemplate(phCustomBaseVariable, phCustomLayoutNodes),
+    [phCustomBaseVariable, phCustomLayoutNodes]
+  );
+
+  const customLayoutPreview = useMemo(
+    () => applyTemplatePreview(customLayoutTemplate, phCustomBaseVariable, customLayoutFields),
+    [customLayoutTemplate, phCustomBaseVariable, customLayoutFields]
+  );
+
+  const insertTokenAtCursor = useCallback((target: 'repeat' | 'custom', token: string) => {
+    const textarea = target === 'repeat' ? repeatLayoutTextareaRef.current : null;
+
+    if (!textarea) {
+      if (target === 'repeat') {
+        setPhRepeatLayoutTemplate((prev) => insertTokenIntoTemplate(prev, token));
+      }
+      return;
+    }
+
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    const current = textarea.value;
+    const next = `${current.slice(0, start)}${token}${current.slice(end)}`;
+    const caret = start + token.length;
+
+    if (target === 'repeat') {
+      setPhRepeatLayoutTemplate(next);
+    }
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
+    });
+  }, []);
+
+  const addRepeatLayoutField = useCallback(() => {
+    const next = normalizeIdentifierDraft(phRepeatLayoutFieldDraft);
+    if (!next) return;
+    if (!KEY_RE.test(next)) {
+      setInsertError('Repeat field id is invalid. Use letters/digits/underscore and start with letter or _.');
+      return;
+    }
+    setPhRepeatLayoutFields((prev) => unique([...prev, next]));
+    setPhRepeatLayoutFieldDraft('');
+    setInsertError('');
+  }, [phRepeatLayoutFieldDraft]);
+
+  const removeRepeatLayoutField = useCallback((field: string) => {
+    setPhRepeatLayoutFields((prev) => prev.filter((item) => item !== field));
+  }, []);
+
+  const addPlaceholderTableHeader = useCallback(() => {
+    const next = normalizeIdentifierDraft(phTableHeaderDraft);
+    if (!next) return;
+    if (!KEY_RE.test(next)) {
+      setInsertError('Table header id is invalid. Use letters/digits/underscore and start with letter or _.');
+      return;
+    }
+    setPhTableHeaders((prev) => {
+      if (prev.includes(next)) return prev;
+      return [...prev, next];
+    });
+    setPhTableHeaderDraft('');
+    setInsertError('');
+  }, [phTableHeaderDraft]);
+
+  const removePlaceholderTableHeader = useCallback((header: string) => {
+    setPhTableHeaders((prev) => prev.filter((item) => item !== header));
+    setPhTableColumnKinds((prev) => {
+      const next = { ...prev };
+      delete next[header];
+      return next;
+    });
+    setPhTableRowKinds((prev) => {
+      const next = { ...prev };
+      delete next[header];
+      return next;
+    });
+  }, []);
+
+  const addTableHeader = useCallback(() => {
+    const nextHeader = normalizeIdentifierDraft(tableHeaderDraft);
+    if (!nextHeader) return;
+    if (!KEY_RE.test(nextHeader)) {
+      setInsertError('Table header id is invalid. Use letters/digits/underscore and start with letter or _.');
+      return;
+    }
+    setTableHeaders((prev) => {
+      if (prev.includes(nextHeader)) return prev;
+      return [...prev, nextHeader];
+    });
+    setTableRows((prev) => alignMatrixToHeaders([...tableHeaders, nextHeader], prev));
+    setTableHeaderDraft('');
+    setInsertError('');
+  }, [tableHeaderDraft, tableHeaders]);
+
+  const removeTableHeader = useCallback((header: string) => {
+    setTableHeaders((prevHeaders) => {
+      const nextHeaders = prevHeaders.filter((item) => item !== header);
+      setTableRows((prevRows) => {
+        const headerIndex = prevHeaders.indexOf(header);
+        if (headerIndex < 0) return prevRows;
+        return prevRows.map((row) => row.filter((_, idx) => idx !== headerIndex));
+      });
+      return nextHeaders.length > 0 ? nextHeaders : [defaultHeaderName(0)];
+    });
+  }, []);
+
+  const updateTableCell = useCallback((rowIndex: number, columnIndex: number, nextValue: string) => {
+    setTableRows((prev) => prev.map((row, rIdx) => {
+      if (rIdx !== rowIndex) return row;
+      const nextRow = [...row];
+      nextRow[columnIndex] = nextValue;
+      return nextRow;
+    }));
+  }, []);
+
+  const addTableRow = useCallback(() => {
+    setTableRows((prev) => [...prev, tableHeaders.map(() => '')]);
+  }, [tableHeaders]);
+
+  const removeTableRow = useCallback((rowIndex: number) => {
+    setTableRows((prev) => {
+      const next = prev.filter((_, idx) => idx !== rowIndex);
+      return next.length > 0 ? next : [tableHeaders.map(() => '')];
+    });
+  }, [tableHeaders]);
+
+  const addCustomTokenDefinition = useCallback(() => {
+    const nextId = phCustomTokenIdDraft.trim().replace(/\s+/g, '_');
+    if (!KEY_RE.test(nextId)) {
+      setInsertError('Token id is invalid. Use letters/digits/underscore and start with letter or _.');
+      return;
+    }
+    if (phCustomTokens.some((token) => token.id === nextId)) {
+      setInsertError(`Token '${nextId}' already exists.`);
+      return;
+    }
+    setPhCustomTokens((prev) => [
+      ...prev,
+      { id: nextId, label: phCustomTokenLabelDraft.trim() || nextId, kind: phCustomTokenKindDraft },
+    ]);
+    setPhCustomTokenIdDraft('');
+    setPhCustomTokenLabelDraft('');
+    setInsertError('');
+  }, [phCustomTokenIdDraft, phCustomTokenKindDraft, phCustomTokenLabelDraft, phCustomTokens]);
+
+  const updateCustomTokenDefinition = useCallback((tokenId: string, patch: Partial<CustomTokenDraft>) => {
+    setPhCustomTokens((prev) => prev.map((token) => (token.id === tokenId ? { ...token, ...patch } : token)));
+  }, []);
+
+  const moveCustomTokenDefinition = useCallback((tokenId: string, direction: 'up' | 'down') => {
+    setPhCustomTokens((prev) => {
+      const index = prev.findIndex((token) => token.id === tokenId);
+      if (index === -1) return prev;
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, []);
+
+  const removeCustomTokenDefinition = useCallback((tokenId: string) => {
+    setPhCustomTokens((prev) => prev.filter((token) => token.id !== tokenId));
+    setPhCustomLayoutNodes((prev) => prev.filter((node) => node.kind !== 'token' || node.tokenId !== tokenId));
+  }, []);
+
+  const appendCustomNode = useCallback((kind: CustomLayoutNodeKind, tokenId?: string) => {
+    setPhCustomLayoutNodes((prev) => [...prev, createCustomLayoutNode(kind, kind === 'newline' ? '\n' : '', tokenId)]);
+  }, []);
+
+  const handleCustomTokenDragStart = useCallback((tokenId: string) => {
+    customTokenDragRef.current = tokenId;
+  }, []);
+
+  const handleCustomLayoutDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const tokenId = customTokenDragRef.current;
+    if (tokenId) {
+      appendCustomNode('token', tokenId);
+    }
+    customTokenDragRef.current = null;
+  }, [appendCustomNode]);
+
+  const updateCustomNode = useCallback((id: string, patch: Partial<CustomLayoutNodeDraft>) => {
+    setPhCustomLayoutNodes((prev) => prev.map((node) => (node.id === id ? { ...node, ...patch } : node)));
+  }, []);
+
+  const removeCustomNode = useCallback((id: string) => {
+    setPhCustomLayoutNodes((prev) => {
+      const next = prev.filter((node) => node.id !== id);
+      return next.length > 0 ? next : [createCustomLayoutNode('text', '')];
+    });
+  }, []);
+
+  const moveCustomNode = useCallback((id: string, direction: 'up' | 'down') => {
+    setPhCustomLayoutNodes((prev) => {
+      const index = prev.findIndex((node) => node.id === id);
+      if (index === -1) return prev;
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, []);
+
   const openPreview = useCallback(() => {
     if (!editor) return;
-
     try {
-      setPreviewHtml(generateHTML(editor.getJSON(), [StarterKit, Placeholder, ...ComponentExtensions]));
+      setPreviewHtml(generateHTML(editor.getJSON(), [
+        StarterKit,
+        Highlight,
+        TextAlign.configure({ types: ['heading', 'paragraph'] }),
+        Placeholder,
+        ...ComponentExtensions,
+      ]));
     } catch {
       setPreviewHtml('<p>Unable to render preview.</p>');
     }
-
     setIsPreviewOpen(true);
   }, [editor]);
 
   const insertTypedPlaceholder = useCallback(() => {
+    if (!editor) return;
+
     const key = phKey.trim().replace(/\s+/g, '_');
-    if (!key || !KEY_RE.test(key)) {
+    if (!KEY_RE.test(key)) {
       setInsertError('Placeholder key is invalid. Use letters/digits/underscore and start with letter or _.');
       return;
     }
 
-    const attrs: Record<string, unknown> = {
-      key,
-      kind: phKind,
-      value: '',
-    };
+    const attrs: Record<string, unknown> = { key, kind: phKind, value: '' };
+    let schema: ComponentTypeSchema = defaultSchemaForKind(phKind);
 
     if (phKind === 'list') {
-      attrs.style = normalizeListStyle(phListStyle);
-      attrs.item_kind = phListItemKind;
+      schema = {
+        kind: 'list',
+        item_type: defaultSchemaForKind(phListItemKind),
+        style: normalizeListStyle(phListStyle),
+      };
     }
 
-    if (phKind === 'container') {
-      const slots = Number(phContainerSlots);
-      const count = Number.isFinite(slots) && slots > 0 ? Math.floor(slots) : 2;
-      attrs.component_kinds = Array.from({ length: count }, (_, index) => phContainerKinds[index] || 'string');
+    if (phKind === 'repeat') {
+      const minItems = phRepeatMinItems.trim() === '' ? undefined : Number(phRepeatMinItems);
+      const maxItems = phRepeatMaxItems.trim() === '' ? undefined : Number(phRepeatMaxItems);
+      const baseVariable = phRepeatBaseVariable.trim() || 'item';
+      const layoutTemplate = phRepeatLayoutTemplate.trim();
+
+      if (minItems !== undefined && (!Number.isFinite(minItems) || minItems < 0)) {
+        setInsertError('Repeat min items must be a non-negative number.');
+        return;
+      }
+
+      if (maxItems !== undefined && (!Number.isFinite(maxItems) || maxItems < 0)) {
+        setInsertError('Repeat max items must be a non-negative number.');
+        return;
+      }
+
+      if (!KEY_RE.test(baseVariable)) {
+        setInsertError('Repeat base variable is invalid. Use letters/digits/underscore and start with letter or _.');
+        return;
+      }
+
+      schema = {
+        kind: 'repeat',
+        item_type: defaultSchemaForKind(phRepeatItemKind),
+        ...(minItems !== undefined ? { min_items: Math.floor(minItems) } : {}),
+        ...(maxItems !== undefined ? { max_items: Math.floor(maxItems) } : {}),
+        ...(baseVariable ? { base_variable: baseVariable } : {}),
+        ...(layoutTemplate ? { layout_template: layoutTemplate } : {}),
+      };
     }
 
-    if (phKind === 'table' && parseCommaSeparated(phTableHeaders).length === 0) {
-      setInsertError('Table placeholders require at least one header.');
-      return;
+    if (phKind === 'custom') {
+      const baseVariable = phCustomBaseVariable.trim() || 'item';
+      const layoutTemplate = customLayoutTemplate.trim();
+      const tokenRegistry = Object.fromEntries(
+        phCustomTokens.map((token) => [token.id, defaultSchemaForKind(token.kind)])
+      );
+      const tokenLabels = Object.fromEntries(
+        phCustomTokens.map((token) => [token.id, token.label])
+      );
+
+      if (!KEY_RE.test(baseVariable)) {
+        setInsertError('Custom base variable is invalid. Use letters/digits/underscore and start with letter or _.');
+        return;
+      }
+
+      if (!layoutTemplate) {
+        setInsertError('Custom layout template is required.');
+        return;
+      }
+
+      if (Object.keys(tokenRegistry).length === 0) {
+        setInsertError('Custom placeholders require at least one token in the registry.');
+        return;
+      }
+
+      schema = {
+        kind: 'custom',
+        base_variable: baseVariable,
+        value_type: defaultSchemaForKind(phCustomValueKind),
+        layout_template: layoutTemplate,
+        repeat: phCustomRepeat,
+        token_registry: tokenRegistry,
+        token_labels: tokenLabels,
+        layout_nodes: toCustomLayoutSchemaNodes(phCustomLayoutNodes),
+      };
     }
 
     if (phKind === 'table') {
-      const headers = parseCommaSeparated(phTableHeaders);
-      attrs.mode = phTableMode;
-      attrs.headers = headers;
+      const headers = phTableHeaders.map((header) => normalizeIdentifierDraft(header)).filter(Boolean);
+      const baseTableSchema: ComponentTypeSchema = {
+        kind: 'table',
+        mode: phTableMode,
+        dynamic_headers: headers.length === 0,
+        ...(headers.length > 0 ? { headers } : {}),
+      };
 
       if (phTableMode === 'row_data') {
-        attrs.column_types = Object.fromEntries(
-          headers.map((header) => [
-            header,
-            defaultSchemaForKind(phTableColumnKinds[header] || 'string'),
-          ])
-        );
+        schema = {
+          ...baseTableSchema,
+          kind: 'table',
+          column_types: Object.fromEntries(
+          headers.map((header) => [header, defaultSchemaForKind(phTableColumnKinds[header] || 'string')])
+          ),
+        };
       } else {
-        attrs.row_types = Object.fromEntries(
-          headers.map((header) => [
-            header,
-            defaultSchemaForKind(phTableRowKinds[header] || 'string'),
-          ])
-        );
+        schema = {
+          ...baseTableSchema,
+          kind: 'table',
+          row_types: Object.fromEntries(
+          headers.map((header) => [header, defaultSchemaForKind(phTableRowKinds[header] || 'string')])
+          ),
+        };
       }
     }
 
-    const result = editor
-      ?.chain()
+    attrs.schema = schema;
+
+    const ok = editor
+      .chain()
       .focus()
       .insertContent({
         type: 'placeholder',
@@ -441,25 +843,19 @@ export default function TemplateEditor({
       })
       .run();
 
-    if (!result) {
+    if (!ok) {
       setInsertError('Failed to insert placeholder.');
       return;
     }
 
-    setInsertError('');
     setPhKey('');
+    setInsertError('');
     setInsertPanel(null);
-  }, [editor, phKey, phKind, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds, phListStyle, phListItemKind, phContainerSlots, phContainerKinds]);
+  }, [editor, phKey, phKind, phListStyle, phListItemKind, phRepeatItemKind, phRepeatMinItems, phRepeatMaxItems, phRepeatBaseVariable, phRepeatLayoutTemplate, phCustomBaseVariable, phCustomValueKind, customLayoutTemplate, phCustomRepeat, phCustomTokens, phCustomLayoutNodes, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds]);
 
   const insertImageComponent = useCallback(() => {
     try {
-      const node = createImageComponent(
-        {
-          src: imageSrc.trim(),
-          alt: imageAlt.trim(),
-        },
-        {}
-      );
+      const node = createImageComponent({ src: imageSrc.trim(), alt: imageAlt.trim() }, {});
       editor?.chain().focus().insertContent(node as any).run();
       setInsertError('');
       setInsertPanel(null);
@@ -468,15 +864,20 @@ export default function TemplateEditor({
     }
   }, [editor, imageSrc, imageAlt]);
 
+  const handleImageFileSelection = useCallback(async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setImageSrc(dataUrl);
+      setInsertError('');
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Failed to load image file');
+    }
+  }, []);
+
   const insertHyperlinkComponent = useCallback(() => {
     try {
-      const node = createHyperlinkComponent(
-        {
-          alias: linkAlias.trim(),
-          url: linkUrl.trim(),
-        },
-        {}
-      );
+      const node = createHyperlinkComponent({ alias: linkAlias.trim(), url: linkUrl.trim() }, {});
       editor?.chain().focus().insertContent(node as any).run();
       setInsertError('');
       setInsertPanel(null);
@@ -485,403 +886,148 @@ export default function TemplateEditor({
     }
   }, [editor, linkAlias, linkUrl]);
 
-  // Legacy inline list/table components handled by the full modal stack
-
-  /** ── Modal stack helpers ─────────────────────────────────── */
-  const topModal = modalStack.length > 0 ? modalStack[modalStack.length - 1] : null;
-  const submodalOpen = modalStack.length > 0;
-
-  const pushModal = useCallback((entry: Omit<ModalStackEntry, 'id' | 'children' | 'nextChildId' | 'error'>) => {
-    setModalNextId(prev => {
-      setModalStack(stack => [...stack, { ...entry, id: prev, children: [], nextChildId: 1, error: '' }]);
-      return prev + 1;
-    });
-    setAddChildType('string');
-    setAddChildValue('');
-    setInsertPanel(null);
-  }, []);
-
-  const popModal = useCallback(() => {
-    setModalStack(stack => stack.slice(0, -1));
-  }, []);
-
-  const updateTopModal = useCallback((updater: (entry: ModalStackEntry) => ModalStackEntry) => {
-    setModalStack(stack => {
-      if (stack.length === 0) return stack;
-      const next = [...stack];
-      next[next.length - 1] = updater(next[next.length - 1]);
-      return next;
-    });
-  }, []);
-
-  const openSubmodal = useCallback((target: SubmodalTarget) => {
-    const label = target.charAt(0).toUpperCase() + target.slice(1);
-    pushModal({
-      target,
-      label,
-      onConfirm: (children, extra) => {
-        const components = children.map(c => childToComponentValue(c)) as ComponentValue[];
-        const componentTypes = children.map(c => c.schema);
-        try {
-          if (target === 'container') {
-            const node = createContainerComponent({ components }, { component_types: componentTypes });
-            editor?.chain().focus().insertContent(node as any).run();
-          } else if (target === 'page') {
-            const node = createPageComponent({ components }, {
-              component_types: componentTypes,
-              pageNumber: extra?.pageNumber as number ?? 1,
-              size: extra?.size as string ?? 'A4',
-              orientation: extra?.orientation as string ?? 'portrait',
-            });
-            editor?.chain().focus().insertContent(node as any).run();
-          } else if (target === 'header') {
-            const node = createHeaderComponent({ components }, { component_types: componentTypes });
-            editor?.chain().focus().insertContent(node as any).run();
-          } else if (target === 'footer') {
-            const node = createFooterComponent({ components }, { component_types: componentTypes });
-            editor?.chain().focus().insertContent(node as any).run();
-          } else if (target === 'list') {
-            const items = components;
-            const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' };
-            const node = createListComponent(
-              { items, style: (extra?.listStyle as ListStyle) || 'bulleted' } as any,
-              { item_type: itemSchema as ComponentTypeSchema }
-            );
-            editor?.chain().focus().insertContent(node as any).run();
-          } else if (target === 'table') {
-            const tableMode = (extra?.tableMode as TableMode) ?? 'row_data';
-            const tableCaption = extra?.tableCaption as string | undefined;
-            if (tableMode === 'row_data') {
-              const headers = (extra?.tableRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
-              const rowRows = extra?.tableRowRows as string[][] ?? [];
-              const rows = rowRows.map((row) => {
-                const rowObj: Record<string, unknown> = {};
-                headers.forEach((header, index) => { rowObj[header] = row[index] ?? ''; });
-                return rowObj;
-              });
-              const node = createTableComponent({ mode: 'row_data', rows, caption: tableCaption } as any, { headers });
-              editor?.chain().focus().insertContent(node as any).run();
-            } else {
-              const headers = (extra?.tableColRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
-              const colNames = extra?.tableColNames as string[] ?? [];
-              const colMatrix = extra?.tableColMatrix as string[][] ?? [];
-              const columns = colNames.map((name, colIdx) => {
-                const vals = colMatrix.map((row) => row[colIdx] ?? '');
-                return [name, ...vals];
-              });
-              const node = createTableComponent({ mode: 'column_data', columns, caption: tableCaption } as any, { headers });
-              editor?.chain().focus().insertContent(node as any).run();
-            }
-          } else if (target === 'list') {
-            const items = children.map((c) => childToComponentValue(c));
-            const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' };
-            const node = createListComponent(
-              { items, style: (extra?.listStyle as ListStyle) || 'bulleted' },
-              { item_type: itemSchema as ComponentTypeSchema }
-            );
-            editor?.chain().focus().insertContent(node as any).run();
-          } else if (target === 'table') {
-            const tableMode = extra?.tableMode as TableMode ?? 'row_data';
-            const tableCaption = extra?.tableCaption as string | undefined;
-            if (tableMode === 'row_data') {
-              const headers = (extra?.tableRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
-              const rowRows = extra?.tableRowRows as string[][] ?? [];
-              const rows = rowRows.map((row) => {
-                const rowObj: Record<string, unknown> = {};
-                headers.forEach((header, index) => { rowObj[header] = row[index] ?? ''; });
-                return rowObj;
-              });
-              const node = createTableComponent({ mode: 'row_data', rows, caption: tableCaption }, { headers });
-              editor?.chain().focus().insertContent(node as any).run();
-            } else {
-              const headers = (extra?.tableColRowHeaders as string[] ?? []).map((h) => h.trim()).filter(Boolean);
-              const colNames = extra?.tableColNames as string[] ?? [];
-              const colMatrix = extra?.tableColMatrix as string[][] ?? [];
-              const columns = colNames.map((name, colIdx) => {
-                const vals = colMatrix.map((row) => row[colIdx] ?? '');
-                return [name, ...vals];
-              });
-              const node = createTableComponent({ mode: 'column_data', columns, caption: tableCaption }, { headers });
-              editor?.chain().focus().insertContent(node as any).run();
-            }
-          }
-        } catch (err) {
-          // error handled at modal level
+  const insertTableComponent = useCallback(() => {
+    try {
+      if (tableMode === 'row_data') {
+        const headers = tableHeaders.map((header) => normalizeIdentifierDraft(header)).filter(Boolean);
+        if (headers.length === 0) {
+          setInsertError('Table headers are required.');
+          return;
         }
-      },
-      // extra initial state per target
-      ...(target === 'page' ? { pageSize: 'A4', pageOrientation: 'portrait' as const, pageNumber: 1 } : {}),
-      ...(target === 'list' ? { listStyle: 'bulleted' as const, listItemType: 'string' as const } : {}),
-      ...(target === 'table' ? {
-        tableMode: 'row_data' as const,
-        tableCaption: '',
-        tableRowHeaders: ['Item', 'Qty'],
-        tableRowRows: [['Pen', '2']],
-        tableColRowHeaders: ['Q1', 'Q2'],
-        tableColNames: ['Sales'],
-        tableColMatrix: [['10'], ['12']],
-      } : {}),
-    });
-  }, [editor, pushModal]);
 
-  const closeSubmodal = useCallback(() => {
-    setModalStack([]);
-  }, []);
+        const rows = (tableRows.length > 0 ? tableRows : [headers.map(() => '')]).map((cells) => {
+          const row: Record<string, unknown> = {};
+          headers.forEach((header, index) => {
+            row[header] = cells[index] ?? '';
+          });
+          return row;
+        });
 
-  const addPrimitiveChild = useCallback(() => {
-    let value: unknown;
-    let schema: ComponentTypeSchema;
+        const node = createTableComponent(
+          { rows, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) },
+          { headers }
+        );
+        editor?.chain().focus().insertContent(node as any).run();
+      } else {
+        const rowHeaders = tableColumnRowHeaders.map((header) => normalizeIdentifierDraft(header)).filter(Boolean);
+        const colNames = tableColumnNames.map((name) => normalizeIdentifierDraft(name)).filter(Boolean);
+        const matrix = alignMatrixToHeaders(colNames, tableColumnMatrix);
 
-    if (addChildType === 'string' || addChildType === 'integer') {
-      if (!addChildValue.trim()) {
-        updateTopModal(m => ({ ...m, error: 'Value cannot be empty.' }));
-        return;
-      }
-      value = addChildValue.trim();
-      schema = { kind: addChildType } as ComponentTypeSchema;
-    } else if (addChildType === 'image') {
-      if (!addChildImageSrc.trim()) {
-        updateTopModal(m => ({ ...m, error: 'Image URL cannot be empty.' }));
-        return;
-      }
-      value = { src: addChildImageSrc.trim(), alt: addChildImageAlt.trim() };
-      schema = { kind: 'image' };
-    } else if (addChildType === 'hyperlink') {
-      if (!addChildLinkUrl.trim()) {
-        updateTopModal(m => ({ ...m, error: 'Link URL cannot be empty.' }));
-        return;
-      }
-      value = { alias: addChildLinkAlias.trim(), url: addChildLinkUrl.trim() };
-      schema = { kind: 'hyperlink' };
-    } else {
-      return; // complex types handled by pushing a new modal
-    }
+        if (rowHeaders.length === 0 || colNames.length === 0) {
+          setInsertError('Column tables require row headers and column names.');
+          return;
+        }
 
-    updateTopModal(m => ({
-      ...m,
-      children: [...m.children, { id: m.nextChildId, type: addChildType, value, schema }],
-      nextChildId: m.nextChildId + 1,
-      error: '',
-    }));
-    setAddChildValue('');
-  }, [addChildType, addChildValue, addChildImageSrc, addChildImageAlt, addChildLinkAlias, addChildLinkUrl, updateTopModal]);
-
-  const addComplexChild = useCallback((type: 'container' | 'list' | 'table') => {
-    const parentLabel = topModal?.label || '';
-    const childIdx = (topModal?.children.length ?? 0) + 1;
-
-    if (type === 'container') {
-      pushModal({
-        target: 'container',
-        label: `${parentLabel} > Container #${childIdx}`,
-        onConfirm: (children) => {
-          const components = children.map(c => childToComponentValue(c));
-          const componentTypes = children.map(c => c.schema);
-          const containerValue = { components };
-          const containerSchema: ComponentTypeSchema = { kind: 'container', component_types: componentTypes };
-          updateTopModal(m => ({
-            ...m,
-            children: [...m.children, { id: m.nextChildId, type: 'container', value: containerValue, schema: containerSchema }],
-            nextChildId: m.nextChildId + 1,
-            error: '',
-          }));
-        },
-      });
-    } else if (type === 'list') {
-      // For list: push a modal that collects list items
-      pushModal({
-        target: 'container', // reuse container-like UI for collecting items
-        label: `${parentLabel} > List #${childIdx}`,
-        onConfirm: (children) => {
-          const items = children.map(c => childToComponentValue(c));
-          const itemSchema = children.length > 0 ? children[0].schema : { kind: 'string' as const };
-          const tableMode = children[0]?.value && typeof children[0].value === 'object' && 'mode' in children[0].value ? (children[0].value as any).mode : 'row_data';
-
-          let tableValue: unknown;
-          if (tableMode === 'row_data') {
-            const headers = extra?.tableRowHeaders as string[] ?? [];
-            const rowRows = extra?.tableRowRows as string[][] ?? [];
-            const rows = rowRows.map((row) => {
-              const rowObj: Record<string, unknown> = {};
-              headers.forEach((h, i) => { rowObj[h] = row[i] ?? ''; });
-              return rowObj;
+        const columns = Object.fromEntries(
+          colNames.map((name, colIdx) => {
+            const columnData: Record<string, unknown> = {};
+            rowHeaders.forEach((rowHeader, rowIdx) => {
+              columnData[rowHeader] = matrix[rowIdx]?.[colIdx] ?? '';
             });
-            tableValue = { rows, mode: 'row_data', caption: extra?.tableCaption };
-          } else {
-            const headers = extra?.tableColRowHeaders as string[] ?? [];
-            const colNames = extra?.tableColNames as string[] ?? [];
-            const colMatrix = extra?.tableColMatrix as string[][] ?? [];
-            const columns = colNames.map((name, colIdx) => [name, ...colMatrix.map(r => r[colIdx] ?? '')]);
-            tableValue = { columns, mode: 'column_data', caption: extra?.tableCaption };
-          }
+            return [name, columnData];
+          })
+        );
 
-          updateTopModal(m => ({
-            ...m,
-            children: [...m.children, { id: m.nextChildId, type: 'table', value: tableValue, schema: { kind: 'table' } }],
-            nextChildId: m.nextChildId + 1,
-            error: '',
-          }));
-        },
-        tableMode: 'row_data',
-        tableCaption: '',
-        tableRowHeaders: ['Item', 'Qty'],
-        tableRowRows: [['Pen', '2']],
-        tableColRowHeaders: ['Q1', 'Q2'],
-        tableColNames: ['Sales'],
-        tableColMatrix: [['10'], ['12']],
-      });
+        const node = createTableComponent(
+          { columns, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) },
+          { headers: rowHeaders }
+        );
+        editor?.chain().focus().insertContent(node as any).run();
+      }
+
+      setInsertError('');
+      setInsertPanel(null);
+    } catch (error) {
+      setInsertError(error instanceof Error ? error.message : 'Invalid table component');
     }
-  }, [topModal, pushModal, updateTopModal]);
-
-  const removeModalChild = useCallback((id: number) => {
-    updateTopModal(m => ({ ...m, children: m.children.filter(c => c.id !== id) }));
-  }, [updateTopModal]);
-
-  const moveModalChild = useCallback((id: number, direction: 'up' | 'down') => {
-    updateTopModal(m => {
-      const idx = m.children.findIndex(c => c.id === id);
-      if (idx < 0) return m;
-      const target = direction === 'up' ? idx - 1 : idx + 1;
-      if (target < 0 || target >= m.children.length) return m;
-      const next = [...m.children];
-      [next[idx], next[target]] = [next[target], next[idx]];
-      return { ...m, children: next };
-    });
-  }, [updateTopModal]);
-
-  const confirmTopModal = useCallback(() => {
-    if (!topModal) return;
-    if (topModal.children.length === 0) {
-      updateTopModal(m => ({ ...m, error: 'Add at least one component.' }));
-      return;
-    }
-    const extra = {
-      pageNumber: topModal.pageNumber,
-      size: topModal.pageSize,
-      orientation: topModal.pageOrientation,
-      listStyle: topModal.listStyle,
-      tableMode: topModal.tableMode,
-      tableCaption: topModal.tableCaption,
-      tableRowHeaders: topModal.tableRowHeaders,
-      tableRowRows: topModal.tableRowRows,
-      tableColRowHeaders: topModal.tableColRowHeaders,
-      tableColNames: topModal.tableColNames,
-      tableColMatrix: topModal.tableColMatrix,
-    };
-    const onConfirm = topModal.onConfirm;
-    const children = topModal.children;
-    popModal();
-    onConfirm(children, extra);
-  }, [topModal, popModal, updateTopModal]);
+  }, [editor, tableMode, tableHeaders, tableRows, tableCaption, tableColumnRowHeaders, tableColumnNames, tableColumnMatrix]);
 
   const insertPageBreak = useCallback(() => {
     editor?.chain().focus().insertContent({ type: 'pageBreakComponent' }).run();
   }, [editor]);
 
-  /** Extracts the set of placeholder keys present in the current editor state. */
-  const placeholderKeys = useMemo(() => {
-    if (!editor) return [] as string[];
-
-    const found = new Set<string>();
-    const json = editor.getJSON() as Record<string, any>;
-    walkTiptapJson(json, (node) => {
-      if (node.type === 'placeholder' && typeof node.attrs?.key === 'string') {
-        found.add(node.attrs.key);
-      }
-    });
-
-    return Array.from(found);
-  }, [editor?.state]);
-
-  // Legacy inline spreadsheet helpers removed in favor of topModal updates
-
   return (
     <div className={`pg-tiptap-wrapper${hasError ? ' pg-tiptap-error' : ''}`}>
       <div className="pg-tiptap-toolbar" role="toolbar" aria-label="Editor toolbar">
-        <button
-          type="button"
-          className={`pg-tb-btn${active('bold')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleBold().run())}
-          title="Bold"
+        <select
+          className="pg-input pg-toolbar-select"
+          value={selectedBlockStyle}
+          onChange={(e) => {
+            const value = e.target.value as 'paragraph' | 'h1' | 'h2' | 'h3';
+            setSelectedBlockStyle(value);
+            if (value === 'paragraph') {
+              editor?.chain().focus().setParagraph().run();
+              return;
+            }
+            const level = value === 'h1' ? 1 : value === 'h2' ? 2 : 3;
+            editor?.chain().focus().toggleHeading({ level }).run();
+          }}
+          aria-label="Block style"
         >
+          <option value="paragraph">Paragraph</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+        </select>
+
+        <span className="pg-tb-sep" aria-hidden="true" />
+
+        <button type="button" className={`pg-tb-btn${active('bold')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleBold().run())} title="Bold">
           <Bold size={16} />
         </button>
-
-        <button
-          type="button"
-          className={`pg-tb-btn${active('italic')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleItalic().run())}
-          title="Italic"
-        >
+        <button type="button" className={`pg-tb-btn${active('italic')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleItalic().run())} title="Italic">
           <Italic size={16} />
         </button>
-
-        <button
-          type="button"
-          className={`pg-tb-btn${active('strike')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleStrike().run())}
-          title="Strikethrough"
-        >
+        <button type="button" className={`pg-tb-btn${active('underline')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleUnderline().run())} title="Underline">
+          <UnderlineIcon size={16} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('strike')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleStrike().run())} title="Strikethrough">
           <Strikethrough size={16} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('highlight')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHighlight().run())} title="Highlight">
+          <Highlighter size={16} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          className={`pg-tb-btn${active('heading', { level: 1 })}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())}
-          title="Heading 1"
-        >
+        <button type="button" className={`pg-tb-btn${active('heading', { level: 1 })}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())} title="Heading 1">
           <Heading1 size={16} />
         </button>
-
-        <button
-          type="button"
-          className={`pg-tb-btn${active('heading', { level: 2 })}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())}
-          title="Heading 2"
-        >
+        <button type="button" className={`pg-tb-btn${active('heading', { level: 2 })}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())} title="Heading 2">
           <Heading2 size={16} />
         </button>
-
-        <button
-          type="button"
-          className={`pg-tb-btn${active('bulletList')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleBulletList().run())}
-          title="Bullet list"
-        >
-          <List size={16} />
+        <button type="button" className={`pg-tb-btn${active('heading', { level: 3 })}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHeading({ level: 3 }).run())} title="Heading 3">
+          <Heading3 size={16} />
         </button>
 
-        <button
-          type="button"
-          className={`pg-tb-btn${active('orderedList')}`}
-          onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())}
-          title="Ordered list"
-        >
+        <button type="button" className={`pg-tb-btn${active('bulletList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleBulletList().run())} title="Bullet list">
+          <List size={16} />
+        </button>
+        <button type="button" className={`pg-tb-btn${active('orderedList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())} title="Ordered list">
           <ListOrdered size={16} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          className="pg-tb-btn"
-          onMouseDown={cmd(() => editor?.chain().focus().undo().run())}
-          title="Undo"
-          disabled={!editor?.can().undo()}
-        >
-          <Undo size={16} />
+        <button type="button" className={`pg-tb-btn${activeAlign('left')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('left').run())} title="Align left">
+          <AlignLeft size={16} />
+        </button>
+        <button type="button" className={`pg-tb-btn${activeAlign('center')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('center').run())} title="Align center">
+          <AlignCenter size={16} />
+        </button>
+        <button type="button" className={`pg-tb-btn${activeAlign('right')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('right').run())} title="Align right">
+          <AlignRight size={16} />
+        </button>
+        <button type="button" className={`pg-tb-btn${activeAlign('justify')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('justify').run())} title="Justify">
+          <AlignJustify size={16} />
         </button>
 
-        <button
-          type="button"
-          className="pg-tb-btn"
-          onMouseDown={cmd(() => editor?.chain().focus().redo().run())}
-          title="Redo"
-          disabled={!editor?.can().redo()}
-        >
+        <span className="pg-tb-sep" aria-hidden="true" />
+
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(() => editor?.chain().focus().undo().run())} title="Undo" disabled={!editor?.can().undo()}>
+          <Undo size={16} />
+        </button>
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(() => editor?.chain().focus().redo().run())} title="Redo" disabled={!editor?.can().redo()}>
           <Redo size={16} />
         </button>
 
@@ -890,53 +1036,26 @@ export default function TemplateEditor({
         <button type="button" className={`pg-tb-btn pg-tb-btn--accent${insertPanel === 'placeholder' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'placeholder' ? null : 'placeholder'); }} title="Insert typed placeholder">
           <Braces size={16} />
         </button>
-
         <button type="button" className={`pg-tb-btn${insertPanel === 'image' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'image' ? null : 'image'); }} title="Insert image component">
-          <ImageIcon size={16} />
+          <FileImage size={16} />
         </button>
-
         <button type="button" className={`pg-tb-btn${insertPanel === 'hyperlink' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'hyperlink' ? null : 'hyperlink'); }} title="Insert hyperlink component">
-          <Link size={16} />
+          <LinkIcon size={16} />
         </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'list' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('list')} title="Insert list component">
-          <Box size={16} />
-        </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'container' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('container')} title="Insert container component">
-          <Layers size={16} />
-        </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'table' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('table')} title="Insert table component">
+        <button type="button" className={`pg-tb-btn${insertPanel === 'table' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'table' ? null : 'table'); }} title="Insert table component">
           <Table size={16} />
         </button>
 
-        <span className="pg-tb-sep" aria-hidden="true" />
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'page' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('page')} title="Insert page element">
-          <File size={16} />
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(() => editor?.chain().focus().setHorizontalRule().run())} title="Insert horizontal rule">
+          <Minus size={16} />
         </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'header' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('header')} title="Insert header element">
-          <PanelTop size={16} />
-        </button>
-
-        <button type="button" className={`pg-tb-btn${submodalOpen && topModal?.target === 'footer' && modalStack.length === 1 ? ' pg-tb-active' : ''}`} onClick={() => openSubmodal('footer')} title="Insert footer element">
-          <PanelBottom size={16} />
-        </button>
-
         <button type="button" className="pg-tb-btn" onMouseDown={cmd(insertPageBreak)} title="Insert page break">
           <SeparatorHorizontal size={16} />
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button
-          type="button"
-          className="pg-tb-btn pg-tb-btn--accent"
-          onMouseDown={cmd(openPreview)}
-          title="Preview document"
-        >
+        <button type="button" className="pg-tb-btn pg-tb-btn--accent" onMouseDown={cmd(openPreview)} title="Preview document">
           Preview
         </button>
       </div>
@@ -946,9 +1065,10 @@ export default function TemplateEditor({
           {insertPanel === 'placeholder' && (
             <>
               <div className="pg-insert-row">
-                <label className="pg-label">Key</label>
+                <label className="pg-label">Placeholder key</label>
                 <input className="pg-input" value={phKey} onChange={(e) => setPhKey(e.target.value)} placeholder="recipient_name" />
               </div>
+
               <div className="pg-insert-row">
                 <label className="pg-label">Schema kind</label>
                 <select className="pg-input" value={phKind} onChange={(e) => setPhKind(e.target.value as PlaceholderKind)}>
@@ -957,7 +1077,8 @@ export default function TemplateEditor({
                   <option value="image">image</option>
                   <option value="hyperlink">hyperlink</option>
                   <option value="list">list</option>
-                  <option value="container">container</option>
+                  <option value="repeat">repeat</option>
+                  <option value="custom">custom</option>
                   <option value="table">table</option>
                 </select>
               </div>
@@ -973,38 +1094,329 @@ export default function TemplateEditor({
                     </select>
                   </div>
                   <div className="pg-insert-row">
-                    <label className="pg-label">List item type</label>
-                    <select className="pg-input" value={phListItemKind} onChange={(e) => setPhListItemKind(e.target.value as PlaceholderKind)}>
+                    <label className="pg-label">Item kind</label>
+                    <select className="pg-input" value={phListItemKind} onChange={(e) => setPhListItemKind(e.target.value as DynamicItemKind)}>
                       <option value="string">string</option>
                       <option value="integer">integer</option>
                       <option value="image">image</option>
                       <option value="hyperlink">hyperlink</option>
+                      <option value="list">list</option>
+                      <option value="repeat">repeat</option>
+                      <option value="custom">custom</option>
+                      <option value="table">table</option>
                     </select>
                   </div>
                 </>
               )}
 
-              {phKind === 'container' && (
+              {phKind === 'repeat' && (
                 <>
                   <div className="pg-insert-row">
-                    <label className="pg-label">Container slots</label>
-                    <input className="pg-input" value={phContainerSlots} onChange={(e) => setPhContainerSlots(e.target.value)} placeholder="2" />
+                    <label className="pg-label">Repeat item kind</label>
+                    <select className="pg-input" value={phRepeatItemKind} onChange={(e) => setPhRepeatItemKind(e.target.value as DynamicItemKind)}>
+                      <option value="string">string</option>
+                      <option value="integer">integer</option>
+                      <option value="image">image</option>
+                      <option value="hyperlink">hyperlink</option>
+                      <option value="list">list</option>
+                      <option value="repeat">repeat</option>
+                      <option value="custom">custom</option>
+                      <option value="table">table</option>
+                    </select>
                   </div>
-                  {Array.from({ length: Number.isFinite(Number(phContainerSlots)) && Number(phContainerSlots) > 0 ? Math.floor(Number(phContainerSlots)) : 2 }, (_, index) => (
-                    <div className="pg-insert-row" key={`container-kind-${index}`}>
-                      <label className="pg-label">Slot {index + 1} kind</label>
-                      <select
-                        className="pg-input"
-                        value={phContainerKinds[index] || 'string'}
-                        onChange={(e) => setPhContainerKinds((prev) => ({ ...prev, [index]: e.target.value as PlaceholderKind }))}
-                      >
-                        <option value="string">string</option>
-                        <option value="integer">integer</option>
-                        <option value="image">image</option>
-                        <option value="hyperlink">hyperlink</option>
-                      </select>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Min items (optional)</label>
+                    <input className="pg-input" value={phRepeatMinItems} onChange={(e) => setPhRepeatMinItems(e.target.value)} placeholder="0" />
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Max items (optional)</label>
+                    <input className="pg-input" value={phRepeatMaxItems} onChange={(e) => setPhRepeatMaxItems(e.target.value)} placeholder="" />
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Base variable</label>
+                    <input className="pg-input" value={phRepeatBaseVariable} onChange={(e) => setPhRepeatBaseVariable(e.target.value)} placeholder="item" />
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Item layout (optional)</label>
+                    <textarea
+                      ref={repeatLayoutTextareaRef}
+                      className="pg-input"
+                      rows={4}
+                      value={phRepeatLayoutTemplate}
+                      onChange={(e) => setPhRepeatLayoutTemplate(e.target.value)}
+                      placeholder={"{{item.name}} - {{item.value}}"}
+                    />
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Suggested fields</label>
+                    <div className="pg-layout-composer">
+                      <div className="pg-layout-composer-actions">
+                        <input
+                          className="pg-input"
+                          value={phRepeatLayoutFieldDraft}
+                          onChange={(e) => setPhRepeatLayoutFieldDraft(e.target.value)}
+                          placeholder="field_name"
+                        />
+                        <button type="button" className="pg-layout-pattern" onClick={addRepeatLayoutField}>+ Field</button>
+                      </div>
+                      <div className="pg-layout-token-list">
+                        {repeatLayoutFields.map((field) => (
+                          <span key={field} className="pg-layout-segment pg-layout-segment-token">
+                            {field}
+                            <button
+                              type="button"
+                              className="pg-layout-segment-btn"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => removeRepeatLayoutField(field)}
+                              aria-label={`Remove ${field}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  ))}
+                  </div>
+                  <div className="pg-layout-token-assist" role="group" aria-label="Repeat layout tokens">
+                    <p className="pg-layout-token-assist-label">Click to insert token</p>
+                    <div className="pg-layout-token-list">
+                      {repeatLayoutTokens.map((token) => (
+                        <button
+                          key={token}
+                          type="button"
+                          className="pg-layout-token"
+                          onClick={() => insertTokenAtCursor('repeat', token)}
+                        >
+                          {token}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="pg-layout-patterns">
+                      <button type="button" className="pg-layout-pattern" onClick={() => setPhRepeatLayoutTemplate(`• {{${phRepeatBaseVariable}.name}} | {{${phRepeatBaseVariable}.value}}`)}>Line item pattern</button>
+                      <button type="button" className="pg-layout-pattern" onClick={() => setPhRepeatLayoutTemplate(`{{${phRepeatBaseVariable}.name}}\n{{${phRepeatBaseVariable}.value}}`)}>Two-line pattern</button>
+                    </div>
+                  </div>
+                  {repeatLayoutPreview && (
+                    <div className="pg-layout-preview" aria-live="polite">
+                      <p className="pg-layout-preview-label">Live preview with sample data</p>
+                      <pre>{repeatLayoutPreview}</pre>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {phKind === 'custom' && (
+                <>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Base variable</label>
+                    <input className="pg-input" value={phCustomBaseVariable} onChange={(e) => setPhCustomBaseVariable(e.target.value)} placeholder="item" />
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Value type</label>
+                    <select className="pg-input" value={phCustomValueKind} onChange={(e) => setPhCustomValueKind(e.target.value as DynamicItemKind)}>
+                      <option value="string">string</option>
+                      <option value="integer">integer</option>
+                      <option value="image">image</option>
+                      <option value="hyperlink">hyperlink</option>
+                      <option value="list">list</option>
+                      <option value="repeat">repeat</option>
+                      <option value="custom">custom</option>
+                      <option value="table">table</option>
+                    </select>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Token Registry</label>
+                    <div className="pg-layout-composer" role="group" aria-label="Custom token registry">
+                      <div className="pg-layout-composer-actions">
+                        <input
+                          className="pg-input"
+                          value={phCustomTokenIdDraft}
+                          onChange={(e) => setPhCustomTokenIdDraft(e.target.value)}
+                          placeholder="token_id"
+                        />
+                        <input
+                          className="pg-input"
+                          value={phCustomTokenLabelDraft}
+                          onChange={(e) => setPhCustomTokenLabelDraft(e.target.value)}
+                          placeholder="Display label"
+                        />
+                        <select className="pg-input" value={phCustomTokenKindDraft} onChange={(e) => setPhCustomTokenKindDraft(e.target.value as DynamicItemKind)}>
+                          <option value="string">string</option>
+                          <option value="integer">integer</option>
+                          <option value="image">image</option>
+                          <option value="hyperlink">hyperlink</option>
+                          <option value="list">list</option>
+                          <option value="repeat">repeat</option>
+                          <option value="custom">custom</option>
+                          <option value="table">table</option>
+                        </select>
+                        <button type="button" className="pg-layout-pattern" onClick={addCustomTokenDefinition}>+ Token</button>
+                      </div>
+
+                      {phCustomTokens.length === 0 ? (
+                        <div className="pg-layout-preview">
+                          <p className="pg-layout-preview-label">Token library is empty</p>
+                          <pre>Create tokens above, then drag them into the canvas below.</pre>
+                        </div>
+                      ) : null}
+
+                      {phCustomTokens.map((token, index) => (
+                        <div
+                          className="pg-layout-segment-row"
+                          key={token.id}
+                          draggable
+                          onDragStart={() => handleCustomTokenDragStart(token.id)}
+                        >
+                          <div className="pg-layout-segment-main">
+                            <div className="pg-layout-composer-actions">
+                              <input
+                                className="pg-input"
+                                value={token.label}
+                                onChange={(e) => updateCustomTokenDefinition(token.id, { label: e.target.value })}
+                                placeholder="Label"
+                              />
+                              <select
+                                className="pg-input"
+                                value={token.kind}
+                                onChange={(e) => updateCustomTokenDefinition(token.id, { kind: e.target.value as DynamicItemKind })}
+                              >
+                                <option value="string">string</option>
+                                <option value="integer">integer</option>
+                                <option value="image">image</option>
+                                <option value="hyperlink">hyperlink</option>
+                                <option value="list">list</option>
+                                <option value="repeat">repeat</option>
+                                <option value="custom">custom</option>
+                                <option value="table">table</option>
+                              </select>
+                            </div>
+                            <span className="pg-layout-segment pg-layout-segment-token">{token.id}</span>
+                          </div>
+                          <div className="pg-layout-segment-actions">
+                            <button type="button" className="pg-layout-segment-btn" onClick={() => appendCustomNode('token', token.id)}>Use</button>
+                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomTokenDefinition(token.id, 'up')} disabled={index === 0}>↑</button>
+                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomTokenDefinition(token.id, 'down')} disabled={index === phCustomTokens.length - 1}>↓</button>
+                            <button type="button" className="pg-layout-segment-btn" onClick={() => removeCustomTokenDefinition(token.id)}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Layout canvas (token references)</label>
+                    <div
+                      className="pg-layout-composer"
+                      role="group"
+                      aria-label="Custom layout composer"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={handleCustomLayoutDrop}
+                    >
+                      {phCustomLayoutNodes.map((segment, index) => (
+                        <div className="pg-layout-segment-row" key={segment.id}>
+                          <div className="pg-layout-segment-main">
+                            {segment.kind === 'text' ? (
+                              <input
+                                className="pg-input"
+                                value={segment.value}
+                                onChange={(e) => updateCustomNode(segment.id, { value: e.target.value })}
+                                placeholder="Text"
+                              />
+                            ) : segment.kind === 'token' ? (
+                              <div className="pg-layout-composer-actions">
+                                <span className="pg-layout-segment pg-layout-segment-token">{segment.tokenId ? `{{${phCustomBaseVariable}.${segment.tokenId}}}` : '{{token}}'}</span>
+                                <input className="pg-input" value={segment.prefix || ''} onChange={(e) => updateCustomNode(segment.id, { prefix: e.target.value })} placeholder="prefix" />
+                                <input className="pg-input" value={segment.suffix || ''} onChange={(e) => updateCustomNode(segment.id, { suffix: e.target.value })} placeholder="suffix" />
+                              </div>
+                            ) : (
+                              <span className="pg-layout-segment pg-layout-segment-newline">line break</span>
+                            )}
+                          </div>
+                          <div className="pg-layout-segment-actions">
+                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomNode(segment.id, 'up')} disabled={index === 0}>↑</button>
+                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomNode(segment.id, 'down')} disabled={index === phCustomLayoutNodes.length - 1}>↓</button>
+                            <button type="button" className="pg-layout-segment-btn" onClick={() => removeCustomNode(segment.id)}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="pg-layout-composer-actions">
+                        <button type="button" className="pg-layout-pattern" onClick={() => appendCustomNode('text')}>+ Text</button>
+                        <button type="button" className="pg-layout-pattern" onClick={() => appendCustomNode('newline')}>+ Line Break</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="pg-layout-token-assist" role="group" aria-label="Custom layout tokens">
+                    <p className="pg-layout-token-assist-label">Token references (reusable)</p>
+                    <div className="pg-layout-token-list">
+                      {customLayoutTokens.map((token) => (
+                        <button
+                          key={token}
+                          type="button"
+                          className="pg-layout-token"
+                          draggable
+                          onDragStart={() => handleCustomTokenDragStart(token.replace(`{{${phCustomBaseVariable}.`, '').replace('}}', ''))}
+                          onClick={() => {
+                            const tokenId = token.replace(`{{${phCustomBaseVariable}.`, '').replace('}}', '');
+                            appendCustomNode('token', tokenId);
+                          }}
+                        >
+                          {token}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="pg-layout-patterns">
+                      <button
+                        type="button"
+                        className="pg-layout-pattern"
+                        disabled={phCustomTokens.length === 0}
+                        onClick={() => {
+                          const firstToken = phCustomTokens[0];
+                          if (!firstToken) return;
+                          setPhCustomLayoutNodes([
+                            createCustomLayoutNode('text', `${firstToken.label || firstToken.id}: `),
+                            createCustomLayoutNode('token', '', firstToken.id),
+                          ]);
+                        }}
+                      >
+                        First token pattern
+                      </button>
+                      <button
+                        type="button"
+                        className="pg-layout-pattern"
+                        disabled={phCustomTokens.length < 2}
+                        onClick={() => {
+                          const firstToken = phCustomTokens[0];
+                          const secondToken = phCustomTokens[1];
+                          if (!firstToken || !secondToken) return;
+                          setPhCustomLayoutNodes([
+                            createCustomLayoutNode('text', `${firstToken.label || firstToken.id}: `),
+                            createCustomLayoutNode('token', '', firstToken.id),
+                            createCustomLayoutNode('newline', '\n'),
+                            createCustomLayoutNode('text', `${secondToken.label || secondToken.id}: `),
+                            createCustomLayoutNode('token', '', secondToken.id),
+                          ]);
+                        }}
+                      >
+                        Two-token pattern
+                      </button>
+                    </div>
+                  </div>
+                  <div className="pg-layout-template-output">
+                    <p className="pg-layout-preview-label">Generated template</p>
+                    <pre>{customLayoutTemplate || '(empty)'}</pre>
+                  </div>
+                  {customLayoutPreview && (
+                    <div className="pg-layout-preview" aria-live="polite">
+                      <p className="pg-layout-preview-label">Live preview with sample data</p>
+                      <pre>{customLayoutPreview}</pre>
+                    </div>
+                  )}
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Repeat rendering</label>
+                    <select className="pg-input" value={phCustomRepeat ? 'true' : 'false'} onChange={(e) => setPhCustomRepeat(e.target.value === 'true')}>
+                      <option value="false">single value</option>
+                      <option value="true">repeat over items</option>
+                    </select>
+                  </div>
                 </>
               )}
 
@@ -1017,20 +1429,40 @@ export default function TemplateEditor({
                       <option value="column_data">column_data</option>
                     </select>
                   </div>
+
                   <div className="pg-insert-row">
-                    <label className="pg-label">Headers (comma separated)</label>
-                    <input className="pg-input" value={phTableHeaders} onChange={(e) => setPhTableHeaders(e.target.value)} placeholder="Item,Qty" />
+                    <label className="pg-label">Headers</label>
+                    <div className="pg-layout-composer">
+                      <div className="pg-layout-composer-actions">
+                        <input
+                          className="pg-input"
+                          value={phTableHeaderDraft}
+                          onChange={(e) => setPhTableHeaderDraft(e.target.value)}
+                          placeholder="header_name"
+                        />
+                        <button type="button" className="pg-layout-pattern" onClick={addPlaceholderTableHeader}>+ Header</button>
+                      </div>
+                      <div className="pg-layout-token-list">
+                        {phTableHeaders.map((header) => (
+                          <span key={header} className="pg-layout-segment pg-layout-segment-token">
+                            {header}
+                            <button
+                              type="button"
+                              className="pg-layout-segment-btn"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => removePlaceholderTableHeader(header)}
+                              aria-label={`Remove ${header}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
-                  {parseCommaSeparated(phTableHeaders).length > 0 && (
-                    <div className="pg-sheet-wrap" style={{ marginTop: 8 }}>
-                      <div className="pg-sheet-toolbar">
-                        <strong>
-                          {phTableMode === 'row_data'
-                            ? 'Column type for each header'
-                            : 'Row type for each header'}
-                        </strong>
-                      </div>
+                  {phTableHeaders.length > 0 && (
+                    <div className="pg-sheet-wrap">
                       <table className="pg-sheet-table">
                         <thead>
                           <tr>
@@ -1039,17 +1471,13 @@ export default function TemplateEditor({
                           </tr>
                         </thead>
                         <tbody>
-                          {parseCommaSeparated(phTableHeaders).map((header) => (
+                          {phTableHeaders.map((header) => (
                             <tr key={header}>
                               <td>{header}</td>
                               <td>
                                 <select
                                   className="pg-input"
-                                  value={
-                                    phTableMode === 'row_data'
-                                      ? (phTableColumnKinds[header] || 'string')
-                                      : (phTableRowKinds[header] || 'string')
-                                  }
+                                  value={phTableMode === 'row_data' ? (phTableColumnKinds[header] || 'string') : (phTableRowKinds[header] || 'string')}
                                   onChange={(e) => {
                                     const kind = e.target.value as PlaceholderKind;
                                     if (phTableMode === 'row_data') {
@@ -1064,7 +1492,8 @@ export default function TemplateEditor({
                                   <option value="image">image</option>
                                   <option value="hyperlink">hyperlink</option>
                                   <option value="list">list</option>
-                                  <option value="container">container</option>
+                                  <option value="repeat">repeat</option>
+                                  <option value="custom">custom</option>
                                   <option value="table">table</option>
                                 </select>
                               </td>
@@ -1087,8 +1516,19 @@ export default function TemplateEditor({
           {insertPanel === 'image' && (
             <>
               <div className="pg-insert-row">
-                <label className="pg-label">Image URL</label>
-                <input className="pg-input" value={imageSrc} onChange={(e) => setImageSrc(e.target.value)} />
+                <label className="pg-label">Image source</label>
+                <div className="pg-layout-composer-actions">
+                  <input className="pg-input" value={imageSrc} onChange={(e) => setImageSrc(e.target.value)} placeholder="https://example.com/image.png" />
+                  <label className="pg-layout-pattern" style={{ cursor: 'pointer' }}>
+                    Upload Image
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => handleImageFileSelection(e.target.files?.[0])}
+                    />
+                  </label>
+                </div>
               </div>
               <div className="pg-insert-row">
                 <label className="pg-label">Alt text</label>
@@ -1118,7 +1558,264 @@ export default function TemplateEditor({
             </>
           )}
 
-          {/* Legacy inline insert panels removed. */}
+          {insertPanel === 'table' && (
+            <>
+              <div className="pg-insert-row">
+                <label className="pg-label">Mode</label>
+                <select className="pg-input" value={tableMode} onChange={(e) => setTableMode(e.target.value as TableMode)}>
+                  <option value="row_data">row_data</option>
+                  <option value="column_data">column_data</option>
+                </select>
+              </div>
+
+              <div className="pg-insert-row">
+                <label className="pg-label">Caption (optional)</label>
+                <input className="pg-input" value={tableCaption} onChange={(e) => setTableCaption(e.target.value)} placeholder="Quarterly summary" />
+              </div>
+
+              {tableMode === 'row_data' ? (
+                <>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Headers</label>
+                    <div className="pg-layout-composer">
+                      <div className="pg-layout-composer-actions">
+                        <input
+                          className="pg-input"
+                          value={tableHeaderDraft}
+                          onChange={(e) => setTableHeaderDraft(e.target.value)}
+                          placeholder="header_name"
+                        />
+                        <button type="button" className="pg-layout-pattern" onClick={addTableHeader}>+ Header</button>
+                      </div>
+                      <div className="pg-layout-token-list">
+                        {tableHeaders.map((header) => (
+                          <span key={header} className="pg-layout-segment pg-layout-segment-token">
+                            {header}
+                            <button
+                              type="button"
+                              className="pg-layout-segment-btn"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => removeTableHeader(header)}
+                              aria-label={`Remove ${header}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Rows</label>
+                    <div className="pg-sheet-wrap">
+                      <table className="pg-sheet-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 48 }}>#</th>
+                            {tableHeaders.map((header) => (
+                              <th key={header}>{header}</th>
+                            ))}
+                            <th style={{ width: 64 }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tableRows.map((row, rowIndex) => (
+                            <tr key={`row-${rowIndex}`}>
+                              <td>{rowIndex + 1}</td>
+                              {tableHeaders.map((header, colIndex) => (
+                                <td key={`${header}-${rowIndex}`}>
+                                  <input
+                                    className="pg-input"
+                                    value={row[colIndex] ?? ''}
+                                    onChange={(e) => updateTableCell(rowIndex, colIndex, e.target.value)}
+                                  />
+                                </td>
+                              ))}
+                              <td>
+                                <button
+                                  type="button"
+                                  className="pg-layout-segment-btn"
+                                  onClick={() => removeTableRow(rowIndex)}
+                                  aria-label={`Remove row ${rowIndex + 1}`}
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <button type="button" className="pg-layout-pattern" onClick={addTableRow}>+ Row</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Row headers</label>
+                    <div className="pg-layout-composer">
+                      <div className="pg-layout-composer-actions">
+                        <input
+                          className="pg-input"
+                          value={tableColumnRowHeaderDraft}
+                          onChange={(e) => setTableColumnRowHeaderDraft(e.target.value)}
+                          placeholder="row_label"
+                        />
+                        <button
+                          type="button"
+                          className="pg-layout-pattern"
+                          onClick={() => {
+                            const next = normalizeIdentifierDraft(tableColumnRowHeaderDraft);
+                            if (!next) return;
+                            if (!KEY_RE.test(next)) {
+                              setInsertError('Row header id is invalid. Use letters/digits/underscore and start with letter or _.');
+                              return;
+                            }
+                            setTableColumnRowHeaders((prev) => {
+                              if (prev.includes(next)) return prev;
+                              const updated = [...prev, next];
+                              setTableColumnMatrix((prevMatrix) => [...prevMatrix, tableColumnNames.map(() => '')]);
+                              return updated;
+                            });
+                            setTableColumnRowHeaderDraft('');
+                            setInsertError('');
+                          }}
+                        >
+                          + Row header
+                        </button>
+                      </div>
+                      <div className="pg-layout-token-list">
+                        {tableColumnRowHeaders.map((rowHeader, index) => (
+                          <span key={rowHeader} className="pg-layout-segment pg-layout-segment-token">
+                            {rowHeader}
+                            <button
+                              type="button"
+                              className="pg-layout-segment-btn"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => {
+                                setTableColumnRowHeaders((prev) => prev.filter((_, idx) => idx !== index));
+                                setTableColumnMatrix((prev) => {
+                                  const next = prev.filter((_, idx) => idx !== index);
+                                  return next.length > 0 ? next : [tableColumnNames.map(() => '')];
+                                });
+                              }}
+                              aria-label={`Remove ${rowHeader}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Column names</label>
+                    <div className="pg-layout-composer">
+                      <div className="pg-layout-composer-actions">
+                        <input
+                          className="pg-input"
+                          value={tableColumnNameDraft}
+                          onChange={(e) => setTableColumnNameDraft(e.target.value)}
+                          placeholder="column_name"
+                        />
+                        <button
+                          type="button"
+                          className="pg-layout-pattern"
+                          onClick={() => {
+                            const next = normalizeIdentifierDraft(tableColumnNameDraft);
+                            if (!next) return;
+                            if (!KEY_RE.test(next)) {
+                              setInsertError('Column name id is invalid. Use letters/digits/underscore and start with letter or _.');
+                              return;
+                            }
+                            setTableColumnNames((prev) => {
+                              if (prev.includes(next)) return prev;
+                              const updated = [...prev, next];
+                              setTableColumnMatrix((prevMatrix) => alignMatrixToHeaders(updated, prevMatrix));
+                              return updated;
+                            });
+                            setTableColumnNameDraft('');
+                            setInsertError('');
+                          }}
+                        >
+                          + Column
+                        </button>
+                      </div>
+                      <div className="pg-layout-token-list">
+                        {tableColumnNames.map((columnName, index) => (
+                          <span key={columnName} className="pg-layout-segment pg-layout-segment-token">
+                            {columnName}
+                            <button
+                              type="button"
+                              className="pg-layout-segment-btn"
+                              style={{ marginLeft: 6 }}
+                              onClick={() => {
+                                setTableColumnNames((prev) => {
+                                  const next = prev.filter((_, idx) => idx !== index);
+                                  setTableColumnMatrix((prevMatrix) => {
+                                    const trimmed = prevMatrix.map((row) => row.filter((_, colIdx) => colIdx !== index));
+                                    return alignMatrixToHeaders(next.length > 0 ? next : [defaultHeaderName(0)], trimmed);
+                                  });
+                                  return next.length > 0 ? next : [defaultHeaderName(0)];
+                                });
+                              }}
+                              aria-label={`Remove ${columnName}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Matrix</label>
+                    <div className="pg-sheet-wrap">
+                      <table className="pg-sheet-table">
+                        <thead>
+                          <tr>
+                            <th>Row</th>
+                            {tableColumnNames.map((columnName) => (
+                              <th key={columnName}>{columnName}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tableColumnRowHeaders.map((rowHeader, rowIndex) => (
+                            <tr key={`${rowHeader}-${rowIndex}`}>
+                              <td>{rowHeader}</td>
+                              {tableColumnNames.map((columnName, colIndex) => (
+                                <td key={`${columnName}-${rowHeader}`}>
+                                  <input
+                                    className="pg-input"
+                                    value={tableColumnMatrix[rowIndex]?.[colIndex] ?? ''}
+                                    onChange={(e) => {
+                                      const nextValue = e.target.value;
+                                      setTableColumnMatrix((prev) => prev.map((row, idx) => {
+                                        if (idx !== rowIndex) return row;
+                                        const nextRow = [...row];
+                                        nextRow[colIndex] = nextValue;
+                                        return nextRow;
+                                      }));
+                                    }}
+                                  />
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="pg-insert-actions">
+                <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
+                <button type="button" className="pg-btn-primary" onClick={insertTableComponent}>Insert Table</button>
+              </div>
+            </>
+          )}
 
           {insertError && <p className="pg-field-error">{insertError}</p>}
         </div>
@@ -1131,15 +1828,10 @@ export default function TemplateEditor({
       </div>
 
       {isPreviewOpen && (
-        <div
-          className="pg-overlay"
-          onClick={(e) => e.target === e.currentTarget && setIsPreviewOpen(false)}
-        >
+        <div className="pg-overlay" onClick={(e) => e.target === e.currentTarget && setIsPreviewOpen(false)}>
           <div className="pg-modal pg-modal-xl" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
             <div className="pg-modal-header">
-              <div>
-                <h2 className="pg-modal-title" id="preview-modal-title">Document Preview</h2>
-              </div>
+              <h2 className="pg-modal-title" id="preview-modal-title">Document Preview</h2>
               <button className="pg-modal-close" onClick={() => setIsPreviewOpen(false)} aria-label="Close">✕</button>
             </div>
             <div className="pg-modal-body">
@@ -1149,163 +1841,15 @@ export default function TemplateEditor({
         </div>
       )}
 
-      {/* ── Recursive Modal Stack ────────────────────────── */}
-      {topModal && (
-        <div
-          className="pg-submodal-overlay"
-          onClick={(e) => e.target === e.currentTarget && (modalStack.length === 1 ? closeSubmodal() : popModal())}
-        >
-          <div className="pg-submodal" role="dialog" aria-modal="true" aria-labelledby="submodal-title">
-            <div className="pg-submodal-header">
-              <div>
-                <h2 className="pg-submodal-title" id="submodal-title">
-                  Edit {topModal.label} Components
-                </h2>
-                {modalStack.length > 1 && (
-                  <p className="pg-submodal-subtitle" style={{ fontFamily: 'var(--pg-font-mono)', fontSize: '11px', color: 'var(--pg-accent)' }}>
-                    {modalStack.map(m => m.label).join(' › ')}
-                  </p>
-                )}
-                <p className="pg-submodal-subtitle">
-                  Add and arrange child components. Complex types open nested editors.
-                </p>
-              </div>
-              <button className="pg-modal-close" onClick={() => modalStack.length === 1 ? closeSubmodal() : popModal()} aria-label="Close">✕</button>
-            </div>
-
-            <div className="pg-submodal-body">
-              {/* Page-specific fields */}
-              {topModal.target === 'page' && modalStack.length === 1 && (
-                <div className="pg-submodal-page-fields">
-                  <div className="pg-insert-row">
-                    <label className="pg-label">Page Number</label>
-                    <input className="pg-input" type="number" min="1" value={topModal.pageNumber ?? 1} onChange={(e) => updateTopModal(m => ({ ...m, pageNumber: parseInt(e.target.value) || 1 }))} />
-                  </div>
-                  <div className="pg-insert-row">
-                    <label className="pg-label">Size</label>
-                    <select className="pg-input" value={topModal.pageSize ?? 'A4'} onChange={(e) => updateTopModal(m => ({ ...m, pageSize: e.target.value }))}>
-                      <option value="A4">A4</option>
-                      <option value="A3">A3</option>
-                      <option value="Letter">Letter</option>
-                    </select>
-                  </div>
-                  <div className="pg-insert-row">
-                    <label className="pg-label">Orientation</label>
-                    <select className="pg-input" value={topModal.pageOrientation ?? 'portrait'} onChange={(e) => updateTopModal(m => ({ ...m, pageOrientation: e.target.value as 'portrait' | 'landscape' }))}>
-                      <option value="portrait">Portrait</option>
-                      <option value="landscape">Landscape</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Child component list */}
-              <div className="pg-child-list">
-                {topModal.children.length === 0 ? (
-                  <div className="pg-child-list-empty">No components added yet. Use the form below to add children.</div>
-                ) : (
-                  topModal.children.map((child, idx) => (
-                    <div className="pg-child-entry" key={child.id}>
-                      <span className="pg-child-index">{idx + 1}</span>
-                      <span className={`pg-child-type-badge pg-child-type-badge--${child.type}`}>{child.type}</span>
-                      <span className="pg-child-preview">{childPreview(child)}</span>
-                      <div className="pg-child-actions">
-                        <button type="button" className="pg-child-action-btn" title="Move up" disabled={idx === 0} onClick={() => moveModalChild(child.id, 'up')}>
-                          <ArrowUp size={14} />
-                        </button>
-                        <button type="button" className="pg-child-action-btn" title="Move down" disabled={idx === topModal.children.length - 1} onClick={() => moveModalChild(child.id, 'down')}>
-                          <ArrowDown size={14} />
-                        </button>
-                        <button type="button" className="pg-child-action-btn danger" title="Remove" onClick={() => removeModalChild(child.id)}>
-                          <X size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Add child form */}
-              <div className="pg-add-child-section">
-                <div className="pg-add-child-header">
-                  <Plus size={14} />
-                  <label className="pg-label">Type</label>
-                  <select className="pg-input" value={addChildType} onChange={(e) => { setAddChildType(e.target.value as AnyChildType); updateTopModal(m => ({ ...m, error: '' })); }} style={{ maxWidth: 160 }}>
-                    {ALL_CHILD_TYPES.map(t => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="pg-add-child-body">
-                  {(addChildType === 'string' || addChildType === 'integer') && (
-                    <div className="pg-insert-row">
-                      <label className="pg-label">Value</label>
-                      <input className="pg-input" value={addChildValue} onChange={(e) => setAddChildValue(e.target.value)} placeholder={addChildType === 'integer' ? '42' : 'Text content'} />
-                    </div>
-                  )}
-                  {addChildType === 'image' && (
-                    <>
-                      <div className="pg-insert-row">
-                        <label className="pg-label">Image URL</label>
-                        <input className="pg-input" value={addChildImageSrc} onChange={(e) => setAddChildImageSrc(e.target.value)} />
-                      </div>
-                      <div className="pg-insert-row">
-                        <label className="pg-label">Alt text</label>
-                        <input className="pg-input" value={addChildImageAlt} onChange={(e) => setAddChildImageAlt(e.target.value)} />
-                      </div>
-                    </>
-                  )}
-                  {addChildType === 'hyperlink' && (
-                    <>
-                      <div className="pg-insert-row">
-                        <label className="pg-label">Alias</label>
-                        <input className="pg-input" value={addChildLinkAlias} onChange={(e) => setAddChildLinkAlias(e.target.value)} />
-                      </div>
-                      <div className="pg-insert-row">
-                        <label className="pg-label">URL</label>
-                        <input className="pg-input" value={addChildLinkUrl} onChange={(e) => setAddChildLinkUrl(e.target.value)} />
-                      </div>
-                    </>
-                  )}
-                  {(addChildType === 'container' || addChildType === 'list' || addChildType === 'table') && (
-                    <div style={{ padding: '8px 0', color: 'var(--pg-text-muted)', fontSize: '12px' }}>
-                      Click "Add" to open a nested editor for this {addChildType}.
-                    </div>
-                  )}
-                </div>
-                <div className="pg-add-child-actions">
-                  {(addChildType === 'string' || addChildType === 'integer' || addChildType === 'image' || addChildType === 'hyperlink') && (
-                    <button type="button" className="pg-btn-primary" onClick={addPrimitiveChild}>Add Component</button>
-                  )}
-                  {(addChildType === 'container' || addChildType === 'list' || addChildType === 'table') && (
-                    <button type="button" className="pg-btn-primary" onClick={() => addComplexChild(addChildType)}>Add {addChildType.charAt(0).toUpperCase() + addChildType.slice(1)}…</button>
-                  )}
-                </div>
-              </div>
-
-              {topModal.error && <p className="pg-field-error">{topModal.error}</p>}
-            </div>
-
-            <div className="pg-submodal-footer">
-              <button type="button" className="pg-btn-ghost" onClick={() => modalStack.length === 1 ? closeSubmodal() : popModal()}>
-                {modalStack.length === 1 ? 'Cancel' : '← Back'}
-              </button>
-              <button type="button" className="pg-btn-primary" onClick={confirmTopModal}>
-                {modalStack.length === 1
-                  ? `Insert ${topModal.label}`
-                  : `Confirm ${topModal.label}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="pg-tiptap-footer">
         <span className="pg-tiptap-footer-label">Placeholders:</span>
-        {placeholderKeys.length === 0 && <span style={{ color: 'var(--pg-text-muted)', fontSize: '11px' }}>none</span>}
-        {placeholderKeys.map((k) => (
-          <span key={k} className="pg-key-chip">{`{{${k}}}`}</span>
+        {placeholderMeta.length === 0 && <span style={{ color: 'var(--pg-text-muted)', fontSize: '11px' }}>none</span>}
+        {placeholderMeta.map((item) => (
+          <span key={item.key} className="pg-key-chip">{`{{${item.key}}}`} · {item.kind}</span>
         ))}
+        <span className="pg-tiptap-footer-spacer" />
+        <span className="pg-tiptap-footer-metric">{metrics.words} words</span>
+        <span className="pg-tiptap-footer-metric">{metrics.characters} chars</span>
       </div>
 
       {validationErrors.length > 0 && (

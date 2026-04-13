@@ -47,7 +47,7 @@ describe('GET /api/templates/[id]', () => {
     expect(data.error).toBe('Invalid template ID format');
   });
 
-  it('should return 400 for invalid placeholder key type schema', async () => {
+  it('should return 400 for invalid placeholder attrs', async () => {
     const template = await createTestTemplate();
 
     const request = new NextRequest(
@@ -64,8 +64,10 @@ describe('GET /api/templates/[id]', () => {
                   {
                     type: 'placeholder',
                     attrs: {
-                      key: 'details',
-                      kind: 'list',
+                      key: '',
+                      schema: {
+                        kind: 'list',
+                      },
                     },
                   },
                 ],
@@ -82,7 +84,7 @@ describe('GET /api/templates/[id]', () => {
 
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
-    expect(data.error).toContain('item_kind is required');
+    expect(data.error).toContain('placeholder.attrs.key must be a non-empty string');
   });
 
   it('should return 404 for non-existent template', async () => {

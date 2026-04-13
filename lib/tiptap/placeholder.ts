@@ -1,143 +1,312 @@
 import { mergeAttributes, Node } from '@tiptap/core';
-import { ComponentTypeSchema, ContainerTypeSchema, ListTypeSchema } from '@/types/template';
+import { ComponentTypeSchema, ContainerTypeSchema, CustomLayoutNode, CustomTypeSchema, ListStyle, ListTypeSchema, RepeatTypeSchema, TableMode, TableTypeSchema } from '@/types/template';
 
-/**
- * Placeholder attrs carry the data binding and the structural hints required
- * to derive a schema without storing redundant computed metadata.
- */
 export interface PlaceholderNodeAttrs {
   key: string;
-  kind: string; // 'string', 'integer', 'image', 'hyperlink', 'list', 'container', 'table'
+  kind?: string;
+  schema: ComponentTypeSchema;
   value: unknown;
-  // Template-specific rendering properties
-  style?: 'bulleted' | 'numbered' | 'plain'; // For lists
-  item_kind?: 'string' | 'integer' | 'image' | 'hyperlink'; // For lists
-  mode?: 'row_data' | 'column_data'; // For tables
-  headers?: string[]; // For tables
-  component_kinds?: Array<'string' | 'integer' | 'image' | 'hyperlink'>; // For containers
-  // Row mode: type per column header.
-  column_types?: Record<string, ComponentTypeSchema>;
-  // Column mode: type per row header.
-  row_types?: Record<string, ComponentTypeSchema>;
-  caption?: ComponentTypeSchema; // For tables
-  option?: Record<string, unknown>; // For images
+  optional?: boolean;
+  fallback?: unknown;
 }
 
-/** Lightweight DOM tuple representation used by TipTap renderHTML hooks. */
 type DOMSpec = [string, ...any[]];
 
-/** Returns true when a value is a plain object and not an array. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Escapes user content before embedding it into generated HTML. */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-/** Normalizes list styles to the small set supported by the renderer. */
-function normalizeListStyle(style: unknown): 'bulleted' | 'numbered' | 'plain' {
+function normalizeListStyle(style: unknown): ListStyle {
   return style === 'numbered' || style === 'plain' ? style : 'bulleted';
 }
 
-/**
- * Renders a placeholder value according to the derived schema for the node.
- * Composite schemas recurse into their child values.
- */
-function renderValueBySchema(
-  schema: ComponentTypeSchema,
-  value: unknown,
-  nodeAttrs?: Partial<PlaceholderNodeAttrs>
-): DOMSpec {
+function normalizeCustomLayoutNodes(value: unknown): CustomLayoutNode[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const nodes: CustomLayoutNode[] = [];
+  for (const node of value) {
+    if (!isRecord(node) || typeof node.kind !== 'string') continue;
+    if (node.kind === 'text') {
+      nodes.push({ kind: 'text', value: typeof node.value === 'string' ? node.value : '' });
+      continue;
+    }
+    if (node.kind === 'token' && typeof node.token_id === 'string' && node.token_id.trim() !== '') {
+      nodes.push({
+        kind: 'token',
+        token_id: node.token_id.trim(),
+        prefix: typeof node.prefix === 'string' ? node.prefix : undefined,
+        suffix: typeof node.suffix === 'string' ? node.suffix : undefined,
+      });
+      continue;
+    }
+    if (node.kind === 'newline') {
+      nodes.push({ kind: 'newline' });
+    }
+  }
+  return nodes.length > 0 ? nodes : undefined;
+}
+
+function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
+  if (!isRecord(rawSchema) || typeof rawSchema.kind !== 'string') {
+    return { kind: 'string' };
+  }
+
+  const schema = rawSchema as ComponentTypeSchema;
+
+  switch (schema.kind) {
+    case 'string':
+    case 'integer':
+    case 'image':
+    case 'hyperlink':
+    case 'page_break':
+      return schema;
+    case 'repeat': {
+      const repeatSchema = schema as RepeatTypeSchema;
+      return {
+        kind: 'repeat',
+        item_type: normalizeTypeSchema(repeatSchema.item_type),
+        min_items: typeof repeatSchema.min_items === 'number' ? repeatSchema.min_items : undefined,
+        max_items: typeof repeatSchema.max_items === 'number' ? repeatSchema.max_items : undefined,
+        base_variable: typeof repeatSchema.base_variable === 'string' ? repeatSchema.base_variable : 'item',
+        layout_template: typeof repeatSchema.layout_template === 'string' ? repeatSchema.layout_template : undefined,
+      };
+    }
+    case 'custom': {
+      const customSchema = schema as CustomTypeSchema;
+      return {
+        kind: 'custom',
+        base_variable: typeof customSchema.base_variable === 'string' && customSchema.base_variable.trim() !== ''
+          ? customSchema.base_variable.trim()
+          : 'item',
+        value_type: normalizeTypeSchema(customSchema.value_type),
+        layout_template: typeof customSchema.layout_template === 'string' ? customSchema.layout_template : '{{item}}',
+        repeat: customSchema.repeat === true,
+        token_registry: isRecord(customSchema.token_registry)
+          ? Object.fromEntries(Object.entries(customSchema.token_registry).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+          : undefined,
+        token_labels: isRecord(customSchema.token_labels)
+          ? Object.fromEntries(Object.entries(customSchema.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)]))
+          : undefined,
+        layout_nodes: normalizeCustomLayoutNodes(customSchema.layout_nodes),
+      };
+    }
+    case 'list': {
+      const listSchema = schema as ListTypeSchema;
+      return {
+        kind: 'list',
+        item_type: normalizeTypeSchema(listSchema.item_type),
+        style: normalizeListStyle(listSchema.style),
+        min_items: typeof listSchema.min_items === 'number' ? listSchema.min_items : undefined,
+        max_items: typeof listSchema.max_items === 'number' ? listSchema.max_items : undefined,
+      };
+    }
+    case 'container': {
+      const containerSchema = schema as ContainerTypeSchema;
+      const mode = containerSchema.mode === 'repeat' ? 'repeat' : 'tuple';
+      return {
+        kind: 'container',
+        mode,
+        component_types: Array.isArray(containerSchema.component_types)
+          ? containerSchema.component_types.map((item) => normalizeTypeSchema(item))
+          : undefined,
+        item_type: containerSchema.item_type ? normalizeTypeSchema(containerSchema.item_type) : undefined,
+        min_items: typeof containerSchema.min_items === 'number' ? containerSchema.min_items : undefined,
+        max_items: typeof containerSchema.max_items === 'number' ? containerSchema.max_items : undefined,
+      };
+    }
+    case 'page':
+    case 'header':
+    case 'footer': {
+      const compositeSchema = schema as ContainerTypeSchema;
+      return {
+        kind: compositeSchema.kind,
+        component_types: Array.isArray(compositeSchema.component_types)
+          ? compositeSchema.component_types.map((item) => normalizeTypeSchema(item))
+          : [],
+      } as ComponentTypeSchema;
+    }
+    case 'table': {
+      const tableSchema = schema as TableTypeSchema;
+      return {
+        kind: 'table',
+        mode: tableSchema.mode === 'column_data' ? 'column_data' : tableSchema.mode === 'row_data' ? 'row_data' : undefined,
+        headers: Array.isArray(tableSchema.headers)
+          ? tableSchema.headers.filter((h) => typeof h === 'string' && h.trim() !== '')
+          : undefined,
+        dynamic_headers: typeof tableSchema.dynamic_headers === 'boolean' ? tableSchema.dynamic_headers : undefined,
+        column_types: isRecord(tableSchema.column_types)
+          ? Object.fromEntries(Object.entries(tableSchema.column_types).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+          : undefined,
+        row_types: isRecord(tableSchema.row_types)
+          ? Object.fromEntries(Object.entries(tableSchema.row_types).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+          : undefined,
+        caption: tableSchema.caption ? normalizeTypeSchema(tableSchema.caption) : undefined,
+      };
+    }
+    default:
+      return { kind: 'string' };
+  }
+}
+
+function inferTableHeaders(tableValue: Record<string, unknown>, mode: TableMode): string[] {
+  if (mode === 'row_data') {
+    if (!Array.isArray(tableValue.rows)) return [];
+    const set = new Set<string>();
+    for (const row of tableValue.rows) {
+      if (!isRecord(row)) continue;
+      Object.keys(row).forEach((key) => set.add(key));
+    }
+    return Array.from(set);
+  }
+
+  if (!isRecord(tableValue.columns)) return [];
+  const set = new Set<string>();
+  for (const col of Object.values(tableValue.columns)) {
+    if (!isRecord(col)) continue;
+    Object.keys(col).forEach((key) => set.add(key));
+  }
+  return Array.from(set);
+}
+
+function renderCollection(items: unknown[], itemType: ComponentTypeSchema): DOMSpec[] {
+  return items.map((item) => ['div', {}, renderValueBySchema(itemType, item)]);
+}
+
+function getByPath(value: unknown, path: string): unknown {
+  const parts = path.split('.').map((p) => p.trim()).filter(Boolean);
+  let current: unknown = value;
+  for (const part of parts) {
+    if (!isRecord(current)) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function renderTemplateString(template: string, baseVariable: string, value: unknown): string {
+  return template.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_\.]*?)\s*\}\}/g, (_, token: string) => {
+    if (token === baseVariable) {
+      if (value === null || value === undefined) return '';
+      return typeof value === 'object' ? JSON.stringify(value) : String(value);
+    }
+
+    const prefix = `${baseVariable}.`;
+    if (token.startsWith(prefix)) {
+      const projected = getByPath(value, token.slice(prefix.length));
+      if (projected === null || projected === undefined) return '';
+      return typeof projected === 'object' ? JSON.stringify(projected) : String(projected);
+    }
+
+    return '';
+  });
+}
+
+function renderValueBySchema(schema: ComponentTypeSchema, value: unknown): DOMSpec {
   switch (schema.kind) {
     case 'string':
     case 'integer':
       return ['span', {}, value === undefined || value === null ? '' : String(value)];
 
     case 'image': {
-      if (!isRecord(value)) {
-        return ['span', {}, '[invalid image value]'];
-      }
+      if (!isRecord(value)) return ['span', {}, '[invalid image value]'];
       const src = typeof value.src === 'string' ? value.src : '';
       const alt = typeof value.alt === 'string' ? value.alt : '';
       return ['figure', {}, ['img', { src, alt, style: 'max-width:100%;height:auto;' }]];
     }
 
     case 'hyperlink': {
-      if (!isRecord(value)) {
-        return ['span', {}, '[invalid hyperlink value]'];
-      }
+      if (!isRecord(value)) return ['span', {}, '[invalid hyperlink value]'];
       const href = typeof value.url === 'string' ? value.url : '';
       const alias = typeof value.alias === 'string' ? value.alias : '';
       return ['a', { href, target: '_blank', rel: 'noopener noreferrer' }, alias];
     }
 
-    case 'list': {
-      const listValue = isRecord(value) ? value : {};
-      const items = Array.isArray(listValue.items) ? listValue.items : [];
-      const style = normalizeListStyle(nodeAttrs?.style ?? 'bulleted');
-      const itemType = (schema as ListTypeSchema).item_type;
-
-      if (style === 'plain') {
+    case 'repeat': {
+      const repeatValue = isRecord(value) ? value : {};
+      const items = Array.isArray(repeatValue.items) ? repeatValue.items : Array.isArray(value) ? value : [];
+      if (typeof schema.layout_template === 'string' && schema.layout_template.trim() !== '') {
+        const baseVariable = schema.base_variable || 'item';
         return [
           'div',
-          { 'data-list-style': 'plain' },
-          ...items.map((item) => ['div', {}, renderValueBySchema(itemType, item, nodeAttrs)]),
+          { 'data-repeat': 'true' },
+          ...items.map((item) => ['div', { 'data-repeat-item': 'true' }, renderTemplateString(schema.layout_template!, baseVariable, item)]),
+        ];
+      }
+      const child = renderCollection(items, schema.item_type);
+      return ['div', { 'data-repeat': 'true' }, ...child];
+    }
+
+    case 'custom': {
+      const baseVariable = schema.base_variable || 'item';
+      const layout = schema.layout_template || '{{item}}';
+
+      if (schema.repeat) {
+        const items = Array.isArray(value)
+          ? value
+          : isRecord(value) && Array.isArray(value.items)
+            ? value.items
+            : [];
+        return [
+          'div',
+          { 'data-custom': 'true', 'data-custom-repeat': 'true' },
+          ...items.map((item) => ['div', { 'data-custom-item': 'true' }, renderTemplateString(layout, baseVariable, item)]),
         ];
       }
 
+      const dataValue = isRecord(value) && 'data' in value ? value.data : value;
+      return ['div', { 'data-custom': 'true' }, renderTemplateString(layout, baseVariable, dataValue)];
+    }
+
+    case 'list': {
+      const listValue = isRecord(value) ? value : {};
+      const items = Array.isArray(listValue.items) ? listValue.items : Array.isArray(value) ? value : [];
+      const style = normalizeListStyle(listValue.style ?? schema.style ?? 'bulleted');
+      const itemType = schema.item_type;
+
+      if (style === 'plain') {
+        return ['div', { 'data-list-style': 'plain' }, ...items.map((item) => ['div', {}, renderValueBySchema(itemType, item)])];
+      }
+
       const listTag = style === 'numbered' ? 'ol' : 'ul';
-      return [
-        listTag,
-        { 'data-list-style': style },
-        ...items.map((item) => ['li', {}, renderValueBySchema(itemType, item, nodeAttrs)]),
-      ];
+      return [listTag, { 'data-list-style': style }, ...items.map((item) => ['li', {}, renderValueBySchema(itemType, item)])];
     }
 
     case 'container': {
       const containerValue = isRecord(value) ? value : {};
       const components = Array.isArray(containerValue.components) ? containerValue.components : [];
-      const componentTypes = (schema as ContainerTypeSchema).component_types;
+      const mode = schema.mode === 'repeat' ? 'repeat' : 'tuple';
+
+      if (mode === 'repeat') {
+        const itemType = schema.item_type || { kind: 'string' };
+        return ['div', { 'data-component': 'container', 'data-mode': 'repeat' }, ...renderCollection(components, itemType)];
+      }
+
+      const componentTypes = Array.isArray(schema.component_types) ? schema.component_types : [];
       return [
         'div',
-        { 'data-component': 'container' },
-        ...components.map((component, index) => {
-          const componentSchema = componentTypes[index] || { kind: 'string' };
-          return ['div', {}, renderValueBySchema(componentSchema, component, nodeAttrs)];
-        }),
+        { 'data-component': 'container', 'data-mode': 'tuple' },
+        ...components.map((component, index) => ['div', {}, renderValueBySchema(componentTypes[index] || { kind: 'string' }, component)]),
       ];
     }
 
     case 'table': {
       const tableValue = isRecord(value) ? value : {};
-      const caption = tableValue.caption !== undefined
-        ? ['caption', {}, typeof tableValue.caption === 'string' ? tableValue.caption : escapeHtml(JSON.stringify(tableValue.caption))]
-        : null;
+      const mode: TableMode = schema.mode || (Array.isArray(tableValue.rows) ? 'row_data' : 'column_data');
+      const headers = schema.headers && schema.headers.length > 0 ? schema.headers : inferTableHeaders(tableValue, mode);
 
-      const mode = nodeAttrs?.mode || 'row_data';
-      const headers = nodeAttrs?.headers || [];
+      const captionNode = tableValue.caption !== undefined
+        ? ['caption', {}, typeof tableValue.caption === 'string' ? tableValue.caption : JSON.stringify(tableValue.caption)]
+        : null;
 
       if (mode === 'row_data') {
         const rows = Array.isArray(tableValue.rows) ? tableValue.rows : [];
         return [
           'table',
           {},
-          ...(caption ? [caption] : []),
-          ['thead', {}, ['tr', {}, ...headers.map((h: string) => ['th', {}, h])]],
-          [
-            'tbody',
-            {},
-            ...rows.map((row) => {
-              const rowObj = isRecord(row) ? row : {};
-              return ['tr', {}, ...headers.map((h: string) => ['td', {}, String(rowObj[h] ?? '')])];
-            }),
-          ],
+          ...(captionNode ? [captionNode] : []),
+          ['thead', {}, ['tr', {}, ...headers.map((h) => ['th', {}, h])]],
+          ['tbody', {}, ...rows.map((row) => {
+            const rowObj = isRecord(row) ? row : {};
+            return ['tr', {}, ...headers.map((h) => ['td', {}, String(rowObj[h] ?? '')])];
+          })],
         ];
       }
 
@@ -146,21 +315,17 @@ function renderValueBySchema(
       return [
         'table',
         {},
-        ...(caption ? [caption] : []),
+        ...(captionNode ? [captionNode] : []),
         ['thead', {}, ['tr', {}, ['th', {}, ''], ...columnNames.map((name) => ['th', {}, name])]],
-        [
-          'tbody',
+        ['tbody', {}, ...headers.map((rowHeader) => [
+          'tr',
           {},
-          ...headers.map((rowHeader: string) => [
-            'tr',
-            {},
-            ['th', {}, rowHeader],
-            ...columnNames.map((name) => {
-              const col = isRecord(columns[name]) ? columns[name] : {};
-              return ['td', {}, String(col[rowHeader] ?? '')];
-            }),
-          ]),
-        ],
+          ['th', {}, rowHeader],
+          ...columnNames.map((name) => {
+            const col = isRecord(columns[name]) ? columns[name] : {};
+            return ['td', {}, String(col[rowHeader] ?? '')];
+          }),
+        ])],
       ];
     }
 
@@ -169,97 +334,122 @@ function renderValueBySchema(
   }
 }
 
-/** Validates the minimum placeholder attrs required by the editor and API. */
 export function validatePlaceholderAttrs(attrs: Record<string, unknown>): string | null {
   if (typeof attrs.key !== 'string' || attrs.key.trim() === '') {
     return 'placeholder.attrs.key must be a non-empty string';
   }
 
-  if (typeof attrs.kind !== 'string' || attrs.kind.trim() === '') {
-    return 'placeholder.attrs.kind must be a non-empty string';
+  if (!isRecord(attrs.schema) || typeof attrs.schema.kind !== 'string') {
+    return 'placeholder.attrs.schema must be a valid schema object';
   }
 
   return null;
 }
 
-/**
- * Derives a ComponentTypeSchema from a placeholder node's attributes and children.
- * Used to determine the schema for a placeholder based on its kind and structure.
- * @param kind The placeholder kind ('string', 'integer', 'image', 'hyperlink', 'list', 'container', 'table')
- * @param attrs The placeholder attributes (style, mode, headers, children, etc.)
- * @param children The placeholder's child nodes
- * @returns The derived ComponentTypeSchema
- */
-/**
- * Derives the placeholder schema from the declared kind and supporting attrs.
- * This is the single source of truth for typed placeholders.
- */
-export function deriveSchemaFromChildren(kind: string, attrs: Record<string, unknown>, children: unknown): ComponentTypeSchema {
-  // Primitive types
-  if (kind === 'string' || kind === 'integer' || kind === 'image' || kind === 'hyperlink') {
-    return { kind: kind as any };
+export function deriveSchemaFromChildren(kind: string, attrs: Record<string, unknown>, _children: unknown): ComponentTypeSchema {
+  if (isRecord(attrs.schema) && typeof attrs.schema.kind === 'string') {
+    const normalized = normalizeTypeSchema(attrs.schema);
+    if (!(normalized.kind === 'string' && kind && kind !== 'string')) {
+      return normalized;
+    }
   }
 
-  // List: derive item_type from explicit item_kind input
-  if (kind === 'list') {
-    const itemKind = typeof attrs.item_kind === 'string' ? attrs.item_kind : '';
-    if (!itemKind) {
-      return { kind: 'list' } as any;
+  if (kind === 'list' || kind === 'repeat') {
+    const itemKind = typeof attrs.item_kind === 'string' ? attrs.item_kind : 'string';
+    const base = {
+      kind,
+      item_type: normalizeTypeSchema({ kind: itemKind }),
+    } as ComponentTypeSchema;
+
+    if (kind === 'list') {
+      return {
+        ...(base as ListTypeSchema),
+        style: normalizeListStyle(attrs.style),
+      };
     }
 
-    return { kind: 'list', item_type: { kind: itemKind as any } };
+    return base;
   }
 
-  // Table
-  if (kind === 'table') {
-    return { kind: 'table' };
-  }
-
-  // Container: collect all child schemas
-  if (kind === 'container') {
-    const componentKinds = Array.isArray(attrs.component_kinds) ? attrs.component_kinds : [];
-    const componentSchemas = componentKinds.map((componentKind) => ({ kind: componentKind } as ComponentTypeSchema));
-
+  if (kind === 'custom') {
     return {
-      kind: 'container',
-      component_types: componentSchemas,
+      kind: 'custom',
+      base_variable: typeof attrs.base_variable === 'string' && attrs.base_variable.trim() !== ''
+        ? attrs.base_variable.trim()
+        : 'item',
+      value_type: isRecord(attrs.value_type) ? normalizeTypeSchema(attrs.value_type) : { kind: 'string' },
+      layout_template: typeof attrs.layout_template === 'string' && attrs.layout_template.trim() !== ''
+        ? attrs.layout_template
+        : '{{item}}',
+      repeat: attrs.repeat === true,
+      token_registry: isRecord(attrs.token_registry)
+        ? Object.fromEntries(Object.entries(attrs.token_registry).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+        : undefined,
+      token_labels: isRecord(attrs.token_labels)
+        ? Object.fromEntries(Object.entries(attrs.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)]))
+        : undefined,
+      layout_nodes: normalizeCustomLayoutNodes(attrs.layout_nodes),
     };
   }
 
-  // Default
-  return { kind: 'string' };
+  if (kind === 'container') {
+    const componentKinds = Array.isArray(attrs.component_kinds) ? attrs.component_kinds : [];
+    return {
+      kind: 'container',
+      mode: 'tuple',
+      component_types: componentKinds.map((componentKind) => normalizeTypeSchema({ kind: String(componentKind) })),
+    };
+  }
+
+  if (kind === 'table') {
+    const mode = attrs.mode === 'column_data' || attrs.mode === 'row_data' ? attrs.mode : 'row_data';
+    const headers = Array.isArray(attrs.headers)
+      ? attrs.headers.filter((h): h is string => typeof h === 'string' && h.trim() !== '')
+      : undefined;
+    const rawTypeMap = mode === 'row_data' ? attrs.column_types : attrs.row_types;
+    const typeMap = isRecord(rawTypeMap)
+      ? Object.fromEntries(Object.entries(rawTypeMap).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+      : undefined;
+
+    return {
+      kind: 'table',
+      mode,
+      headers,
+      dynamic_headers: !headers || headers.length === 0,
+      ...(mode === 'row_data' ? { column_types: typeMap } : { row_types: typeMap }),
+      ...(attrs.caption !== undefined ? { caption: normalizeTypeSchema(attrs.caption) } : {}),
+    };
+  }
+
+  if (kind === 'page_break') {
+    return { kind: 'page_break' };
+  }
+
+  if (kind === 'image' || kind === 'hyperlink' || kind === 'integer' || kind === 'string') {
+    return { kind: kind as ComponentTypeSchema['kind'] };
+  }
+
+  return { kind: (kind || 'string') as ComponentTypeSchema['kind'] };
 }
 
-/** Returns a copy of placeholder attrs with a new runtime value applied. */
-export function substitutePlaceholderValue(
-  attrs: PlaceholderNodeAttrs,
-  nextValue: unknown
-): PlaceholderNodeAttrs {
-  return {
-    ...attrs,
-    value: nextValue,
-  };
+export function substitutePlaceholderValue(attrs: PlaceholderNodeAttrs, nextValue: unknown): PlaceholderNodeAttrs {
+  return { ...attrs, value: nextValue };
 }
 
-/** Creates a raw placeholder node payload ready for insertion into TipTap. */
 export function createPlaceholderNode(attrs: PlaceholderNodeAttrs) {
   const validationError = validatePlaceholderAttrs(attrs as unknown as Record<string, unknown>);
-  if (validationError) {
-    throw new Error(validationError);
-  }
+  if (validationError) throw new Error(validationError);
 
   return {
     type: 'placeholder',
-    attrs,
+    attrs: {
+      ...attrs,
+      kind: attrs.schema.kind,
+      schema: normalizeTypeSchema(attrs.schema),
+    },
   };
 }
 
-/**
- * Custom Tiptap node used for fillable values.
- * The `key` attribute stores the placeholder key in templates,
- * while node content holds the visible text.
- */
-/** TipTap node definition that renders placeholders into HTML output. */
 export const Placeholder = Node.create({
   name: 'placeholder',
   group: 'inline',
@@ -286,31 +476,27 @@ export const Placeholder = Node.create({
             ? { 'data-kind': attributes.kind }
             : {},
       },
-      value: {
-        default: '',
+      schema: {
+        default: { kind: 'string' },
         parseHTML: (element) => {
-          const raw = element.getAttribute('data-value');
-          if (!raw) return '';
+          const raw = element.getAttribute('data-schema');
+          if (!raw) return { kind: 'string' };
           try {
-            return JSON.parse(raw);
+            return normalizeTypeSchema(JSON.parse(raw));
           } catch {
-            return raw;
+            return { kind: 'string' };
           }
         },
-        renderHTML: (attributes) => ({ 'data-value': JSON.stringify(attributes.value ?? '') }),
+        renderHTML: (attributes) => ({ 'data-schema': JSON.stringify(normalizeTypeSchema(attributes.schema)) }),
       },
       item_kind: {
         default: undefined,
         parseHTML: (element) => {
           const raw = element.getAttribute('data-item-kind');
-          return raw === 'string' || raw === 'integer' || raw === 'image' || raw === 'hyperlink' ? raw : undefined;
+          return raw || undefined;
         },
-        renderHTML: (attributes) => {
-          const itemKind = attributes.item_kind;
-          return itemKind === 'string' || itemKind === 'integer' || itemKind === 'image' || itemKind === 'hyperlink'
-            ? { 'data-item-kind': itemKind }
-            : {};
-        },
+        renderHTML: (attributes) =>
+          typeof attributes.item_kind === 'string' ? { 'data-item-kind': attributes.item_kind } : {},
       },
       component_kinds: {
         default: undefined,
@@ -319,43 +505,27 @@ export const Placeholder = Node.create({
           if (!raw) return undefined;
           try {
             const parsed = JSON.parse(raw);
-            return Array.isArray(parsed)
-              ? parsed.filter((item) => item === 'string' || item === 'integer' || item === 'image' || item === 'hyperlink')
-              : undefined;
+            return Array.isArray(parsed) ? parsed : undefined;
           } catch {
             return undefined;
           }
         },
-        renderHTML: (attributes) => {
-          const kinds = attributes.component_kinds;
-          return Array.isArray(kinds) && kinds.length > 0
-            ? { 'data-component-kinds': JSON.stringify(kinds) }
-            : {};
-        },
+        renderHTML: (attributes) =>
+          Array.isArray(attributes.component_kinds)
+            ? { 'data-component-kinds': JSON.stringify(attributes.component_kinds) }
+            : {},
       },
       style: {
         default: undefined,
-        parseHTML: (element) => {
-          const raw = element.getAttribute('data-style');
-          return raw === 'numbered' || raw === 'plain' || raw === 'bulleted' ? raw : undefined;
-        },
-        renderHTML: (attributes) => {
-          const style = attributes.style;
-          return style === 'numbered' || style === 'plain' || style === 'bulleted'
-            ? { 'data-style': style }
-            : {};
-        },
+        parseHTML: (element) => element.getAttribute('data-style') || undefined,
+        renderHTML: (attributes) =>
+          typeof attributes.style === 'string' ? { 'data-style': attributes.style } : {},
       },
       mode: {
         default: undefined,
-        parseHTML: (element) => {
-          const raw = element.getAttribute('data-mode');
-          return raw === 'column_data' || raw === 'row_data' ? raw : undefined;
-        },
-        renderHTML: (attributes) => {
-          const mode = attributes.mode;
-          return mode === 'column_data' || mode === 'row_data' ? { 'data-mode': mode } : {};
-        },
+        parseHTML: (element) => element.getAttribute('data-mode') || undefined,
+        renderHTML: (attributes) =>
+          typeof attributes.mode === 'string' ? { 'data-mode': attributes.mode } : {},
       },
       headers: {
         default: undefined,
@@ -364,15 +534,13 @@ export const Placeholder = Node.create({
           if (!raw) return undefined;
           try {
             const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed.filter((h) => typeof h === 'string') : undefined;
+            return Array.isArray(parsed) ? parsed : undefined;
           } catch {
             return undefined;
           }
         },
-        renderHTML: (attributes) => {
-          const headers = attributes.headers;
-          return Array.isArray(headers) ? { 'data-headers': JSON.stringify(headers) } : {};
-        },
+        renderHTML: (attributes) =>
+          Array.isArray(attributes.headers) ? { 'data-headers': JSON.stringify(attributes.headers) } : {},
       },
       column_types: {
         default: undefined,
@@ -381,17 +549,15 @@ export const Placeholder = Node.create({
           if (!raw) return undefined;
           try {
             const parsed = JSON.parse(raw);
-            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+            return isRecord(parsed) ? parsed : undefined;
           } catch {
             return undefined;
           }
         },
-        renderHTML: (attributes) => {
-          const types = attributes.column_types;
-          return types && typeof types === 'object' && !Array.isArray(types)
-            ? { 'data-column-types': JSON.stringify(types) }
-            : {};
-        },
+        renderHTML: (attributes) =>
+          isRecord(attributes.column_types)
+            ? { 'data-column-types': JSON.stringify(attributes.column_types) }
+            : {},
       },
       row_types: {
         default: undefined,
@@ -400,17 +566,15 @@ export const Placeholder = Node.create({
           if (!raw) return undefined;
           try {
             const parsed = JSON.parse(raw);
-            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+            return isRecord(parsed) ? parsed : undefined;
           } catch {
             return undefined;
           }
         },
-        renderHTML: (attributes) => {
-          const types = attributes.row_types;
-          return types && typeof types === 'object' && !Array.isArray(types)
-            ? { 'data-row-types': JSON.stringify(types) }
-            : {};
-        },
+        renderHTML: (attributes) =>
+          isRecord(attributes.row_types)
+            ? { 'data-row-types': JSON.stringify(attributes.row_types) }
+            : {},
       },
       caption: {
         default: undefined,
@@ -426,15 +590,127 @@ export const Placeholder = Node.create({
         renderHTML: (attributes) =>
           attributes.caption !== undefined ? { 'data-caption': JSON.stringify(attributes.caption) } : {},
       },
+      base_variable: {
+        default: undefined,
+        parseHTML: (element) => element.getAttribute('data-base-variable') || undefined,
+        renderHTML: (attributes) =>
+          typeof attributes.base_variable === 'string' ? { 'data-base-variable': attributes.base_variable } : {},
+      },
+      value_type: {
+        default: undefined,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-value-type');
+          if (!raw) return undefined;
+          try {
+            return normalizeTypeSchema(JSON.parse(raw));
+          } catch {
+            return undefined;
+          }
+        },
+        renderHTML: (attributes) =>
+          isRecord(attributes.value_type)
+            ? { 'data-value-type': JSON.stringify(normalizeTypeSchema(attributes.value_type)) }
+            : {},
+      },
+      layout_template: {
+        default: undefined,
+        parseHTML: (element) => element.getAttribute('data-layout-template') || undefined,
+        renderHTML: (attributes) =>
+          typeof attributes.layout_template === 'string' ? { 'data-layout-template': attributes.layout_template } : {},
+      },
+      token_registry: {
+        default: undefined,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-token-registry');
+          if (!raw) return undefined;
+          try {
+            const parsed = JSON.parse(raw);
+            return isRecord(parsed) ? parsed : undefined;
+          } catch {
+            return undefined;
+          }
+        },
+        renderHTML: (attributes) =>
+          isRecord(attributes.token_registry)
+            ? { 'data-token-registry': JSON.stringify(attributes.token_registry) }
+            : {},
+      },
+      token_labels: {
+        default: undefined,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-token-labels');
+          if (!raw) return undefined;
+          try {
+            const parsed = JSON.parse(raw);
+            return isRecord(parsed) ? parsed : undefined;
+          } catch {
+            return undefined;
+          }
+        },
+        renderHTML: (attributes) =>
+          isRecord(attributes.token_labels)
+            ? { 'data-token-labels': JSON.stringify(attributes.token_labels) }
+            : {},
+      },
+      layout_nodes: {
+        default: undefined,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-layout-nodes');
+          if (!raw) return undefined;
+          try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : undefined;
+          } catch {
+            return undefined;
+          }
+        },
+        renderHTML: (attributes) =>
+          Array.isArray(attributes.layout_nodes)
+            ? { 'data-layout-nodes': JSON.stringify(attributes.layout_nodes) }
+            : {},
+      },
+      repeat: {
+        default: undefined,
+        parseHTML: (element) => element.getAttribute('data-repeat') === 'true',
+        renderHTML: (attributes) =>
+          attributes.repeat === true ? { 'data-repeat': 'true' } : {},
+      },
+      value: {
+        default: '',
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-value');
+          if (!raw) return '';
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return raw;
+          }
+        },
+        renderHTML: (attributes) => ({ 'data-value': JSON.stringify(attributes.value ?? '') }),
+      },
+      optional: {
+        default: false,
+        parseHTML: (element) => element.getAttribute('data-optional') === 'true',
+        renderHTML: (attributes) => attributes.optional ? { 'data-optional': 'true' } : {},
+      },
+      fallback: {
+        default: undefined,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-fallback');
+          if (!raw) return undefined;
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return raw;
+          }
+        },
+        renderHTML: (attributes) => attributes.fallback !== undefined ? { 'data-fallback': JSON.stringify(attributes.fallback) } : {},
+      },
     };
   },
 
   parseHTML() {
-    return [
-      {
-        tag: 'span[data-placeholder]',
-      },
-    ];
+    return [{ tag: 'span[data-placeholder]' }];
   },
 
   renderHTML({ node, HTMLAttributes }) {
@@ -444,13 +720,12 @@ export const Placeholder = Node.create({
       return ['span', { 'data-component-error': 'placeholder', title: validationError }, '[invalid placeholder]'];
     }
 
-    const kind = typeof attrs.kind === 'string' ? attrs.kind : 'string';
-    const schema = deriveSchemaFromChildren(kind, attrs, node.content);
+    const schema = deriveSchemaFromChildren(typeof attrs.kind === 'string' ? attrs.kind : 'string', attrs, node.content);
 
     if (schema.kind === 'string' || schema.kind === 'integer') {
       return ['span', mergeAttributes(HTMLAttributes, { 'data-placeholder': 'true' }), 0];
     }
 
-    return renderValueBySchema(schema, attrs.value, attrs);
+    return renderValueBySchema(schema, attrs.value);
   },
 });

@@ -43,6 +43,78 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
       return validateComponentTypeSchema(typed.item_type, `${path}.item_type`);
     }
 
+    case 'repeat': {
+      if (!('item_type' in typed)) {
+        return `${path}.item_type is required`;
+      }
+      return validateComponentTypeSchema(typed.item_type, `${path}.item_type`);
+    }
+
+    case 'custom': {
+      if (typeof typed.base_variable !== 'string' || typed.base_variable.trim() === '') {
+        return `${path}.base_variable is required`;
+      }
+      if (typeof typed.layout_template !== 'string' || typed.layout_template.trim() === '') {
+        return `${path}.layout_template is required`;
+      }
+      if (!('value_type' in typed)) {
+        return `${path}.value_type is required`;
+      }
+      const valueTypeError = validateComponentTypeSchema(typed.value_type, `${path}.value_type`);
+      if (valueTypeError) {
+        return valueTypeError;
+      }
+
+      if (typed.token_registry !== undefined) {
+        if (!isRecord(typed.token_registry)) {
+          return `${path}.token_registry must be an object`;
+        }
+        for (const [tokenId, tokenSchema] of Object.entries(typed.token_registry)) {
+          if (!PLACEHOLDER_KEY_RE.test(tokenId)) {
+            return `${path}.token_registry key '${tokenId}' is invalid`;
+          }
+          const tokenSchemaError = validateComponentTypeSchema(tokenSchema, `${path}.token_registry.${tokenId}`);
+          if (tokenSchemaError) {
+            return tokenSchemaError;
+          }
+        }
+      }
+
+      if (typed.layout_nodes !== undefined) {
+        if (!Array.isArray(typed.layout_nodes)) {
+          return `${path}.layout_nodes must be an array`;
+        }
+        const allowedTokenIds = isRecord(typed.token_registry) ? new Set(Object.keys(typed.token_registry)) : new Set<string>();
+        for (let i = 0; i < typed.layout_nodes.length; i += 1) {
+          const node = typed.layout_nodes[i];
+          if (!isRecord(node) || typeof node.kind !== 'string') {
+            return `${path}.layout_nodes[${i}] must be an object with kind`;
+          }
+          if (node.kind === 'text') {
+            if (typeof node.value !== 'string') {
+              return `${path}.layout_nodes[${i}].value must be a string`;
+            }
+            continue;
+          }
+          if (node.kind === 'newline') {
+            continue;
+          }
+          if (node.kind === 'token') {
+            if (typeof node.token_id !== 'string' || node.token_id.trim() === '') {
+              return `${path}.layout_nodes[${i}].token_id must be a non-empty string`;
+            }
+            if (allowedTokenIds.size > 0 && !allowedTokenIds.has(node.token_id)) {
+              return `${path}.layout_nodes[${i}].token_id '${node.token_id}' is not defined in token_registry`;
+            }
+            continue;
+          }
+          return `${path}.layout_nodes[${i}].kind '${node.kind}' is unsupported`;
+        }
+      }
+
+      return null;
+    }
+
     case 'page_break':
       return null;
 
@@ -50,6 +122,15 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
     case 'header':
     case 'footer':
     case 'container': {
+      const mode = typed.kind === 'container' && typed.mode === 'repeat' ? 'repeat' : 'tuple';
+
+      if (mode === 'repeat') {
+        if (!('item_type' in typed)) {
+          return `${path}.item_type is required when mode=repeat`;
+        }
+        return validateComponentTypeSchema(typed.item_type, `${path}.item_type`);
+      }
+
       const componentTypes = typed.component_types;
       if (!Array.isArray(componentTypes)) {
         return `${path}.component_types must be an array`;
@@ -71,6 +152,17 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
         const captionError = validateComponentTypeSchema(caption, `${path}.caption`);
         if (captionError) {
           return captionError;
+        }
+      }
+
+      const mode = typed.mode;
+      if (mode !== undefined && mode !== 'row_data' && mode !== 'column_data') {
+        return `${path}.mode must be row_data or column_data when provided`;
+      }
+
+      if (typed.headers !== undefined) {
+        if (!Array.isArray(typed.headers) || typed.headers.some((h) => typeof h !== 'string' || h.trim() === '')) {
+          return `${path}.headers must be an array of non-empty strings`;
         }
       }
 
@@ -203,22 +295,9 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
       return `Placeholder key '${String(attrs.key)}' is invalid`;
     }
 
-    const kind = typeof attrs.kind === 'string' ? attrs.kind : 'string';
-    if (kind === 'list') {
-      if (typeof attrs.item_kind !== 'string' || attrs.item_kind.trim() === '') {
-        return `Placeholder key '${String(attrs.key)}' item_kind is required`;
-      }
-    }
-
-    if (kind === 'container') {
-      if (!Array.isArray(attrs.component_kinds) || attrs.component_kinds.length === 0) {
-        return `Placeholder key '${String(attrs.key)}' component_kinds is required`;
-      }
-
-      if (attrs.component_kinds.some((componentKind) => typeof componentKind !== 'string' || componentKind.trim() === '')) {
-        return `Placeholder key '${String(attrs.key)}' component_kinds must contain non-empty strings`;
-      }
-    }
+    const kind = typeof attrs.kind === 'string'
+      ? attrs.kind
+      : (isRecord(attrs.schema) && typeof attrs.schema.kind === 'string' ? String(attrs.schema.kind) : 'string');
 
     // Derive the schema from the node structure
     const derivedSchema = deriveSchemaFromChildren(kind, attrs, node.content);
@@ -228,26 +307,26 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
     }
 
     const schema = derivedSchema as unknown as Record<string, unknown>;
-    if (schema.kind === 'list' && attrs.style !== undefined) {
-      const style = attrs.style;
+    if (schema.kind === 'list' && schema.style !== undefined) {
+      const style = schema.style;
       if (style !== 'bulleted' && style !== 'numbered' && style !== 'plain') {
         return `Placeholder key '${String(attrs.key)}' style must be 'bulleted', 'numbered', or 'plain'`;
       }
     }
 
     if (schema.kind === 'table') {
-      if (attrs.mode !== 'row_data' && attrs.mode !== 'column_data') {
+      if (schema.mode !== undefined && schema.mode !== 'row_data' && schema.mode !== 'column_data') {
         return `Placeholder key '${String(attrs.key)}' mode must be 'row_data' or 'column_data'`;
       }
 
-      if (!Array.isArray(attrs.headers) || attrs.headers.some((h) => typeof h !== 'string' || h.trim() === '')) {
+      if (schema.headers !== undefined && (!Array.isArray(schema.headers) || schema.headers.some((h) => typeof h !== 'string' || h.trim() === ''))) {
         return `Placeholder key '${String(attrs.key)}' headers must contain non-empty strings`;
       }
 
-      const typeMapAttr = attrs.mode === 'row_data' ? attrs.column_types : attrs.row_types;
+      const typeMapAttr = schema.mode === 'row_data' ? schema.column_types : schema.row_types;
       if (typeMapAttr !== undefined) {
         if (!isRecord(typeMapAttr)) {
-          return `Placeholder key '${String(attrs.key)}' ${attrs.mode === 'row_data' ? 'column_types' : 'row_types'} must be an object`;
+          return `Placeholder key '${String(attrs.key)}' ${schema.mode === 'row_data' ? 'column_types' : 'row_types'} must be an object`;
         }
 
         for (const [header, typeSchema] of Object.entries(typeMapAttr)) {
@@ -257,7 +336,7 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
 
           const childError = validateComponentTypeSchema(
             typeSchema,
-            `Placeholder key '${String(attrs.key)}' ${attrs.mode === 'row_data' ? 'column_types' : 'row_types'}.${header}`
+            `Placeholder key '${String(attrs.key)}' ${schema.mode === 'row_data' ? 'column_types' : 'row_types'}.${header}`
           );
           if (childError) {
             return childError;

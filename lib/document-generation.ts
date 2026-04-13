@@ -10,6 +10,7 @@ import {
   ComponentTypeSchema,
   ComponentValue,
   ContainerTypeSchema,
+  CustomTypeSchema,
   HyperlinkTypeSchema,
   HyperlinkValue,
   ImageTypeSchema,
@@ -19,6 +20,8 @@ import {
   ListValue,
   PlaceholderKeyTypeMap,
   ListStyle,
+  RepeatTypeSchema,
+  RepeatValue,
   StringTypeSchema,
   TableColumnDataValue,
   TableMode,
@@ -47,6 +50,8 @@ export interface PlaceholderValidationConfig {
   headers?: string[];
   column_types?: Record<string, ComponentTypeSchema>;
   row_types?: Record<string, ComponentTypeSchema>;
+  optional?: boolean;
+  fallback?: unknown;
 }
 
 export type PlaceholderValidationConfigMap = Record<string, PlaceholderValidationConfig>;
@@ -142,11 +147,42 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
     case 'image':
     case 'hyperlink':
       return schema;
+    case 'repeat': {
+      const repeatSchema = schema as RepeatTypeSchema;
+      return {
+        kind: repeatSchema.kind,
+        item_type: normalizeTypeSchema(repeatSchema.item_type),
+        min_items: typeof repeatSchema.min_items === 'number' ? repeatSchema.min_items : undefined,
+        max_items: typeof repeatSchema.max_items === 'number' ? repeatSchema.max_items : undefined,
+        base_variable: typeof repeatSchema.base_variable === 'string' ? repeatSchema.base_variable : undefined,
+        layout_template: typeof repeatSchema.layout_template === 'string' ? repeatSchema.layout_template : undefined,
+      };
+    }
+    case 'custom': {
+      const customSchema = schema as CustomTypeSchema;
+      return {
+        kind: 'custom',
+        base_variable: typeof customSchema.base_variable === 'string' && customSchema.base_variable.trim() !== ''
+          ? customSchema.base_variable.trim()
+          : 'item',
+        value_type: normalizeTypeSchema(customSchema.value_type),
+        layout_template: typeof customSchema.layout_template === 'string' ? customSchema.layout_template : '{{item}}',
+        repeat: customSchema.repeat === true,
+        token_registry: normalizeSchemaMap(customSchema.token_registry),
+        token_labels: isRecord(customSchema.token_labels)
+          ? Object.fromEntries(Object.entries(customSchema.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)]))
+          : undefined,
+        layout_nodes: Array.isArray(customSchema.layout_nodes) ? customSchema.layout_nodes : undefined,
+      };
+    }
     case 'list': {
       const listSchema = schema as ListTypeSchema;
       return {
         kind: listSchema.kind,
         item_type: normalizeTypeSchema(listSchema.item_type),
+        style: normalizeListStyle(listSchema.style),
+        min_items: typeof listSchema.min_items === 'number' ? listSchema.min_items : undefined,
+        max_items: typeof listSchema.max_items === 'number' ? listSchema.max_items : undefined,
       };
     }
     case 'page':
@@ -156,15 +192,24 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
       const containerSchema = schema as ContainerTypeSchema;
       return {
         kind: containerSchema.kind,
+        mode: containerSchema.mode === 'repeat' ? 'repeat' : 'tuple',
         component_types: Array.isArray(containerSchema.component_types)
           ? containerSchema.component_types.map((item) => normalizeTypeSchema(item))
-          : [],
+          : undefined,
+        item_type: containerSchema.item_type ? normalizeTypeSchema(containerSchema.item_type) : undefined,
+        min_items: typeof containerSchema.min_items === 'number' ? containerSchema.min_items : undefined,
+        max_items: typeof containerSchema.max_items === 'number' ? containerSchema.max_items : undefined,
       };
     }
     case 'table': {
       const tableSchema = schema as TableTypeSchema;
       return {
         kind: tableSchema.kind,
+        mode: tableSchema.mode,
+        headers: tableSchema.headers,
+        dynamic_headers: tableSchema.dynamic_headers,
+        column_types: normalizeSchemaMap(tableSchema.column_types),
+        row_types: normalizeSchemaMap(tableSchema.row_types),
         caption: tableSchema.caption ? normalizeTypeSchema(tableSchema.caption) : undefined,
       };
     }
@@ -180,7 +225,9 @@ function getPlaceholderKeyAndSchema(typedNode: Record<string, unknown>): { key: 
     return null;
   }
 
-  const kind = typeof attrs.kind === 'string' ? attrs.kind : 'string';
+  const kind = typeof attrs.kind === 'string'
+    ? attrs.kind
+    : (isRecord(attrs.schema) && typeof attrs.schema.kind === 'string' ? attrs.schema.kind : 'string');
   const schema = deriveSchemaFromChildren(kind, attrs, typedNode.content);
   return { key, schema };
 }
@@ -334,16 +381,12 @@ export function collectPlaceholderValidationConfigMap(templateJson: Record<strin
 
     const schema = derivedSchemaMap[key] || { kind: 'string' };
 
-    const style = attrs.style === 'numbered' || attrs.style === 'plain' || attrs.style === 'bulleted'
-      ? attrs.style as ListStyle
+    const style = schema.kind === 'list' ? normalizeListStyle(schema.style) : undefined;
+    const mode = schema.kind === 'table' && (schema.mode === 'row_data' || schema.mode === 'column_data')
+      ? schema.mode
       : undefined;
-
-    const mode = attrs.mode === 'column_data' || attrs.mode === 'row_data'
-      ? attrs.mode as TableMode
-      : undefined;
-
-    const headers = Array.isArray(attrs.headers)
-      ? attrs.headers.filter((h): h is string => typeof h === 'string' && h.trim() !== '')
+    const headers = schema.kind === 'table' && Array.isArray(schema.headers)
+      ? schema.headers.filter((h): h is string => typeof h === 'string' && h.trim() !== '')
       : undefined;
 
     configMap[key] = {
@@ -351,8 +394,10 @@ export function collectPlaceholderValidationConfigMap(templateJson: Record<strin
       style,
       mode,
       headers,
-      column_types: normalizeSchemaMap(attrs.column_types),
-      row_types: normalizeSchemaMap(attrs.row_types),
+      column_types: schema.kind === 'table' ? normalizeSchemaMap(schema.column_types) : undefined,
+      row_types: schema.kind === 'table' ? normalizeSchemaMap(schema.row_types) : undefined,
+      optional: attrs.optional === true,
+      fallback: attrs.fallback,
     };
   });
 
@@ -479,6 +524,9 @@ function validateAndNormalizeValue(
       const normalized: ImageValue = {
         src: value.src,
         alt: value.alt,
+        ...(typeof value.source === 'string' ? { source: value.source as ImageValue['source'] } : {}),
+        ...(typeof value.mime_type === 'string' ? { mime_type: value.mime_type } : {}),
+        ...(typeof value.file_name === 'string' ? { file_name: value.file_name } : {}),
       };
 
       return { ok: true, value: normalized };
@@ -511,11 +559,102 @@ function validateAndNormalizeValue(
       return { ok: true, value: normalized };
     }
 
+    case 'repeat': {
+      const rawItems = Array.isArray(value)
+        ? value
+        : isRecord(value) && Array.isArray(value.items)
+          ? value.items
+          : undefined;
+      if (!Array.isArray(rawItems)) {
+        return { ok: false, error: `${path} must be an array or an object with items[]` };
+      }
+
+      if (typeof schema.min_items === 'number' && rawItems.length < schema.min_items) {
+        return { ok: false, error: `${path} requires at least ${schema.min_items} item(s)` };
+      }
+      if (typeof schema.max_items === 'number' && rawItems.length > schema.max_items) {
+        return { ok: false, error: `${path} allows at most ${schema.max_items} item(s)` };
+      }
+
+      const normalizedItems: ComponentValue[] = [];
+      for (let i = 0; i < rawItems.length; i += 1) {
+        const itemResult = validateAndNormalizeValue(rawItems[i], schema.item_type, `${path}[${i}]`);
+        if (!itemResult.ok) return itemResult;
+        normalizedItems.push(itemResult.value);
+      }
+
+      const normalized: RepeatValue = { items: normalizedItems };
+      return { ok: true, value: normalized };
+    }
+
+    case 'custom': {
+      const customSchema = schema as CustomTypeSchema;
+      const valueType = normalizeTypeSchema(customSchema.value_type);
+      const tokenRegistry = normalizeSchemaMap(customSchema.token_registry);
+
+      const validateTokenObject = (candidate: unknown, tokenPath: string) => {
+        if (!isRecord(candidate)) {
+          return { ok: false as const, error: `${tokenPath} must be an object keyed by token ids` };
+        }
+
+        if (!tokenRegistry || Object.keys(tokenRegistry).length === 0) {
+          const nestedValidation = validateAndNormalizeValue(candidate, valueType, tokenPath);
+          if (!nestedValidation.ok) return nestedValidation;
+          return { ok: true as const, value: nestedValidation.value };
+        }
+
+        const normalizedTokenData: Record<string, ComponentValue> = {};
+        for (const [tokenId, tokenSchema] of Object.entries(tokenRegistry)) {
+          if (!(tokenId in candidate)) {
+            return { ok: false as const, error: `${tokenPath}.${tokenId} is required by token registry` };
+          }
+          const tokenValidation = validateAndNormalizeValue(candidate[tokenId], tokenSchema, `${tokenPath}.${tokenId}`);
+          if (!tokenValidation.ok) return tokenValidation;
+          normalizedTokenData[tokenId] = tokenValidation.value;
+        }
+
+        return { ok: true as const, value: normalizedTokenData };
+      };
+
+      if (customSchema.repeat) {
+        const rawItems = Array.isArray(value)
+          ? value
+          : isRecord(value) && Array.isArray(value.items)
+            ? value.items
+            : undefined;
+
+        if (!Array.isArray(rawItems)) {
+          return { ok: false, error: `${path} must be an array or {items:[]}` };
+        }
+
+        const normalizedItems: ComponentValue[] = [];
+        for (let i = 0; i < rawItems.length; i += 1) {
+          const itemResult = validateTokenObject(rawItems[i], `${path}[${i}]`);
+          if (!itemResult.ok) return itemResult;
+          normalizedItems.push(itemResult.value);
+        }
+
+        return { ok: true, value: { data: { items: normalizedItems } } };
+      }
+
+      const candidate = isRecord(value) && 'data' in value ? value.data : value;
+      const nestedValidation = validateTokenObject(candidate, `${path}.data`);
+      if (!nestedValidation.ok) return nestedValidation;
+      return { ok: true, value: { data: nestedValidation.value } };
+    }
+
     case 'list': {
       const rawValue = isRecord(value) ? value : {};
       const rawItems = Array.isArray(value) ? value : Array.isArray(rawValue.items) ? rawValue.items : undefined;
       if (!Array.isArray(rawItems)) {
         return { ok: false, error: `${path} must be an array or a list object with items[]` };
+      }
+
+      if (typeof schema.min_items === 'number' && rawItems.length < schema.min_items) {
+        return { ok: false, error: `${path} requires at least ${schema.min_items} item(s)` };
+      }
+      if (typeof schema.max_items === 'number' && rawItems.length > schema.max_items) {
+        return { ok: false, error: `${path} allows at most ${schema.max_items} item(s)` };
       }
 
       const normalizedItems: ComponentValue[] = [];
@@ -527,8 +666,8 @@ function validateAndNormalizeValue(
         normalizedItems.push(itemResult.value);
       }
 
-      const style = isRecord(value) && typeof rawValue.style === 'string' 
-        ? normalizeListStyle(rawValue.style) 
+      const style = isRecord(value) && typeof rawValue.style === 'string'
+        ? normalizeListStyle(rawValue.style)
         : undefined;
 
       const normalized: ListValue = {
@@ -547,24 +686,33 @@ function validateAndNormalizeValue(
         return { ok: false, error: `${path} must be a ${schema.kind} object with components[]` };
       }
 
-      if (value.components.length !== schema.component_types.length) {
-        return {
-          ok: false,
-          error: `${path}.components length must be ${schema.component_types.length}`,
-        };
-      }
-
+      const mode = (schema as ContainerTypeSchema).mode === 'repeat' ? 'repeat' : 'tuple';
       const normalizedComponents: ComponentValue[] = [];
-      for (let i = 0; i < schema.component_types.length; i += 1) {
-        const itemResult = validateAndNormalizeValue(
-          value.components[i],
-          schema.component_types[i],
-          `${path}.components[${i}]`
-        );
-        if (!itemResult.ok) {
-          return itemResult;
+
+      if (mode === 'repeat') {
+        const itemSchema = (schema as ContainerTypeSchema).item_type || { kind: 'string' };
+        for (let i = 0; i < value.components.length; i += 1) {
+          const itemResult = validateAndNormalizeValue(value.components[i], itemSchema, `${path}.components[${i}]`);
+          if (!itemResult.ok) return itemResult;
+          normalizedComponents.push(itemResult.value);
         }
-        normalizedComponents.push(itemResult.value);
+      } else {
+        const componentTypes = Array.isArray((schema as ContainerTypeSchema).component_types)
+          ? (schema as ContainerTypeSchema).component_types!
+          : [];
+
+        if (value.components.length !== componentTypes.length) {
+          return {
+            ok: false,
+            error: `${path}.components length must be ${componentTypes.length}`,
+          };
+        }
+
+        for (let i = 0; i < componentTypes.length; i += 1) {
+          const itemResult = validateAndNormalizeValue(value.components[i], componentTypes[i], `${path}.components[${i}]`);
+          if (!itemResult.ok) return itemResult;
+          normalizedComponents.push(itemResult.value);
+        }
       }
 
       return {
@@ -580,16 +728,19 @@ function validateAndNormalizeValue(
         return { ok: false, error: `${path} must be a table object` };
       }
 
-      // Determine mode from config first, then fall back to payload shape.
+      // Determine mode from config or schema first, then fall back to payload shape.
       const configuredMode = config?.mode;
+      const schemaMode = schema.mode;
       const hasRows = Array.isArray(value.rows);
       const hasColumns = isRecord(value.columns);
 
-      if (configuredMode === 'row_data' && !hasRows) {
+      const effectiveMode = configuredMode || schemaMode;
+
+      if (effectiveMode === 'row_data' && !hasRows) {
         return { ok: false, error: `${path}.rows must be an array` };
       }
 
-      if (configuredMode === 'column_data' && !hasColumns) {
+      if (effectiveMode === 'column_data' && !hasColumns) {
         return { ok: false, error: `${path}.columns must be an object` };
       }
 
@@ -612,15 +763,23 @@ function validateAndNormalizeValue(
 
       if (hasRows) {
         const rows = value.rows as unknown[];
-        const headers = config?.headers || [];
-        const columnTypes = config?.column_types || {};
+        const schemaHeaders = Array.isArray(schema.headers) ? schema.headers : [];
+        const headers = config?.headers && config.headers.length > 0
+          ? config.headers
+          : schemaHeaders.length > 0
+            ? schemaHeaders
+            : [];
+        const inferredHeaders = headers.length > 0
+          ? headers
+          : Array.from(new Set(rows.flatMap((row) => (isRecord(row) ? Object.keys(row) : []))));
+        const columnTypes = config?.column_types || schema.column_types || {};
         for (let i = 0; i < rows.length; i += 1) {
           const row = rows[i];
           if (!isRecord(row)) {
             return { ok: false, error: `${path}.rows[${i}] must be an object` };
           }
 
-          for (const header of headers) {
+          for (const header of inferredHeaders) {
             if (!(header in row)) {
               return { ok: false, error: `${path}.rows[${i}] missing header '${header}'` };
             }
@@ -649,15 +808,21 @@ function validateAndNormalizeValue(
 
       // has columns
       const columns = value.columns as Record<string, unknown>;
-      const headers = config?.headers || [];
-      const rowTypes = config?.row_types || {};
+      const schemaHeaders = Array.isArray(schema.headers) ? schema.headers : [];
+      const headers = config?.headers && config.headers.length > 0
+        ? config.headers
+        : schemaHeaders;
+      const inferredHeaders = headers.length > 0
+        ? headers
+        : Array.from(new Set(Object.values(columns).flatMap((col) => (isRecord(col) ? Object.keys(col) : []))));
+      const rowTypes = config?.row_types || schema.row_types || {};
       for (const colName of Object.keys(columns)) {
         const col = columns[colName];
         if (!isRecord(col)) {
           return { ok: false, error: `${path}.columns['${colName}'] must be an object` };
         }
 
-        for (const rowHeader of headers) {
+        for (const rowHeader of inferredHeaders) {
           if (!(rowHeader in col)) {
             return { ok: false, error: `${path}.columns['${colName}'] missing row header '${rowHeader}'` };
           }
@@ -736,6 +901,12 @@ export function validateDataPointAgainstPlaceholderConfigMap(
   for (const [key, config] of Object.entries(configMap)) {
     const value = dataPoint[key];
     if (value === undefined || value === null) {
+      if (config.optional) {
+        if (config.fallback !== undefined) {
+          normalizedDataPoint[key] = config.fallback;
+        }
+        continue;
+      }
       missing.push(key);
       continue;
     }

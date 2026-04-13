@@ -44,7 +44,9 @@ export function getComponentTypeExpectation(node: unknown): ComponentTypeSchema 
       };
     }
     case 'placeholder': {
-      const kind = typeof attrs.kind === 'string' ? attrs.kind : 'string';
+      const kind = typeof attrs.schema?.kind === 'string'
+        ? attrs.schema.kind
+        : (typeof attrs.kind === 'string' ? attrs.kind : 'string');
       return deriveSchemaFromChildren(kind, attrs, node && isRecord(node) ? node.content : undefined);
     }
     default:
