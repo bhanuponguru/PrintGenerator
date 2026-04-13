@@ -80,26 +80,32 @@ describe('TemplateEditor custom visual composer', () => {
     await user.type(screen.getByPlaceholderText('recipient_name'), 'customer_card');
     await user.selectOptions(getInsertRowSelect('Schema kind'), 'custom');
 
-    await user.type(screen.getByPlaceholderText('token_set_id'), 'hero');
-    await user.type(screen.getByPlaceholderText('Token set label'), 'Hero');
-    await user.click(screen.getByRole('button', { name: '+ Token Set' }));
+    // Get the token creation section
+    const tokenCreationForm = screen.getByRole('group', { name: 'Token library' });
+    
+    // Create first token within the form context
+    const tokenIdInputs = within(tokenCreationForm).queryAllByPlaceholderText('token_id');
+    const tokenLabelInputs = within(tokenCreationForm).queryAllByPlaceholderText('Token label');
+    
+    if (tokenIdInputs.length > 0) await user.type(tokenIdInputs[0], 'hero');
+    if (tokenLabelInputs.length > 0) await user.type(tokenLabelInputs[0], 'Hero');
+    await user.click(screen.getByRole('button', { name: '+ Token' }));
 
-    await user.type(screen.getByPlaceholderText('token_set_id'), 'details');
-    await user.type(screen.getByPlaceholderText('Token set label'), 'Details');
-    await user.click(screen.getByRole('button', { name: '+ Token Set' }));
+    // Create second token (now inputs are cleared, so refetch)
+    const tokenIdInputs2 = within(tokenCreationForm).queryAllByPlaceholderText('token_id');
+    const tokenLabelInputs2 = within(tokenCreationForm).queryAllByPlaceholderText('Token label');
+    
+    if (tokenIdInputs2.length > 0) await user.type(tokenIdInputs2[0], 'details');
+    if (tokenLabelInputs2.length > 0) await user.type(tokenLabelInputs2[0], 'Details');
+    await user.click(screen.getByRole('button', { name: '+ Token' }));
 
-    await user.click(getItemSelectButton('hero'));
-    const heroTemplate = screen.getByLabelText('Token set template') as HTMLTextAreaElement;
-    await user.clear(heroTemplate);
-    await user.type(heroTemplate, 'Hero: {{hero.value}}');
-
-    await user.click(getItemSelectButton('details'));
+    // Set custom placeholder template
     const customTemplate = screen.getByLabelText('Custom placeholder template') as HTMLTextAreaElement;
     await user.clear(customTemplate);
-    const placeholderTokenSets = within(screen.getByRole('group', { name: 'Custom placeholder token sets' }));
-    await user.click(placeholderTokenSets.getByRole('button', { name: '{{hero}}' }));
+    const tokenRefs = within(screen.getByRole('group', { name: 'Token references' }));
+    await user.click(tokenRefs.getAllByRole('button')[0]); // Click first token reference button
     await user.type(customTemplate, '\n');
-    await user.click(placeholderTokenSets.getByRole('button', { name: '{{details}}' }));
+    await user.click(tokenRefs.getAllByRole('button')[1]); // Click second token reference button
     await user.click(screen.getByRole('button', { name: 'Insert Placeholder' }));
 
     await waitFor(() => {
@@ -112,15 +118,10 @@ describe('TemplateEditor custom visual composer', () => {
 
     const attrs = (node?.attrs || {}) as Record<string, unknown>;
     const schema = attrs.schema as Record<string, unknown>;
-    const items = Array.isArray(schema.items) ? (schema.items as Array<Record<string, unknown>>) : [];
+    const tokenLibrary = Array.isArray(schema.token_library) ? (schema.token_library as Array<Record<string, unknown>>) : [];
 
     expect(schema.kind).toBe('custom');
-    expect(items.map((item) => item.id)).toEqual(['hero', 'details']);
-    expect(Object.keys((items[0].token_registry || {}) as Record<string, unknown>)).toEqual(['value']);
-    expect(String(items[0].layout_template || '')).toContain('Hero:');
-    expect(String(items[0].layout_template || '')).toContain('hero.value');
-    expect(items[1].kind).toBe('custom');
-    expect(Object.keys((items[1].token_registry || {}) as Record<string, unknown>).length).toBeGreaterThan(0);
+    expect(tokenLibrary.map((token) => token.id)).toEqual(['hero', 'details']);
     expect(String(schema.layout_template || '')).toContain('{{hero}}');
     expect(String(schema.layout_template || '')).toContain('{{details}}');
   });
@@ -135,17 +136,16 @@ describe('TemplateEditor custom visual composer', () => {
     await user.type(screen.getByPlaceholderText('recipient_name'), 'custom_visual');
     await user.selectOptions(getInsertRowSelect('Schema kind'), 'custom');
 
-    await user.type(screen.getByPlaceholderText('token_set_id'), 'card');
-    await user.type(screen.getByPlaceholderText('Token set label'), 'Card');
-    await user.click(screen.getByRole('button', { name: '+ Token Set' }));
+    // Create a token
+    const tokenCreationForm = screen.getByRole('group', { name: 'Token library' });
+    const tokenIdInputs = within(tokenCreationForm).queryAllByPlaceholderText('token_id');
+    const tokenLabelInputs = within(tokenCreationForm).queryAllByPlaceholderText('Token label');
+    
+    if (tokenIdInputs.length > 0) await user.type(tokenIdInputs[0], 'card');
+    if (tokenLabelInputs.length > 0) await user.type(tokenLabelInputs[0], 'Card');
+    await user.click(screen.getByRole('button', { name: '+ Token' }));
 
-    await user.click(getItemSelectButton('card'));
-
-    const templateArea = screen.getByLabelText('Token set template') as HTMLTextAreaElement;
-    await user.clear(templateArea);
-    await user.type(templateArea, 'Card: ');
-
-    await user.click(screen.getAllByRole('button', { name: '{{card.value}}' })[0] as HTMLButtonElement);
+    // Set custom placeholder template
     const customTemplate = screen.getByLabelText('Custom placeholder template') as HTMLTextAreaElement;
     await user.clear(customTemplate);
     await user.type(customTemplate, '{{card}}');
@@ -157,11 +157,10 @@ describe('TemplateEditor custom visual composer', () => {
 
     const attrs = (node?.attrs || {}) as Record<string, unknown>;
     const schema = attrs.schema as Record<string, unknown>;
-    const item = Array.isArray(schema.items) ? (schema.items as Array<Record<string, unknown>>)[0] : undefined;
+    const tokenLibrary = Array.isArray(schema.token_library) ? (schema.token_library as Array<Record<string, unknown>>) : [];
 
     expect(schema.kind).toBe('custom');
-    expect(item?.id).toBe('card');
-    expect(String(item?.layout_template || '')).toContain('{{card.value}}');
+    expect(tokenLibrary[0]?.id).toBe('card');
   });
 
   it('edits custom item templates directly in the inspector', async () => {
@@ -174,16 +173,16 @@ describe('TemplateEditor custom visual composer', () => {
     await user.type(screen.getByPlaceholderText('recipient_name'), 'custom_template');
     await user.selectOptions(getInsertRowSelect('Schema kind'), 'custom');
 
-    await user.type(screen.getByPlaceholderText('token_set_id'), 'badge');
-    await user.type(screen.getByPlaceholderText('Token set label'), 'Badge');
-    await user.click(screen.getByRole('button', { name: '+ Token Set' }));
+    // Create a token
+    const tokenCreationForm = screen.getByRole('group', { name: 'Token library' });
+    const tokenIdInputs = within(tokenCreationForm).queryAllByPlaceholderText('token_id');
+    const tokenLabelInputs = within(tokenCreationForm).queryAllByPlaceholderText('Token label');
+    
+    if (tokenIdInputs.length > 0) await user.type(tokenIdInputs[0], 'badge');
+    if (tokenLabelInputs.length > 0) await user.type(tokenLabelInputs[0], 'Badge');
+    await user.click(screen.getByRole('button', { name: '+ Token' }));
 
-    await user.click(getItemSelectButton('badge'));
-    const templateArea = screen.getByLabelText('Token set template') as HTMLTextAreaElement;
-    await user.clear(templateArea);
-    await user.type(templateArea, 'Badge: ');
-    const templateTokens = within(screen.getByRole('group', { name: 'badge template tokens' }));
-    await user.click(templateTokens.getByRole('button', { name: '{{badge.value}}' }));
+    // Set custom placeholder template
     const customTemplate = screen.getByLabelText('Custom placeholder template') as HTMLTextAreaElement;
     await user.clear(customTemplate);
     await user.type(customTemplate, '{{badge}}');
@@ -195,12 +194,12 @@ describe('TemplateEditor custom visual composer', () => {
 
     const attrs = (node?.attrs || {}) as Record<string, unknown>;
     const schema = attrs.schema as Record<string, unknown>;
-    const item = Array.isArray(schema.items) ? (schema.items as Array<Record<string, unknown>>)[0] : undefined;
+    const tokenLibrary = Array.isArray(schema.token_library) ? (schema.token_library as Array<Record<string, unknown>>) : [];
 
     expect(schema.kind).toBe('custom');
-    expect(item?.id).toBe('badge');
-    expect(String(item?.layout_template || '')).toContain('Badge:');
-    expect(String(item?.layout_template || '')).toContain('{{badge.value}}');
+    expect(tokenLibrary[0]?.id).toBe('badge');
+    expect(tokenLibrary[0]?.label).toBe('Badge');
+    expect(tokenLibrary[0]?.kind).toBe('string');
   });
 
   it('builds repeat layout_template from visual field chips', async () => {

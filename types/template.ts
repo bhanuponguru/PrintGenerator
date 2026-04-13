@@ -72,32 +72,46 @@ export type CustomLayoutNode =
   | CustomLayoutTokenNode
   | CustomLayoutNewlineNode;
 
-export interface CustomTokenDefinition {
+/**
+ * A token is a reusable component in the token library.
+ * Can be a simple type (string, integer) or complex type (list, table).
+ * For complex types with nested structure, supports nested token_registry.
+ */
+export interface TokenLibraryItemSchema extends BaseTypeSchema {
   id: string;
   label?: string;
-  kind: ComponentTypeSchema['kind'];
-}
-
-export interface CustomPlaceholderItemSchema extends BaseTypeSchema {
-  id: string;
-  label?: string;
-  kind: ComponentTypeSchema['kind'];
+  kind: ComponentTypeSchema['kind']; // Can be 'string', 'list', 'table', 'integer', 'image', etc.
+  // For complex token types (list, table), define nested structure
   token_registry?: Record<string, ComponentTypeSchema>;
   token_labels?: Record<string, string>;
   layout_template?: string;
   layout_nodes?: CustomLayoutNode[];
+  // List/Table specific attributes (if kind is 'list' or 'table')
+  item_type?: ComponentTypeSchema; // for list tokens
+  style?: ListStyle; // for list tokens
+  mode?: TableMode; // for table tokens
+  headers?: string[]; // for table tokens
+  dynamic_headers?: boolean; // for table tokens
+  column_types?: Record<string, ComponentTypeSchema>; // for table tokens
+  row_types?: Record<string, ComponentTypeSchema>; // for table tokens
 }
+
+/** @deprecated Use TokenLibraryItemSchema instead */
+export type CustomPlaceholderItemSchema = TokenLibraryItemSchema;
 
 export interface CustomTypeSchema extends BaseTypeSchema {
   kind: 'custom';
   base_variable: string;
   value_type: ComponentTypeSchema;
+  // Token library replaces the old "items" concept
+  token_library?: TokenLibraryItemSchema[];
+  // Legacy fields for backward compatibility
   items?: CustomPlaceholderItemSchema[];
+  token_registry?: Record<string, ComponentTypeSchema>;
+  token_labels?: Record<string, string>;
   layout_template: string;
   layout_nodes?: CustomLayoutNode[];
   repeat?: boolean;
-  token_registry?: Record<string, ComponentTypeSchema>;
-  token_labels?: Record<string, string>;
 }
 
 export interface PageTypeSchema extends BaseTypeSchema {

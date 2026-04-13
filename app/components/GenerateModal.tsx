@@ -121,6 +121,21 @@ function generateExampleValue(schema: ComponentTypeSchema | null): unknown {
       };
     }
     case 'custom': {
+      // Handle new token_library model
+      if (Array.isArray(schema.token_library) && schema.token_library.length > 0) {
+        const tokenSchemas = Object.fromEntries(
+          schema.token_library.map((token: any) => [token.id, { kind: token.kind, ...token } as ComponentTypeSchema])
+        );
+        const tokenData = Object.fromEntries(
+          Object.entries(tokenSchemas).map(([tokenId, tokenSchema]) => [tokenId, generateExampleValue(tokenSchema)])
+        );
+        if (schema.repeat) {
+          return { data: { items: [tokenData, tokenData] } };
+        }
+        return { data: tokenData };
+      }
+
+      // Fall back to legacy token_registry model
       if (isRecord(schema.token_registry)) {
         const tokenData = Object.fromEntries(
           Object.entries(schema.token_registry).map(([tokenId, tokenSchema]) => [tokenId, generateExampleValue(tokenSchema)])
@@ -812,6 +827,113 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
           <input className="pg-input" value={typeof link.url === 'string' ? link.url : ''} onChange={(e) => onChange({ ...link, url: e.target.value })} placeholder="URL" />
         </div>
       );
+    }
+
+    if (schema.kind === 'custom') {
+      // Handle new token_library model
+      if (Array.isArray(schema.token_library) && schema.token_library.length > 0) {
+        const container = isRecord(value) ? value : {};
+        const customData = isRecord(container.data) ? container.data : {};
+
+        if (schema.repeat) {
+          const items = isRecord(customData) && Array.isArray(customData.items) ? customData.items : [{}];
+          return (
+            <div className="pg-layout-composer">
+              {items.map((item, itemIndex) => {
+                const row = isRecord(item) ? item : {};
+                return (
+                  <div className="pg-layout-composer" key={`custom-item-${itemIndex}`}>
+                    <div className="pg-layout-token-assist-label">Item {itemIndex + 1}</div>
+                    {schema.token_library.map((token: any) => {
+                      const tokenSchema = { kind: token.kind, ...token } as ComponentTypeSchema;
+                      return (
+                        <div className="pg-insert-row" key={`token-${token.id}-${itemIndex}`}>
+                          <label className="pg-label">{token.label || token.id}</label>
+                          {renderSchemaEditor(tokenSchema, row[token.id], (nextTokenValue) => {
+                            const nextItems = [...items];
+                            const current = isRecord(nextItems[itemIndex]) ? nextItems[itemIndex] : {};
+                            nextItems[itemIndex] = { ...current, [token.id]: nextTokenValue };
+                            onChange({ data: { items: nextItems } });
+                          }, token.id)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+              <div className="pg-layout-composer-actions">
+                <button type="button" className="pg-layout-pattern" onClick={() => onChange({ data: { items: [...items, {}] } })}>+ Item</button>
+                <button type="button" className="pg-layout-pattern" onClick={() => onChange({ data: { items: items.length > 1 ? items.slice(0, -1) : items } })}>- Item</button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="pg-layout-composer">
+            {schema.token_library.map((token: any) => {
+              const tokenSchema = { kind: token.kind, ...token } as ComponentTypeSchema;
+              return (
+                <div className="pg-insert-row" key={`token-${token.id}`}>
+                  <label className="pg-label">{token.label || token.id}</label>
+                  {renderSchemaEditor(tokenSchema, customData[token.id], (nextTokenValue) => {
+                    onChange({ data: { ...customData, [token.id]: nextTokenValue } });
+                  }, token.id)}
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+
+      // Fall back to legacy token_registry model
+      if (isRecord(schema.token_registry)) {
+        const container = isRecord(value) ? value : {};
+        const customData = isRecord(container.data) ? container.data : {};
+        if (schema.repeat) {
+          const items = isRecord(customData) && Array.isArray(customData.items) ? customData.items : [{}];
+          return (
+            <div className="pg-layout-composer">
+              {items.map((item, itemIndex) => {
+                const row = isRecord(item) ? item : {};
+                return (
+                  <div className="pg-layout-composer" key={`custom-item-${itemIndex}`}>
+                    <div className="pg-layout-token-assist-label">Item {itemIndex + 1}</div>
+                    {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
+                      <div className="pg-insert-row" key={`token-${tokenId}-${itemIndex}`}>
+                        <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                        {renderSchemaEditor(tokenSchema, row[tokenId], (nextTokenValue) => {
+                          const nextItems = [...items];
+                          const current = isRecord(nextItems[itemIndex]) ? nextItems[itemIndex] : {};
+                          nextItems[itemIndex] = { ...current, [tokenId]: nextTokenValue };
+                          onChange({ data: { items: nextItems } });
+                        }, tokenId)}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+              <div className="pg-layout-composer-actions">
+                <button type="button" className="pg-layout-pattern" onClick={() => onChange({ data: { items: [...items, {}] } })}>+ Item</button>
+                <button type="button" className="pg-layout-pattern" onClick={() => onChange({ data: { items: items.length > 1 ? items.slice(0, -1) : items } })}>- Item</button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="pg-layout-composer">
+            {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
+              <div className="pg-insert-row" key={`token-${tokenId}`}>
+                <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                {renderSchemaEditor(tokenSchema, customData[tokenId], (nextTokenValue) => {
+                  onChange({ data: { ...customData, [tokenId]: nextTokenValue } });
+                }, tokenId)}
+              </div>
+            ))}
+          </div>
+        );
+      }
     }
 
     if (schema.kind === 'custom' && isRecord(schema.token_registry)) {
