@@ -45,6 +45,109 @@ function buildTemplate() {
 }
 
 describe('GenerateModal premium visual/json workflow', () => {
+  it('shows type guidance for standard placeholder values', () => {
+    const template = {
+      ...buildTemplate(),
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'full_name',
+                  schema: { kind: 'string' },
+                },
+              },
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'age',
+                  schema: { kind: 'integer' },
+                },
+              },
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'profile_link',
+                  schema: { kind: 'hyperlink' },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    render(
+      <GenerateModal
+        template={template as any}
+        onClose={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Enter plain text.'))).length).toBeGreaterThan(0);
+    expect(screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Enter a numeric value.'))).length).toBeGreaterThan(0);
+    expect(screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Provide alias and URL.'))).length).toBeGreaterThan(0);
+  });
+
+  it('renders custom token_library placeholders as token fields instead of a plain textbox', () => {
+    const template = {
+      ...buildTemplate(),
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'student_details',
+                  kind: 'custom',
+                  schema: {
+                    kind: 'custom',
+                    base_variable: 'token',
+                    value_type: { kind: 'string' },
+                    layout_template: 'Name: {{token.name}} Age: {{token.age}}',
+                    repeat: false,
+                    token_library: [
+                      { id: 'name', label: 'Name', kind: 'string' },
+                      { id: 'age', label: 'Age', kind: 'integer' },
+                      { id: 'photo', label: 'Photo', kind: 'image' },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    render(
+      <GenerateModal
+        template={template as any}
+        onClose={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByPlaceholderText('student_details')).toBeNull();
+    expect(screen.getAllByText('Name').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Age').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Photo').length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Enter plain text.'))).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Enter a numeric value.'))).length
+    ).toBeGreaterThan(0);
+  });
+
   it('syncs visual token fields into JSON workspace', async () => {
     const user = userEvent.setup();
 

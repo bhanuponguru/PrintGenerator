@@ -187,6 +187,46 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function tokenKindLabel(schema: ComponentTypeSchema | null): string {
+  if (!schema) return 'text';
+
+  switch (schema.kind) {
+    case 'string':
+      return 'text';
+    case 'integer':
+      return 'number';
+    case 'hyperlink':
+      return 'link';
+    default:
+      return schema.kind;
+  }
+}
+
+function tokenValueHint(schema: ComponentTypeSchema | null): string {
+  if (!schema) return 'Enter text value.';
+
+  switch (schema.kind) {
+    case 'string':
+      return 'Enter plain text.';
+    case 'integer':
+      return 'Enter a numeric value.';
+    case 'image':
+      return 'Provide image URL or upload a file.';
+    case 'hyperlink':
+      return 'Provide alias and URL.';
+    case 'list':
+      return 'Provide item values for the list.';
+    case 'table':
+      return 'Fill table cell values only.';
+    case 'repeat':
+      return 'Provide repeated item values.';
+    case 'custom':
+      return 'Provide values for nested custom tokens.';
+    default:
+      return 'Enter value.';
+  }
+}
+
 function ImageValueEditor({
   value,
   label,
@@ -311,15 +351,7 @@ function CollectionEditor({
       {kind === 'list' ? (
         <div className="pg-insert-row">
           <label className="pg-label">List Style</label>
-          <select
-            className="pg-input"
-            value={style || 'bulleted'}
-            onChange={(e) => emit(items, e.target.value)}
-          >
-            <option value="bulleted">bulleted</option>
-            <option value="numbered">numbered</option>
-            <option value="plain">plain</option>
-          </select>
+          <span style={{backgroundColor: '#e9ecef', padding: '4px 8px', borderRadius: '4px', display: 'inline-block'}}>{style || 'bulleted'}</span>
         </div>
       ) : null}
 
@@ -500,37 +532,19 @@ function TableValueEditor({
 
     return (
       <div className="pg-layout-composer">
-        <div className="pg-insert-row">
-          <label className="pg-label">Caption</label>
-          <input
-            className="pg-input"
-            value={caption}
-            onChange={(e) => emitColumns(columns as Record<string, Record<string, unknown>>, e.target.value)}
-            placeholder="Optional caption"
-          />
-        </div>
+        {caption && (
+          <div className="pg-insert-row">
+            <label className="pg-label">Caption</label>
+            <div style={{padding: '4px 8px'}}>{caption}</div>
+          </div>
+        )}
         <div className="pg-sheet-wrap">
           <table className="pg-sheet-table">
             <thead>
               <tr>
                 <th></th>
                 {safeColumnNames.map((columnName) => (
-                  <th key={`column-name-${columnName}`}>
-                    <input
-                      className="pg-input"
-                      value={columnName}
-                      onChange={(e) => {
-                        const nextName = e.target.value.trim();
-                        if (!nextName || nextName === columnName) return;
-                        const nextColumns: Record<string, Record<string, unknown>> = {};
-                        safeColumnNames.forEach((name) => {
-                          const data = isRecord(columns[name]) ? columns[name] : {};
-                          nextColumns[name === columnName ? nextName : name] = { ...data };
-                        });
-                        emitColumns(nextColumns, caption);
-                      }}
-                    />
-                  </th>
+                  <th key={`column-name-${columnName}`}>{columnName}</th>
                 ))}
               </tr>
             </thead>
@@ -572,10 +586,10 @@ function TableValueEditor({
   const inferredHeaders = Array.from(new Set(rows.flatMap((row) => (isRecord(row) ? Object.keys(row) : []))));
   const headers = schemaHeaders.length > 0 ? schemaHeaders : (inferredHeaders.length > 0 ? inferredHeaders : ['Column 1']);
 
-  const emitRows = (nextRows: Array<Record<string, unknown>>, nextHeaders: string[], nextCaption?: string) => {
+  const emitRows = (nextRows: Array<Record<string, unknown>>, nextCaption?: string) => {
     const normalizedRows = nextRows.map((row) => {
       const normalized: Record<string, unknown> = {};
-      nextHeaders.forEach((header) => {
+      headers.forEach((header) => {
         normalized[header] = row[header] ?? '';
       });
       return normalized;
@@ -599,32 +613,18 @@ function TableValueEditor({
 
   return (
     <div className="pg-layout-composer">
-      <div className="pg-insert-row">
-        <label className="pg-label">Caption</label>
-        <input
-          className="pg-input"
-          value={caption}
-          onChange={(e) => emitRows(safeRows, headers, e.target.value)}
-          placeholder="Optional caption"
-        />
-      </div>
+      {caption && (
+        <div className="pg-insert-row">
+          <label className="pg-label">Caption</label>
+          <div style={{padding: '4px 8px'}}>{caption}</div>
+        </div>
+      )}
       <div className="pg-layout-composer-actions">
         <button
           type="button"
           className="pg-layout-pattern"
           onClick={() => {
-            const nextHeader = `Column ${headers.length + 1}`;
-            const nextHeaders = [...headers, nextHeader];
-            emitRows(safeRows, nextHeaders, caption);
-          }}
-        >
-          + Add Column
-        </button>
-        <button
-          type="button"
-          className="pg-layout-pattern"
-          onClick={() => {
-            emitRows([...safeRows, Object.fromEntries(headers.map((header) => [header, '']))], headers, caption);
+            emitRows([...safeRows, Object.fromEntries(headers.map((header) => [header, '']))]);
           }}
         >
           + Add Row
@@ -635,44 +635,7 @@ function TableValueEditor({
           <thead>
             <tr>
               {headers.map((header, headerIndex) => (
-                <th key={`header-${headerIndex}`}>
-                  <div className="pg-layout-composer-actions">
-                    <input
-                      className="pg-input"
-                      value={header}
-                      onChange={(e) => {
-                        const nextHeader = e.target.value.trim();
-                        if (!nextHeader || nextHeader === header) return;
-                        const nextHeaders = [...headers];
-                        nextHeaders[headerIndex] = nextHeader;
-                        const nextRows = safeRows.map((row) => {
-                          const nextRow = { ...row };
-                          nextRow[nextHeader] = nextRow[header] ?? '';
-                          delete nextRow[header];
-                          return nextRow;
-                        });
-                        emitRows(nextRows, nextHeaders, caption);
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="pg-layout-segment-btn"
-                      onClick={() => {
-                        if (headers.length <= 1) return;
-                        const nextHeaders = headers.filter((_, index) => index !== headerIndex);
-                        const nextRows = safeRows.map((row) => {
-                          const nextRow = { ...row };
-                          delete nextRow[header];
-                          return nextRow;
-                        });
-                        emitRows(nextRows, nextHeaders, caption);
-                      }}
-                      disabled={headers.length <= 1}
-                    >
-                      ×
-                    </button>
-                  </div>
-                </th>
+                <th key={`header-${headerIndex}`}>{header}</th>
               ))}
               <th></th>
             </tr>
@@ -688,7 +651,7 @@ function TableValueEditor({
                       onChange={(e) => {
                         const nextRows = [...safeRows];
                         nextRows[rowIndex] = { ...nextRows[rowIndex], [header]: e.target.value };
-                        emitRows(nextRows, headers, caption);
+                        emitRows(nextRows);
                       }}
                     />
                   </td>
@@ -699,7 +662,7 @@ function TableValueEditor({
                     className="pg-layout-segment-btn"
                     onClick={() => {
                       const nextRows = safeRows.filter((_, index) => index !== rowIndex);
-                      emitRows(nextRows.length > 0 ? nextRows : [Object.fromEntries(headers.map((header) => [header, '']))], headers, caption);
+                      emitRows(nextRows.length > 0 ? nextRows : [Object.fromEntries(headers.map((header) => [header, '']))]);
                     }}
                     disabled={safeRows.length === 1}
                   >
@@ -808,23 +771,49 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     label: string
   ) => {
     if (!schema || schema.kind === 'string') {
-      return <input className="pg-input" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} placeholder={label} />;
+      return (
+        <div className="pg-layout-composer">
+          <div className="pg-field-hint">
+            <strong>text</strong>: {tokenValueHint({ kind: 'string' })}
+          </div>
+          <input className="pg-input" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} placeholder={label} />
+        </div>
+      );
     }
 
     if (schema.kind === 'integer') {
-      return <input className="pg-input" type="number" value={typeof value === 'number' ? value : 0} onChange={(e) => onChange(Number(e.target.value))} placeholder={label} />;
+      return (
+        <div className="pg-layout-composer">
+          <div className="pg-field-hint">
+            <strong>number</strong>: {tokenValueHint({ kind: 'integer' })}
+          </div>
+          <input className="pg-input" type="number" value={typeof value === 'number' ? value : 0} onChange={(e) => onChange(Number(e.target.value))} placeholder={label} />
+        </div>
+      );
     }
 
     if (schema.kind === 'image') {
-      return <ImageValueEditor value={value} label={label} onChange={onChange} />;
+      return (
+        <div className="pg-layout-composer">
+          <div className="pg-field-hint">
+            <strong>image</strong>: {tokenValueHint({ kind: 'image' })}
+          </div>
+          <ImageValueEditor value={value} label={label} onChange={onChange} />
+        </div>
+      );
     }
 
     if (schema.kind === 'hyperlink') {
       const link = isRecord(value) ? value : {};
       return (
-        <div className="pg-layout-composer-actions">
-          <input className="pg-input" value={typeof link.alias === 'string' ? link.alias : ''} onChange={(e) => onChange({ ...link, alias: e.target.value })} placeholder="Alias" />
-          <input className="pg-input" value={typeof link.url === 'string' ? link.url : ''} onChange={(e) => onChange({ ...link, url: e.target.value })} placeholder="URL" />
+        <div className="pg-layout-composer">
+          <div className="pg-field-hint">
+            <strong>link</strong>: {tokenValueHint({ kind: 'hyperlink' })}
+          </div>
+          <div className="pg-layout-composer-actions">
+            <input className="pg-input" value={typeof link.alias === 'string' ? link.alias : ''} onChange={(e) => onChange({ ...link, alias: e.target.value })} placeholder="Alias" />
+            <input className="pg-input" value={typeof link.url === 'string' ? link.url : ''} onChange={(e) => onChange({ ...link, url: e.target.value })} placeholder="URL" />
+          </div>
         </div>
       );
     }
@@ -848,7 +837,12 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
                       const tokenSchema = { kind: token.kind, ...token } as ComponentTypeSchema;
                       return (
                         <div className="pg-insert-row" key={`token-${token.id}-${itemIndex}`}>
-                          <label className="pg-label">{token.label || token.id}</label>
+                          <div>
+                            <label className="pg-label">{token.label || token.id}</label>
+                            <div className="pg-field-hint">
+                              <strong>{tokenKindLabel(tokenSchema)}</strong>: {tokenValueHint(tokenSchema)}
+                            </div>
+                          </div>
                           {renderSchemaEditor(tokenSchema, row[token.id], (nextTokenValue) => {
                             const nextItems = [...items];
                             const current = isRecord(nextItems[itemIndex]) ? nextItems[itemIndex] : {};
@@ -875,7 +869,12 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
               const tokenSchema = { kind: token.kind, ...token } as ComponentTypeSchema;
               return (
                 <div className="pg-insert-row" key={`token-${token.id}`}>
-                  <label className="pg-label">{token.label || token.id}</label>
+                  <div>
+                    <label className="pg-label">{token.label || token.id}</label>
+                    <div className="pg-field-hint">
+                      <strong>{tokenKindLabel(tokenSchema)}</strong>: {tokenValueHint(tokenSchema)}
+                    </div>
+                  </div>
                   {renderSchemaEditor(tokenSchema, customData[token.id], (nextTokenValue) => {
                     onChange({ data: { ...customData, [token.id]: nextTokenValue } });
                   }, token.id)}
@@ -901,7 +900,12 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
                     <div className="pg-layout-token-assist-label">Item {itemIndex + 1}</div>
                     {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
                       <div className="pg-insert-row" key={`token-${tokenId}-${itemIndex}`}>
-                        <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                        <div>
+                          <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                          <div className="pg-field-hint">
+                            <strong>{tokenKindLabel(tokenSchema as ComponentTypeSchema)}</strong>: {tokenValueHint(tokenSchema as ComponentTypeSchema)}
+                          </div>
+                        </div>
                         {renderSchemaEditor(tokenSchema, row[tokenId], (nextTokenValue) => {
                           const nextItems = [...items];
                           const current = isRecord(nextItems[itemIndex]) ? nextItems[itemIndex] : {};
@@ -925,7 +929,12 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
           <div className="pg-layout-composer">
             {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
               <div className="pg-insert-row" key={`token-${tokenId}`}>
-                <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                <div>
+                  <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                  <div className="pg-field-hint">
+                    <strong>{tokenKindLabel(tokenSchema as ComponentTypeSchema)}</strong>: {tokenValueHint(tokenSchema as ComponentTypeSchema)}
+                  </div>
+                </div>
                 {renderSchemaEditor(tokenSchema, customData[tokenId], (nextTokenValue) => {
                   onChange({ data: { ...customData, [tokenId]: nextTokenValue } });
                 }, tokenId)}
@@ -950,7 +959,12 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
                   <div className="pg-layout-token-assist-label">Item {itemIndex + 1}</div>
                   {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
                     <div className="pg-insert-row" key={`token-${tokenId}-${itemIndex}`}>
-                      <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                      <div>
+                        <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                        <div className="pg-field-hint">
+                          <strong>{tokenKindLabel(tokenSchema as ComponentTypeSchema)}</strong>: {tokenValueHint(tokenSchema as ComponentTypeSchema)}
+                        </div>
+                      </div>
                       {renderSchemaEditor(tokenSchema, row[tokenId], (nextTokenValue) => {
                         const nextItems = [...items];
                         const current = isRecord(nextItems[itemIndex]) ? nextItems[itemIndex] : {};
@@ -974,7 +988,12 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
         <div className="pg-layout-composer">
           {Object.entries(schema.token_registry || {}).map(([tokenId, tokenSchema]) => (
             <div className="pg-insert-row" key={`token-${tokenId}`}>
-              <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+              <div>
+                <label className="pg-label">{schema.token_labels?.[tokenId] || tokenId}</label>
+                <div className="pg-field-hint">
+                  <strong>{tokenKindLabel(tokenSchema as ComponentTypeSchema)}</strong>: {tokenValueHint(tokenSchema as ComponentTypeSchema)}
+                </div>
+              </div>
               {renderSchemaEditor(tokenSchema, customData[tokenId], (nextTokenValue) => {
                 onChange({ data: { ...customData, [tokenId]: nextTokenValue } });
               }, tokenId)}

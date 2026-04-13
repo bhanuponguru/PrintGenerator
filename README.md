@@ -14,6 +14,14 @@ Before starting, ensure you have the following installed on your system:
 - **npm**: The Node Package Manager (installs alongside Node.js).
 - **Git** (optional): Used for cloning the repository.
 
+#### System Dependencies (Linux/WSL)
+If you're running on **Linux or WSL**, you'll need to install system libraries required for Puppeteer/Chromium PDF generation:
+```bash
+sudo apt update && sudo apt install -y libnspr4 libnss3 libgconf-2-4 libatk1.0-0 libgbm1 libnss3 libxss1 libxtst6
+```
+For **macOS**: These are pre-installed with the OS.
+For **Windows**: Chromium dependencies are typically handled automatically.
+
 ### 1. Clone & Download the Repository
 If you downloaded the code as a folder, simply open it in your terminal. If you are using Git, clone the project and navigate into the root directory:
 ```bash
@@ -44,6 +52,23 @@ npm run dev
 
 The application interface will bind to the browser at **http://localhost:3000**.
 Navigate there, and you will see the interactive Template Layout Dashboard. You can also view the documented API Swagger specification at **http://localhost:3000/api-docs**.
+
+---
+
+## 🔧 Troubleshooting
+
+### Chromium/Puppeteer Errors on Linux/WSL
+If you encounter errors related to missing libraries when generating PDFs (e.g., `libnspr4.so` not found), run:
+```bash
+sudo apt update && sudo apt install -y libnspr4 libnss3 libgconf-2-4 libatk1.0-0 libgbm1 libnss3 libxss1 libxtst6
+```
+Then restart your development server with `npm run dev`.
+
+### MongoDB Connection Issues
+If the system cannot connect to MongoDB:
+- Ensure MongoDB is running locally: `mongod` or check your Atlas connection string in `.env.local`
+- The system will automatically fall back to an in-memory database if MongoDB is unavailable
+- Check `.env.local` exists with valid `MONGODB_URI` and `MONGODB_DB` values
 
 ---
 

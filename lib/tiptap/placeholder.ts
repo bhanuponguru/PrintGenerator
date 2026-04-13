@@ -1,5 +1,5 @@
 import { mergeAttributes, Node } from '@tiptap/core';
-import { ComponentTypeSchema, ContainerTypeSchema, CustomLayoutNode, CustomPlaceholderItemSchema, CustomTypeSchema, ListStyle, ListTypeSchema, RepeatTypeSchema, TableMode, TableTypeSchema } from '@/types/template';
+import { ComponentTypeSchema, ContainerTypeSchema, CustomLayoutNode, CustomPlaceholderItemSchema, CustomTypeSchema, ListStyle, ListTypeSchema, RepeatTypeSchema, TableMode, TableTypeSchema, TokenLibraryItemSchema } from '@/types/template';
 
 export interface PlaceholderNodeAttrs {
   key: string;
@@ -67,6 +67,42 @@ function normalizeCustomPlaceholderItem(value: unknown): CustomPlaceholderItemSc
   return normalized;
 }
 
+function normalizeTokenLibraryItem(value: unknown): TokenLibraryItemSchema | undefined {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id.trim() === '' || typeof value.kind !== 'string') {
+    return undefined;
+  }
+
+  const kind = value.kind as ComponentTypeSchema['kind'];
+  const normalized: TokenLibraryItemSchema = {
+    id: value.id.trim(),
+    kind,
+    ...(typeof value.label === 'string' && value.label.trim() !== '' ? { label: value.label.trim() } : {}),
+    ...(isRecord(value.token_registry)
+      ? { token_registry: Object.fromEntries(Object.entries(value.token_registry).map(([k, v]) => [k, normalizeTypeSchema(v)])) }
+      : {}),
+    ...(isRecord(value.token_labels)
+      ? { token_labels: Object.fromEntries(Object.entries(value.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)])) }
+      : {}),
+    ...(typeof value.layout_template === 'string' && value.layout_template.trim() !== '' ? { layout_template: value.layout_template } : {}),
+    ...(normalizeCustomLayoutNodes(value.layout_nodes) ? { layout_nodes: normalizeCustomLayoutNodes(value.layout_nodes) } : {}),
+  };
+
+  if (kind === 'list') {
+    normalized.item_type = isRecord(value.item_type) ? normalizeTypeSchema(value.item_type) : { kind: 'string' };
+    normalized.style = normalizeListStyle(value.style);
+  }
+
+  if (kind === 'table') {
+    normalized.mode = value.mode === 'column_data' ? 'column_data' : 'row_data';
+    normalized.headers = Array.isArray(value.headers)
+      ? value.headers.filter((header): header is string => typeof header === 'string' && header.trim() !== '')
+      : undefined;
+    normalized.dynamic_headers = typeof value.dynamic_headers === 'boolean' ? value.dynamic_headers : undefined;
+  }
+
+  return normalized;
+}
+
 function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
   if (!isRecord(rawSchema) || typeof rawSchema.kind !== 'string') {
     return { kind: 'string' };
@@ -80,7 +116,7 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
     case 'image':
     case 'hyperlink':
     case 'page_break':
-      return schema;
+      return { kind: schema.kind } as ComponentTypeSchema;
     case 'repeat': {
       const repeatSchema = schema as RepeatTypeSchema;
       return {
@@ -97,6 +133,11 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
       const items = Array.isArray(customSchema.items)
         ? customSchema.items.map((item) => normalizeCustomPlaceholderItem(item)).filter((item): item is CustomPlaceholderItemSchema => !!item)
         : undefined;
+      const tokenLibrary = Array.isArray(customSchema.token_library)
+        ? customSchema.token_library
+            .map((item) => normalizeTokenLibraryItem(item))
+            .filter((item): item is TokenLibraryItemSchema => !!item)
+        : undefined;
       return {
         kind: 'custom',
         base_variable: typeof customSchema.base_variable === 'string' && customSchema.base_variable.trim() !== ''
@@ -105,6 +146,7 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
         value_type: normalizeTypeSchema(customSchema.value_type),
         layout_template: typeof customSchema.layout_template === 'string' ? customSchema.layout_template : '{{item}}',
         ...(items ? { items } : {}),
+        ...(tokenLibrary ? { token_library: tokenLibrary } : {}),
         ...(normalizeCustomLayoutNodes(customSchema.layout_nodes) ? { layout_nodes: normalizeCustomLayoutNodes(customSchema.layout_nodes) } : {}),
         repeat: customSchema.repeat === true,
         token_registry: isRecord(customSchema.token_registry)
@@ -154,7 +196,7 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
       const tableSchema = schema as TableTypeSchema;
       return {
         kind: 'table',
-        mode: tableSchema.mode === 'column_data' ? 'column_data' : tableSchema.mode === 'row_data' ? 'row_data' : undefined,
+        mode: tableSchema.mode === 'column_data' ? 'column_data' : tableSchema.mode === 'row_data' ? 'row_data' : 'row_data',
         headers: Array.isArray(tableSchema.headers)
           ? tableSchema.headers.filter((h) => typeof h === 'string' && h.trim() !== '')
           : undefined,
@@ -480,6 +522,12 @@ export function deriveSchemaFromChildren(kind: string, attrs: Record<string, unk
   }
 
   if (kind === 'custom') {
+    const tokenLibrary = Array.isArray(attrs.token_library)
+      ? attrs.token_library
+          .map((item) => normalizeTokenLibraryItem(item))
+          .filter((item): item is TokenLibraryItemSchema => !!item)
+      : undefined;
+
     return {
       kind: 'custom',
       base_variable: typeof attrs.base_variable === 'string' && attrs.base_variable.trim() !== ''
@@ -496,6 +544,7 @@ export function deriveSchemaFromChildren(kind: string, attrs: Record<string, unk
       token_labels: isRecord(attrs.token_labels)
         ? Object.fromEntries(Object.entries(attrs.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)]))
         : undefined,
+      ...(tokenLibrary ? { token_library: tokenLibrary } : {}),
       layout_nodes: normalizeCustomLayoutNodes(attrs.layout_nodes),
     };
   }
