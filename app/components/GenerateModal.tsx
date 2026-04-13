@@ -204,12 +204,21 @@ function ImageValueEditor({
   return (
     <div className="pg-layout-composer" aria-label={label}>
       <div className="pg-layout-composer-actions">
-        <button type="button" className={`pg-layout-pattern${source === 'url' ? ' pg-tb-active' : ''}`} onClick={() => onChange({ ...image, src, alt, source: 'url' })}>
-          Use URL
-        </button>
-        <button type="button" className={`pg-layout-pattern${source === 'file' ? ' pg-tb-active' : ''}`} onClick={() => fileInputRef.current?.click()}>
-          Upload File
-        </button>
+        <label className="pg-label" style={{ minWidth: 120 }}>Image source</label>
+        <select
+          className="pg-input"
+          value={source}
+          onChange={(e) => {
+            const nextSource = e.target.value === 'file' ? 'file' : 'url';
+            onChange({ ...image, src, alt, source: nextSource });
+            if (nextSource === 'file') {
+              fileInputRef.current?.click();
+            }
+          }}
+        >
+          <option value="url">URL</option>
+          <option value="file">File</option>
+        </select>
         <input
           ref={fileInputRef}
           type="file"
@@ -220,12 +229,22 @@ function ImageValueEditor({
           }}
         />
       </div>
-      <input
-        className="pg-input"
-        value={src}
-        onChange={(e) => onChange({ ...image, src: e.target.value, alt, source: e.target.value.startsWith('data:') ? 'file' : 'url' })}
-        placeholder="https://example.com/image.png"
-      />
+      {source === 'url' ? (
+        <input
+          className="pg-input"
+          value={src}
+          onChange={(e) => onChange({ ...image, src: e.target.value, alt, source: 'url' })}
+          placeholder="https://example.com/image.png"
+        />
+      ) : (
+        <input
+          className="pg-input"
+          value={typeof image.file_name === 'string' ? image.file_name : src ? 'uploaded-image' : ''}
+          readOnly
+          aria-readonly="true"
+          placeholder="Upload an image file"
+        />
+      )}
       <input
         className="pg-input"
         value={alt}
@@ -709,18 +728,6 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     });
   };
 
-  const updateJsonAndSyncVisual = (nextJson: string) => {
-    setDataPointsJson(nextJson);
-    const parsed = parseInputJson(nextJson);
-    if (!parsed.ok) {
-      setJsonError(parsed.error);
-      return;
-    }
-    setJsonError('');
-    setDataPoints(parsed.value);
-    setDownloaded(false);
-  };
-
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -981,8 +988,8 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
           <div className="pg-field">
             <label className="pg-label">Input Mode</label>
             <div className="pg-layout-composer-actions">
-              <button type="button" className={`pg-layout-pattern${entryMode === 'visual' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('visual')}>Visual Inserter</button>
-              <button type="button" className={`pg-layout-pattern${entryMode === 'json' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('json')}>JSON Workspace</button>
+                  <button type="button" className={`pg-layout-pattern${entryMode === 'visual' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('visual')}>Visual Inserter</button>
+                  <button type="button" className={`pg-layout-pattern${entryMode === 'json' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('json')}>JSON Preview</button>
               <button type="button" className="pg-layout-pattern" onClick={handleExportJson}>Export JSON</button>
               <button type="button" className="pg-layout-pattern" onClick={() => fileInputRef.current?.click()}>Upload JSON</button>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json,application/json" style={{ display: 'none' }} />
@@ -1019,20 +1026,20 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
             </div>
           ) : (
             <div className="pg-field">
-              <label className="pg-label" htmlFor="g-dp-json">JSON Workspace</label>
-              <textarea
+              <label className="pg-label" htmlFor="g-dp-json">JSON Preview</label>
+              <pre
                 id="g-dp-json"
-                className={`pg-textarea${jsonError ? ' error' : ''}`}
-                value={dataPointsJson}
-                onChange={(e) => updateJsonAndSyncVisual(e.target.value)}
-                rows={12}
-                spellCheck={false}
-                style={{ minHeight: '260px' }}
-              />
+                className="pg-layout-template-output"
+                aria-readonly="true"
+                aria-label="JSON Preview"
+                style={{ maxHeight: '260px', overflow: 'auto', margin: 0 }}
+              >
+                {dataPointsJson}
+              </pre>
               {jsonError ? (
                 <span className="pg-field-error">{jsonError}</span>
               ) : (
-                <span className="pg-field-hint">JSON is synced with visual inserter in real time.</span>
+                <span className="pg-field-hint">JSON is read-only in generation mode and mirrors the visual inputs.</span>
               )}
             </div>
           )}

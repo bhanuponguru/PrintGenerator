@@ -11,6 +11,7 @@ import {
   ComponentValue,
   ContainerTypeSchema,
   CustomTypeSchema,
+  CustomPlaceholderItemSchema,
   HyperlinkTypeSchema,
   HyperlinkValue,
   ImageTypeSchema,
@@ -51,7 +52,6 @@ export interface PlaceholderValidationConfig {
   column_types?: Record<string, ComponentTypeSchema>;
   row_types?: Record<string, ComponentTypeSchema>;
   optional?: boolean;
-  fallback?: unknown;
 }
 
 export type PlaceholderValidationConfigMap = Record<string, PlaceholderValidationConfig>;
@@ -160,12 +160,16 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
     }
     case 'custom': {
       const customSchema = schema as CustomTypeSchema;
+      const items = Array.isArray(customSchema.items)
+        ? customSchema.items.map((item) => normalizeCustomItemSchema(item)).filter((item): item is CustomPlaceholderItemSchema => !!item)
+        : undefined;
       return {
         kind: 'custom',
         base_variable: typeof customSchema.base_variable === 'string' && customSchema.base_variable.trim() !== ''
           ? customSchema.base_variable.trim()
           : 'item',
         value_type: normalizeTypeSchema(customSchema.value_type),
+        ...(items ? { items } : {}),
         layout_template: typeof customSchema.layout_template === 'string' ? customSchema.layout_template : '{{item}}',
         repeat: customSchema.repeat === true,
         token_registry: normalizeSchemaMap(customSchema.token_registry),
@@ -244,6 +248,26 @@ function normalizeSchemaMap(value: unknown): Record<string, ComponentTypeSchema>
   }
 
   return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function normalizeCustomItemSchema(rawItem: unknown): CustomPlaceholderItemSchema | undefined {
+  if (!isRecord(rawItem) || typeof rawItem.id !== 'string' || rawItem.id.trim() === '' || typeof rawItem.kind !== 'string') {
+    return undefined;
+  }
+
+  return {
+    id: rawItem.id.trim(),
+    kind: rawItem.kind as CustomPlaceholderItemSchema['kind'],
+    ...(typeof rawItem.label === 'string' && rawItem.label.trim() !== '' ? { label: rawItem.label.trim() } : {}),
+    ...(isRecord(rawItem.token_registry)
+      ? { token_registry: Object.fromEntries(Object.entries(rawItem.token_registry).map(([k, v]) => [k, normalizeTypeSchema(v)])) }
+      : {}),
+    ...(isRecord(rawItem.token_labels)
+      ? { token_labels: Object.fromEntries(Object.entries(rawItem.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)])) }
+      : {}),
+    ...(typeof rawItem.layout_template === 'string' ? { layout_template: rawItem.layout_template } : {}),
+    ...(Array.isArray(rawItem.layout_nodes) ? { layout_nodes: rawItem.layout_nodes } : {}),
+  };
 }
 
 function replaceTextTokens(value: string, dataPoint: DataPoint): string {
@@ -397,7 +421,6 @@ export function collectPlaceholderValidationConfigMap(templateJson: Record<strin
       column_types: schema.kind === 'table' ? normalizeSchemaMap(schema.column_types) : undefined,
       row_types: schema.kind === 'table' ? normalizeSchemaMap(schema.row_types) : undefined,
       optional: attrs.optional === true,
-      fallback: attrs.fallback,
     };
   });
 
@@ -591,6 +614,26 @@ function validateAndNormalizeValue(
       const customSchema = schema as CustomTypeSchema;
       const valueType = normalizeTypeSchema(customSchema.value_type);
       const tokenRegistry = normalizeSchemaMap(customSchema.token_registry);
+      const items = Array.isArray(customSchema.items)
+        ? customSchema.items.map((item) => normalizeCustomItemSchema(item)).filter((item): item is CustomPlaceholderItemSchema => !!item)
+        : [];
+
+      const normalizeItemSchema = (itemSchema: CustomPlaceholderItemSchema): ComponentTypeSchema => {
+        if (itemSchema.kind === 'custom' || itemSchema.token_registry) {
+          return {
+            kind: 'custom',
+            base_variable: itemSchema.id,
+            value_type: normalizeTypeSchema((itemSchema as CustomPlaceholderItemSchema & { value_type?: ComponentTypeSchema }).value_type || valueType),
+            layout_template: itemSchema.layout_template || '{{item}}',
+            repeat: false,
+            token_registry: normalizeSchemaMap(itemSchema.token_registry),
+            token_labels: itemSchema.token_labels,
+            layout_nodes: itemSchema.layout_nodes,
+          };
+        }
+
+        return normalizeTypeSchema({ kind: itemSchema.kind });
+      };
 
       const validateTokenObject = (candidate: unknown, tokenPath: string) => {
         if (!isRecord(candidate)) {
@@ -635,6 +678,31 @@ function validateAndNormalizeValue(
         }
 
         return { ok: true, value: { data: { items: normalizedItems } } };
+      }
+
+      if (items.length > 0) {
+        const rawItems = Array.isArray(value)
+          ? value
+          : isRecord(value) && Array.isArray(value.items)
+            ? value.items
+            : isRecord(value) && Array.isArray(value.data)
+              ? value.data
+              : undefined;
+
+        if (!Array.isArray(rawItems)) {
+          return { ok: false, error: `${path} must be an array or {items:[]}` };
+        }
+
+        const normalizedItems: ComponentValue[] = [];
+        for (let i = 0; i < items.length; i += 1) {
+          const itemSchema = normalizeItemSchema(items[i]);
+          const itemValue = rawItems[i];
+          const itemResult = validateAndNormalizeValue(itemValue, itemSchema, `${path}.items[${i}]`);
+          if (!itemResult.ok) return itemResult;
+          normalizedItems.push(itemResult.value);
+        }
+
+        return { ok: true, value: { items: normalizedItems } };
       }
 
       const candidate = isRecord(value) && 'data' in value ? value.data : value;
@@ -901,12 +969,7 @@ export function validateDataPointAgainstPlaceholderConfigMap(
   for (const [key, config] of Object.entries(configMap)) {
     const value = dataPoint[key];
     if (value === undefined || value === null) {
-      if (config.optional) {
-        if (config.fallback !== undefined) {
-          normalizedDataPoint[key] = config.fallback;
-        }
-        continue;
-      }
+      if (config.optional) continue;
       missing.push(key);
       continue;
     }

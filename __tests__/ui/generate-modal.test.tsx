@@ -64,11 +64,11 @@ describe('GenerateModal premium visual/json workflow', () => {
     await user.clear(websiteInput);
     await user.type(websiteInput, 'https://example.com');
 
-    await user.click(screen.getByRole('button', { name: 'JSON Workspace' }));
+    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
 
-    const jsonArea = screen.getByLabelText('JSON Workspace') as HTMLTextAreaElement;
-    expect(jsonArea.value).toContain('Ada Lovelace');
-    expect(jsonArea.value).toContain('https://example.com');
+    const jsonPreview = screen.getByLabelText('JSON Preview');
+    expect(jsonPreview.textContent).toContain('Ada Lovelace');
+    expect(jsonPreview.textContent).toContain('https://example.com');
   });
 
   it('syncs uploaded JSON back to visual token fields', async () => {
@@ -168,11 +168,11 @@ describe('GenerateModal premium visual/json workflow', () => {
     await user.clear(rowOneCells[1] as HTMLInputElement);
     await user.type(rowOneCells[1] as HTMLInputElement, '95');
 
-    await user.click(screen.getByRole('button', { name: 'JSON Workspace' }));
-    const jsonArea = screen.getByLabelText('JSON Workspace') as HTMLTextAreaElement;
-    expect(jsonArea.value).toContain('Mathematics');
-    expect(jsonArea.value).toContain('Physics');
-    expect(jsonArea.value).toContain('95');
+    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
+    const jsonPreview = screen.getByLabelText('JSON Preview');
+    expect(jsonPreview.textContent).toContain('Mathematics');
+    expect(jsonPreview.textContent).toContain('Physics');
+    expect(jsonPreview.textContent).toContain('95');
   });
 
   it('edits repeat placeholders visually and syncs JSON', async () => {
@@ -223,11 +223,11 @@ describe('GenerateModal premium visual/json workflow', () => {
     const secondInput = repeatScope.getByPlaceholderText('line_items item 2') as HTMLInputElement;
     await user.type(secondInput, 'Paper');
 
-    await user.click(screen.getByRole('button', { name: 'JSON Workspace' }));
-    const jsonArea = screen.getByLabelText('JSON Workspace') as HTMLTextAreaElement;
+    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
+    const jsonArea = screen.getByLabelText('JSON Preview');
 
-    expect(jsonArea.value).toContain('line_items');
-    expect(jsonArea.value).toContain('Pen');
-    expect(jsonArea.value).toContain('Paper');
+    expect(jsonArea.textContent).toContain('line_items');
+    expect(jsonArea.textContent).toContain('Pen');
+    expect(jsonArea.textContent).toContain('Paper');
   });
 });

@@ -75,18 +75,29 @@ export type CustomLayoutNode =
 export interface CustomTokenDefinition {
   id: string;
   label?: string;
-  schema: ComponentTypeSchema;
+  kind: ComponentTypeSchema['kind'];
+}
+
+export interface CustomPlaceholderItemSchema extends BaseTypeSchema {
+  id: string;
+  label?: string;
+  kind: ComponentTypeSchema['kind'];
+  token_registry?: Record<string, ComponentTypeSchema>;
+  token_labels?: Record<string, string>;
+  layout_template?: string;
+  layout_nodes?: CustomLayoutNode[];
 }
 
 export interface CustomTypeSchema extends BaseTypeSchema {
   kind: 'custom';
   base_variable: string;
   value_type: ComponentTypeSchema;
+  items?: CustomPlaceholderItemSchema[];
   layout_template: string;
+  layout_nodes?: CustomLayoutNode[];
   repeat?: boolean;
   token_registry?: Record<string, ComponentTypeSchema>;
   token_labels?: Record<string, string>;
-  layout_nodes?: CustomLayoutNode[];
 }
 
 export interface PageTypeSchema extends BaseTypeSchema {

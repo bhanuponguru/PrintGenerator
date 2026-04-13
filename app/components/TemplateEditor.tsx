@@ -48,7 +48,7 @@ import {
   validateTableAttrs,
 } from '@/lib/tiptap/extensions';
 import { fileToDataUrl } from '@/lib/image-utils';
-import { ComponentTypeSchema, ListStyle, TableMode } from '@/types/template';
+import { ComponentTypeSchema, CustomPlaceholderItemSchema, ListStyle, TableMode } from '@/types/template';
 
 interface TemplateEditorProps {
   initialContent?: Record<string, unknown>;
@@ -66,6 +66,18 @@ interface CustomTokenDraft {
   id: string;
   label: string;
   kind: DynamicItemKind;
+}
+
+interface CustomPlaceholderItemDraft {
+  id: string;
+  label: string;
+  kind: DynamicItemKind;
+  tokens: CustomTokenDraft[];
+  tokenIdDraft: string;
+  tokenLabelDraft: string;
+  tokenKindDraft: DynamicItemKind;
+  layoutNodes: CustomLayoutNodeDraft[];
+  layoutTemplate: string;
 }
 
 interface CustomLayoutNodeDraft {
@@ -150,6 +162,26 @@ function createCustomLayoutNode(kind: CustomLayoutNodeKind, value: string, token
   };
 }
 
+function createCustomTokenDraft(id: string, label: string, kind: DynamicItemKind): CustomTokenDraft {
+  return { id, label, kind };
+}
+
+function createCustomPlaceholderItemDraft(id: string): CustomPlaceholderItemDraft {
+  const tokenId = 'value';
+
+  return {
+    id,
+    label: id,
+    kind: 'custom',
+    tokens: [createCustomTokenDraft(tokenId, 'Value', 'string')],
+    tokenIdDraft: '',
+    tokenLabelDraft: '',
+    tokenKindDraft: 'string',
+    layoutNodes: [createCustomLayoutNode('token', '', tokenId)],
+    layoutTemplate: `{{${id}.${tokenId}}}`,
+  };
+}
+
 function buildCustomLayoutTemplate(baseVariable: string, nodes: CustomLayoutNodeDraft[]): string {
   const safeBase = KEY_RE.test(baseVariable.trim()) ? baseVariable.trim() : 'item';
   return nodes
@@ -202,6 +234,16 @@ function applyTemplatePreview(template: string, baseVariable: string, fields: st
 function defaultSchemaForKind(kind: PlaceholderKind): ComponentTypeSchema {
   if (kind === 'string' || kind === 'integer' || kind === 'image' || kind === 'hyperlink') {
     return { kind } as ComponentTypeSchema;
+  }
+
+  if (kind === 'custom') {
+    return {
+      kind: 'custom',
+      base_variable: 'item',
+      value_type: { kind: 'string' },
+      layout_template: '{{item}}',
+      repeat: false,
+    };
   }
 
   if (kind === 'list') {
@@ -350,15 +392,18 @@ export default function TemplateEditor({
   const [phRepeatLayoutTemplate, setPhRepeatLayoutTemplate] = useState('');
   const [phRepeatLayoutFields, setPhRepeatLayoutFields] = useState<string[]>(['name', 'value']);
   const [phRepeatLayoutFieldDraft, setPhRepeatLayoutFieldDraft] = useState('');
-  const [phCustomBaseVariable, setPhCustomBaseVariable] = useState('item');
-  const [phCustomValueKind, setPhCustomValueKind] = useState<DynamicItemKind>('string');
-  const [phCustomTokens, setPhCustomTokens] = useState<CustomTokenDraft[]>([]);
-  const [phCustomTokenIdDraft, setPhCustomTokenIdDraft] = useState('');
-  const [phCustomTokenLabelDraft, setPhCustomTokenLabelDraft] = useState('');
-  const [phCustomTokenKindDraft, setPhCustomTokenKindDraft] = useState<DynamicItemKind>('string');
+  const [phCustomItems, setPhCustomItems] = useState<CustomPlaceholderItemDraft[]>([]);
+  const [phCustomItemIdDraft, setPhCustomItemIdDraft] = useState('');
+  const [phCustomItemLabelDraft, setPhCustomItemLabelDraft] = useState('');
+  const [phCustomSelectedItemId, setPhCustomSelectedItemId] = useState('');
+  const [phCustomItemFilter, setPhCustomItemFilter] = useState('');
+  const [phCustomTokenFilter, setPhCustomTokenFilter] = useState('');
+  const [phCustomTemplate, setPhCustomTemplate] = useState('');
   const [phCustomLayoutNodes, setPhCustomLayoutNodes] = useState<CustomLayoutNodeDraft[]>([]);
   const [phCustomRepeat, setPhCustomRepeat] = useState(false);
   const customTokenDragRef = useRef<string | null>(null);
+  const customItemTemplateRef = useRef<HTMLTextAreaElement | null>(null);
+  const customPlaceholderTemplateRef = useRef<HTMLTextAreaElement | null>(null);
 
   const repeatLayoutTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [phTableMode, setPhTableMode] = useState<TableMode>('row_data');
@@ -480,25 +525,46 @@ export default function TemplateEditor({
     [phRepeatLayoutTemplate, phRepeatBaseVariable, repeatLayoutFields]
   );
 
-  const customLayoutFields = useMemo(
-    () => unique(phCustomTokens.map((token) => token.id)),
-    [phCustomTokens]
+  const customItemIds = useMemo(
+    () => unique(phCustomItems.map((item) => item.id)),
+    [phCustomItems]
   );
 
   const customLayoutTokens = useMemo(
-    () => customLayoutFields.map((field) => `{{${phCustomBaseVariable}.${field}}}`),
-    [customLayoutFields, phCustomBaseVariable]
+    () => customItemIds.map((itemId) => `{{${itemId}}}`),
+    [customItemIds]
   );
 
   const customLayoutTemplate = useMemo(
-    () => buildCustomLayoutTemplate(phCustomBaseVariable, phCustomLayoutNodes),
-    [phCustomBaseVariable, phCustomLayoutNodes]
+    () => phCustomLayoutNodes
+      .map((node) => {
+        if (node.kind === 'newline') return '\n';
+        if (node.kind === 'text') return node.value;
+        return node.tokenId ? `{{${node.tokenId}}}` : '';
+      })
+      .join(''),
+    [phCustomLayoutNodes]
   );
 
-  const customLayoutPreview = useMemo(
-    () => applyTemplatePreview(customLayoutTemplate, phCustomBaseVariable, customLayoutFields),
-    [customLayoutTemplate, phCustomBaseVariable, customLayoutFields]
+  const selectedCustomItem = useMemo(
+    () => phCustomItems.find((item) => item.id === phCustomSelectedItemId) || null,
+    [phCustomItems, phCustomSelectedItemId]
   );
+
+  const filteredCustomItems = useMemo(() => {
+    const query = phCustomItemFilter.trim().toLowerCase();
+    if (!query) return phCustomItems;
+    return phCustomItems.filter((item) => item.id.toLowerCase().includes(query) || item.label.toLowerCase().includes(query));
+  }, [phCustomItems, phCustomItemFilter]);
+
+  const filteredSelectedItemTokens = useMemo(() => {
+    if (!selectedCustomItem) return [] as CustomTokenDraft[];
+    const query = phCustomTokenFilter.trim().toLowerCase();
+    if (!query) return selectedCustomItem.tokens;
+    return selectedCustomItem.tokens.filter((token) => token.id.toLowerCase().includes(query) || token.label.toLowerCase().includes(query));
+  }, [selectedCustomItem, phCustomTokenFilter]);
+
+  const buildItemLayoutTemplate = useCallback((itemId: string, nodes: CustomLayoutNodeDraft[]) => buildCustomLayoutTemplate(itemId, nodes), []);
 
   const insertTokenAtCursor = useCallback((target: 'repeat' | 'custom', token: string) => {
     const textarea = target === 'repeat' ? repeatLayoutTextareaRef.current : null;
@@ -619,32 +685,42 @@ export default function TemplateEditor({
     });
   }, [tableHeaders]);
 
-  const addCustomTokenDefinition = useCallback(() => {
-    const nextId = phCustomTokenIdDraft.trim().replace(/\s+/g, '_');
+  const addCustomItem = useCallback(() => {
+    const nextId = phCustomItemIdDraft.trim().replace(/\s+/g, '_');
     if (!KEY_RE.test(nextId)) {
-      setInsertError('Token id is invalid. Use letters/digits/underscore and start with letter or _.');
+      setInsertError('Item id is invalid. Use letters/digits/underscore and start with letter or _.');
       return;
     }
-    if (phCustomTokens.some((token) => token.id === nextId)) {
-      setInsertError(`Token '${nextId}' already exists.`);
+    if (phCustomItems.some((item) => item.id === nextId)) {
+      setInsertError(`Item '${nextId}' already exists.`);
       return;
     }
-    setPhCustomTokens((prev) => [
-      ...prev,
-      { id: nextId, label: phCustomTokenLabelDraft.trim() || nextId, kind: phCustomTokenKindDraft },
-    ]);
-    setPhCustomTokenIdDraft('');
-    setPhCustomTokenLabelDraft('');
-    setInsertError('');
-  }, [phCustomTokenIdDraft, phCustomTokenKindDraft, phCustomTokenLabelDraft, phCustomTokens]);
 
-  const updateCustomTokenDefinition = useCallback((tokenId: string, patch: Partial<CustomTokenDraft>) => {
-    setPhCustomTokens((prev) => prev.map((token) => (token.id === tokenId ? { ...token, ...patch } : token)));
+    setPhCustomItems((prev) => [
+      ...prev,
+      createCustomPlaceholderItemDraft(nextId),
+    ]);
+    setPhCustomSelectedItemId(nextId);
+    setPhCustomLayoutNodes((prev) => prev.length > 0 ? prev : [createCustomLayoutNode('token', '', nextId)]);
+    setPhCustomItemIdDraft('');
+    setPhCustomItemLabelDraft('');
+    setInsertError('');
+  }, [phCustomItemIdDraft, phCustomItems]);
+
+  const updateCustomItem = useCallback((itemId: string, patch: Partial<CustomPlaceholderItemDraft>) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      const nextItem = { ...item, ...patch };
+      if (patch.kind && patch.kind !== 'custom' && nextItem.tokens.length > 1) {
+        nextItem.tokens = nextItem.tokens.slice(0, 1);
+      }
+      return nextItem;
+    }));
   }, []);
 
-  const moveCustomTokenDefinition = useCallback((tokenId: string, direction: 'up' | 'down') => {
-    setPhCustomTokens((prev) => {
-      const index = prev.findIndex((token) => token.id === tokenId);
+  const moveCustomItem = useCallback((itemId: string, direction: 'up' | 'down') => {
+    setPhCustomItems((prev) => {
+      const index = prev.findIndex((item) => item.id === itemId);
       if (index === -1) return prev;
       const target = direction === 'up' ? index - 1 : index + 1;
       if (target < 0 || target >= prev.length) return prev;
@@ -654,17 +730,197 @@ export default function TemplateEditor({
     });
   }, []);
 
-  const removeCustomTokenDefinition = useCallback((tokenId: string) => {
-    setPhCustomTokens((prev) => prev.filter((token) => token.id !== tokenId));
-    setPhCustomLayoutNodes((prev) => prev.filter((node) => node.kind !== 'token' || node.tokenId !== tokenId));
+  const removeCustomItem = useCallback((itemId: string) => {
+    setPhCustomItems((prev) => prev.filter((item) => item.id !== itemId));
+    setPhCustomLayoutNodes((prev) => prev.filter((node) => node.kind !== 'token' || node.tokenId !== itemId));
+    setPhCustomSelectedItemId((prev) => (prev === itemId ? '' : prev));
   }, []);
+
+  const duplicateCustomItem = useCallback((itemId: string) => {
+    setPhCustomItems((prev) => {
+      const source = prev.find((item) => item.id === itemId);
+      if (!source) return prev;
+
+      let suffix = 2;
+      let nextId = `${source.id}_${suffix}`;
+      const ids = new Set(prev.map((item) => item.id));
+      while (ids.has(nextId)) {
+        suffix += 1;
+        nextId = `${source.id}_${suffix}`;
+      }
+
+      const cloned: CustomPlaceholderItemDraft = {
+        ...source,
+        id: nextId,
+        label: source.label ? `${source.label} Copy` : `${nextId}`,
+        tokens: source.tokens.map((token) => ({ ...token })),
+        layoutNodes: source.layoutNodes.map((node) => ({ ...node })),
+      };
+
+      setPhCustomSelectedItemId(nextId);
+      return [...prev, cloned];
+    });
+  }, []);
+
+  const insertCustomItemTemplateToken = useCallback((itemId: string, tokenId: string) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+
+      const tokenText = `{{${item.id}.${tokenId}}}`;
+      const textarea = customItemTemplateRef.current;
+      if (!textarea || textarea.dataset.itemId !== itemId) {
+        return { ...item, layoutTemplate: insertTokenIntoTemplate(item.layoutTemplate, tokenText) };
+      }
+
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? textarea.value.length;
+      const nextTemplate = `${textarea.value.slice(0, start)}${tokenText}${textarea.value.slice(end)}`;
+      const caret = start + tokenText.length;
+
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(caret, caret);
+      });
+
+      return { ...item, layoutTemplate: nextTemplate };
+    }));
+  }, []);
+
+  const insertCustomPlaceholderTokenSet = useCallback((itemId: string) => {
+    const tokenText = `{{${itemId}}}`;
+    const textarea = customPlaceholderTemplateRef.current;
+    if (!textarea) {
+      setPhCustomTemplate((prev) => insertTokenIntoTemplate(prev, tokenText));
+      return;
+    }
+
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    const nextTemplate = `${textarea.value.slice(0, start)}${tokenText}${textarea.value.slice(end)}`;
+    const caret = start + tokenText.length;
+    setPhCustomTemplate(nextTemplate);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
+    });
+  }, []);
+
+  const addCustomItemToken = useCallback((itemId: string) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId || item.kind !== 'custom') return item;
+      const nextTokenId = item.tokenIdDraft.trim().replace(/\s+/g, '_');
+      if (!KEY_RE.test(nextTokenId)) {
+        setInsertError('Token id is invalid. Use letters/digits/underscore and start with letter or _.');
+        return item;
+      }
+      if (item.tokens.some((token) => token.id === nextTokenId)) {
+        setInsertError(`Token '${nextTokenId}' already exists.`);
+        return item;
+      }
+      setInsertError('');
+      return {
+        ...item,
+        tokens: [...item.tokens, createCustomTokenDraft(nextTokenId, item.tokenLabelDraft.trim() || nextTokenId, 'string')],
+        tokenIdDraft: '',
+        tokenLabelDraft: '',
+      };
+    }));
+  }, []);
+
+  const updateCustomItemToken = useCallback((itemId: string, tokenId: string, patch: Partial<CustomTokenDraft>) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      return {
+        ...item,
+        tokens: item.tokens.map((token) => (token.id === tokenId ? { ...token, ...patch } : token)),
+      };
+    }));
+  }, []);
+
+  const moveCustomItemToken = useCallback((itemId: string, tokenId: string, direction: 'up' | 'down') => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      const index = item.tokens.findIndex((token) => token.id === tokenId);
+      if (index === -1) return item;
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= item.tokens.length) return item;
+      const nextTokens = [...item.tokens];
+      [nextTokens[index], nextTokens[target]] = [nextTokens[target], nextTokens[index]];
+      return { ...item, tokens: nextTokens };
+    }));
+  }, []);
+
+  const removeCustomItemToken = useCallback((itemId: string, tokenId: string) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      const nextTokens = item.tokens.filter((token) => token.id !== tokenId);
+      if (item.kind !== 'custom' && nextTokens.length === 0) {
+        nextTokens.push(createCustomTokenDraft('value', 'Value', 'string'));
+      }
+      return { ...item, tokens: nextTokens };
+    }));
+  }, []);
+
+  const appendCustomItemNode = useCallback((itemId: string, kind: CustomLayoutNodeKind, tokenId?: string) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      const nextNodes = [...item.layoutNodes, createCustomLayoutNode(kind, kind === 'newline' ? '\n' : '', tokenId)];
+      return {
+        ...item,
+        layoutNodes: nextNodes,
+        layoutTemplate: buildItemLayoutTemplate(item.id, nextNodes),
+      };
+    }));
+  }, [buildItemLayoutTemplate]);
+
+  const updateCustomItemNode = useCallback((itemId: string, nodeId: string, patch: Partial<CustomLayoutNodeDraft>) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      const nextNodes = item.layoutNodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node));
+      return {
+        ...item,
+        layoutNodes: nextNodes,
+        layoutTemplate: buildItemLayoutTemplate(item.id, nextNodes),
+      };
+    }));
+  }, [buildItemLayoutTemplate]);
+
+  const moveCustomItemNode = useCallback((itemId: string, nodeId: string, direction: 'up' | 'down') => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      const index = item.layoutNodes.findIndex((node) => node.id === nodeId);
+      if (index === -1) return item;
+      const target = direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= item.layoutNodes.length) return item;
+      const nextNodes = [...item.layoutNodes];
+      [nextNodes[index], nextNodes[target]] = [nextNodes[target], nextNodes[index]];
+      return {
+        ...item,
+        layoutNodes: nextNodes,
+        layoutTemplate: buildItemLayoutTemplate(item.id, nextNodes),
+      };
+    }));
+  }, [buildItemLayoutTemplate]);
+
+  const removeCustomItemNode = useCallback((itemId: string, nodeId: string) => {
+    setPhCustomItems((prev) => prev.map((item) => {
+      if (item.id !== itemId) return item;
+      const nextNodes = item.layoutNodes.filter((node) => node.id !== nodeId);
+      return {
+        ...item,
+        layoutNodes: nextNodes.length > 0 ? nextNodes : [createCustomLayoutNode('text', '')],
+        layoutTemplate: buildItemLayoutTemplate(item.id, nextNodes.length > 0 ? nextNodes : [createCustomLayoutNode('text', '')]),
+      };
+    }));
+  }, [buildItemLayoutTemplate]);
 
   const appendCustomNode = useCallback((kind: CustomLayoutNodeKind, tokenId?: string) => {
     setPhCustomLayoutNodes((prev) => [...prev, createCustomLayoutNode(kind, kind === 'newline' ? '\n' : '', tokenId)]);
   }, []);
 
-  const handleCustomTokenDragStart = useCallback((tokenId: string) => {
-    customTokenDragRef.current = tokenId;
+  const handleCustomItemDragStart = useCallback((itemId: string) => {
+    customTokenDragRef.current = itemId;
   }, []);
 
   const handleCustomLayoutDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -767,39 +1023,49 @@ export default function TemplateEditor({
     }
 
     if (phKind === 'custom') {
-      const baseVariable = phCustomBaseVariable.trim() || 'item';
-      const layoutTemplate = customLayoutTemplate.trim();
-      const tokenRegistry = Object.fromEntries(
-        phCustomTokens.map((token) => [token.id, defaultSchemaForKind(token.kind)])
-      );
-      const tokenLabels = Object.fromEntries(
-        phCustomTokens.map((token) => [token.id, token.label])
-      );
+      const placeholderTemplate = phCustomTemplate.trim();
 
-      if (!KEY_RE.test(baseVariable)) {
-        setInsertError('Custom base variable is invalid. Use letters/digits/underscore and start with letter or _.');
+      if (phCustomItems.length === 0) {
+        setInsertError('Custom placeholders require at least one item.');
         return;
       }
 
-      if (!layoutTemplate) {
-        setInsertError('Custom layout template is required.');
+      if (!placeholderTemplate) {
+        setInsertError('Custom placeholder template is required.');
         return;
       }
 
-      if (Object.keys(tokenRegistry).length === 0) {
-        setInsertError('Custom placeholders require at least one token in the registry.');
+      const emptyTemplateItem = phCustomItems.find((item) => item.layoutTemplate.trim() === '');
+      if (emptyTemplateItem) {
+        setInsertError(`Token set '${emptyTemplateItem.id}' requires an explicit template.`);
         return;
       }
+
+      const items: CustomPlaceholderItemSchema[] = phCustomItems.map((item) => {
+        const tokenRegistry = Object.fromEntries(
+          item.tokens.map((token) => [token.id, defaultSchemaForKind(token.kind)])
+        );
+        const tokenLabels = Object.fromEntries(
+          item.tokens.map((token) => [token.id, token.label])
+        );
+
+        return {
+          id: item.id,
+          ...(item.label.trim() ? { label: item.label.trim() } : {}),
+          kind: item.kind,
+          ...(Object.keys(tokenRegistry).length > 0 ? { token_registry: tokenRegistry } : {}),
+          ...(Object.keys(tokenLabels).length > 0 ? { token_labels: tokenLabels } : {}),
+          layout_template: item.layoutTemplate.trim(),
+        };
+      });
 
       schema = {
         kind: 'custom',
-        base_variable: baseVariable,
-        value_type: defaultSchemaForKind(phCustomValueKind),
-        layout_template: layoutTemplate,
+        base_variable: 'token',
+        value_type: defaultSchemaForKind('string'),
+        layout_template: placeholderTemplate,
         repeat: phCustomRepeat,
-        token_registry: tokenRegistry,
-        token_labels: tokenLabels,
-        layout_nodes: toCustomLayoutSchemaNodes(phCustomLayoutNodes),
+        items,
       };
     }
 
@@ -851,7 +1117,7 @@ export default function TemplateEditor({
     setPhKey('');
     setInsertError('');
     setInsertPanel(null);
-  }, [editor, phKey, phKind, phListStyle, phListItemKind, phRepeatItemKind, phRepeatMinItems, phRepeatMaxItems, phRepeatBaseVariable, phRepeatLayoutTemplate, phCustomBaseVariable, phCustomValueKind, customLayoutTemplate, phCustomRepeat, phCustomTokens, phCustomLayoutNodes, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds]);
+  }, [editor, phKey, phKind, phListStyle, phListItemKind, phRepeatItemKind, phRepeatMinItems, phRepeatMaxItems, phRepeatBaseVariable, phRepeatLayoutTemplate, phCustomTemplate, phCustomRepeat, phCustomItems, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds]);
 
   const insertImageComponent = useCallback(() => {
     try {
@@ -1208,208 +1474,328 @@ export default function TemplateEditor({
               {phKind === 'custom' && (
                 <>
                   <div className="pg-insert-row">
-                    <label className="pg-label">Base variable</label>
-                    <input className="pg-input" value={phCustomBaseVariable} onChange={(e) => setPhCustomBaseVariable(e.target.value)} placeholder="item" />
-                  </div>
-                  <div className="pg-insert-row">
-                    <label className="pg-label">Value type</label>
-                    <select className="pg-input" value={phCustomValueKind} onChange={(e) => setPhCustomValueKind(e.target.value as DynamicItemKind)}>
-                      <option value="string">string</option>
-                      <option value="integer">integer</option>
-                      <option value="image">image</option>
-                      <option value="hyperlink">hyperlink</option>
-                      <option value="list">list</option>
-                      <option value="repeat">repeat</option>
-                      <option value="custom">custom</option>
-                      <option value="table">table</option>
-                    </select>
-                  </div>
-                  <div className="pg-insert-row">
-                    <label className="pg-label">Token Registry</label>
-                    <div className="pg-layout-composer" role="group" aria-label="Custom token registry">
+                    <label className="pg-label">Token Set Library</label>
+                    <div className="pg-layout-composer" role="group" aria-label="Custom token set library">
                       <div className="pg-layout-composer-actions">
                         <input
                           className="pg-input"
-                          value={phCustomTokenIdDraft}
-                          onChange={(e) => setPhCustomTokenIdDraft(e.target.value)}
-                          placeholder="token_id"
+                          value={phCustomItemIdDraft}
+                          onChange={(e) => setPhCustomItemIdDraft(e.target.value)}
+                          placeholder="token_set_id"
                         />
                         <input
                           className="pg-input"
-                          value={phCustomTokenLabelDraft}
-                          onChange={(e) => setPhCustomTokenLabelDraft(e.target.value)}
-                          placeholder="Display label"
+                          value={phCustomItemLabelDraft}
+                          onChange={(e) => setPhCustomItemLabelDraft(e.target.value)}
+                          placeholder="Token set label"
                         />
-                        <select className="pg-input" value={phCustomTokenKindDraft} onChange={(e) => setPhCustomTokenKindDraft(e.target.value as DynamicItemKind)}>
-                          <option value="string">string</option>
-                          <option value="integer">integer</option>
-                          <option value="image">image</option>
-                          <option value="hyperlink">hyperlink</option>
-                          <option value="list">list</option>
-                          <option value="repeat">repeat</option>
-                          <option value="custom">custom</option>
-                          <option value="table">table</option>
-                        </select>
-                        <button type="button" className="pg-layout-pattern" onClick={addCustomTokenDefinition}>+ Token</button>
+                        <button type="button" className="pg-layout-pattern" onClick={addCustomItem}>+ Token Set</button>
                       </div>
 
-                      {phCustomTokens.length === 0 ? (
+                      {phCustomItems.length === 0 ? (
                         <div className="pg-layout-preview">
-                          <p className="pg-layout-preview-label">Token library is empty</p>
-                          <pre>Create tokens above, then drag them into the canvas below.</pre>
+                          <p className="pg-layout-preview-label">Token set library is empty</p>
+                          <pre>Create token sets, then compose the placeholder template with set references.</pre>
                         </div>
-                      ) : null}
-
-                      {phCustomTokens.map((token, index) => (
-                        <div
-                          className="pg-layout-segment-row"
-                          key={token.id}
-                          draggable
-                          onDragStart={() => handleCustomTokenDragStart(token.id)}
-                        >
-                          <div className="pg-layout-segment-main">
-                            <div className="pg-layout-composer-actions">
-                              <input
-                                className="pg-input"
-                                value={token.label}
-                                onChange={(e) => updateCustomTokenDefinition(token.id, { label: e.target.value })}
-                                placeholder="Label"
-                              />
-                              <select
-                                className="pg-input"
-                                value={token.kind}
-                                onChange={(e) => updateCustomTokenDefinition(token.id, { kind: e.target.value as DynamicItemKind })}
+                      ) : (
+                        <div className="pg-custom-workspace">
+                          <div className="pg-custom-library" role="group" aria-label="Custom token sets">
+                            <input
+                              className="pg-input"
+                              value={phCustomItemFilter}
+                              onChange={(e) => setPhCustomItemFilter(e.target.value)}
+                              placeholder="Search token sets"
+                              aria-label="Search custom token sets"
+                            />
+                            <p className="pg-layout-preview-label">{filteredCustomItems.length} of {phCustomItems.length} token set(s)</p>
+                            {filteredCustomItems.map((item) => {
+                              const index = phCustomItems.findIndex((entry) => entry.id === item.id);
+                              return (
+                              <div
+                                key={item.id}
+                                className={`pg-custom-item-card${item.id === (selectedCustomItem?.id || '') ? ' pg-custom-item-card-active' : ''}`}
+                                draggable
+                                onDragStart={() => handleCustomItemDragStart(item.id)}
                               >
-                                <option value="string">string</option>
-                                <option value="integer">integer</option>
-                                <option value="image">image</option>
-                                <option value="hyperlink">hyperlink</option>
-                                <option value="list">list</option>
-                                <option value="repeat">repeat</option>
-                                <option value="custom">custom</option>
-                                <option value="table">table</option>
-                              </select>
-                            </div>
-                            <span className="pg-layout-segment pg-layout-segment-token">{token.id}</span>
-                          </div>
-                          <div className="pg-layout-segment-actions">
-                            <button type="button" className="pg-layout-segment-btn" onClick={() => appendCustomNode('token', token.id)}>Use</button>
-                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomTokenDefinition(token.id, 'up')} disabled={index === 0}>↑</button>
-                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomTokenDefinition(token.id, 'down')} disabled={index === phCustomTokens.length - 1}>↓</button>
-                            <button type="button" className="pg-layout-segment-btn" onClick={() => removeCustomTokenDefinition(token.id)}>×</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="pg-insert-row">
-                    <label className="pg-label">Layout canvas (token references)</label>
-                    <div
-                      className="pg-layout-composer"
-                      role="group"
-                      aria-label="Custom layout composer"
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={handleCustomLayoutDrop}
-                    >
-                      {phCustomLayoutNodes.map((segment, index) => (
-                        <div className="pg-layout-segment-row" key={segment.id}>
-                          <div className="pg-layout-segment-main">
-                            {segment.kind === 'text' ? (
-                              <input
-                                className="pg-input"
-                                value={segment.value}
-                                onChange={(e) => updateCustomNode(segment.id, { value: e.target.value })}
-                                placeholder="Text"
-                              />
-                            ) : segment.kind === 'token' ? (
-                              <div className="pg-layout-composer-actions">
-                                <span className="pg-layout-segment pg-layout-segment-token">{segment.tokenId ? `{{${phCustomBaseVariable}.${segment.tokenId}}}` : '{{token}}'}</span>
-                                <input className="pg-input" value={segment.prefix || ''} onChange={(e) => updateCustomNode(segment.id, { prefix: e.target.value })} placeholder="prefix" />
-                                <input className="pg-input" value={segment.suffix || ''} onChange={(e) => updateCustomNode(segment.id, { suffix: e.target.value })} placeholder="suffix" />
+                                <button
+                                  type="button"
+                                  className="pg-custom-item-select"
+                                  onClick={() => setPhCustomSelectedItemId(item.id)}
+                                >
+                                  <span className="pg-layout-segment pg-layout-segment-token">{item.id}</span>
+                                  <span className="pg-layout-preview-label">{item.kind}</span>
+                                </button>
+                                <div className="pg-layout-segment-actions">
+                                  <button type="button" className="pg-layout-segment-btn" onClick={() => insertCustomPlaceholderTokenSet(item.id)}>Insert</button>
+                                  <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomItem(item.id, 'up')} disabled={index === 0}>↑</button>
+                                  <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomItem(item.id, 'down')} disabled={index === phCustomItems.length - 1}>↓</button>
+                                  <button type="button" className="pg-layout-segment-btn" onClick={() => duplicateCustomItem(item.id)}>Duplicate</button>
+                                  <button type="button" className="pg-layout-segment-btn" onClick={() => removeCustomItem(item.id)}>×</button>
+                                </div>
                               </div>
-                            ) : (
-                              <span className="pg-layout-segment pg-layout-segment-newline">line break</span>
+                              );
+                            })}
+                            {filteredCustomItems.length === 0 && (
+                              <div className="pg-layout-preview">
+                                <p className="pg-layout-preview-label">No token sets match this search</p>
+                                <pre>Try searching by token set id or label.</pre>
+                              </div>
                             )}
                           </div>
-                          <div className="pg-layout-segment-actions">
-                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomNode(segment.id, 'up')} disabled={index === 0}>↑</button>
-                            <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomNode(segment.id, 'down')} disabled={index === phCustomLayoutNodes.length - 1}>↓</button>
-                            <button type="button" className="pg-layout-segment-btn" onClick={() => removeCustomNode(segment.id)}>×</button>
-                          </div>
+
+                          {selectedCustomItem ? (() => {
+                            const item = selectedCustomItem;
+                            const primaryToken = item.tokens[0] || createCustomTokenDraft('value', 'Value', item.kind === 'custom' ? 'string' : item.kind);
+                            const itemPreview = item.layoutTemplate.trim() || '(empty)';
+
+                            return (
+                              <div className="pg-custom-detail">
+                                <div className="pg-layout-composer-actions">
+                                  <input
+                                    className="pg-input"
+                                    value={item.label}
+                                    onChange={(e) => updateCustomItem(item.id, { label: e.target.value })}
+                                    placeholder="Label"
+                                  />
+                                  <span className="pg-layout-segment pg-layout-segment-token">token_set</span>
+                                </div>
+
+                                {item.kind === 'custom' ? (
+                                  <>
+                                    <div className="pg-insert-row">
+                                      <label className="pg-label">Token set template</label>
+                                      <textarea
+                                        ref={customItemTemplateRef}
+                                        data-item-id={item.id}
+                                        className="pg-input"
+                                        aria-label="Token set template"
+                                        rows={4}
+                                        value={item.layoutTemplate}
+                                        onChange={(e) => updateCustomItem(item.id, { layoutTemplate: e.target.value })}
+                                        placeholder={`{{${item.id}.value}}`}
+                                      />
+                                    </div>
+
+                                    <div className="pg-layout-token-assist" role="group" aria-label={`${item.id} template tokens`}>
+                                      <p className="pg-layout-token-assist-label">Insert token into token set template</p>
+                                      <div className="pg-layout-token-list">
+                                        {item.tokens.map((token) => (
+                                          <button
+                                            key={token.id}
+                                            type="button"
+                                            className="pg-layout-token"
+                                            onClick={() => insertCustomItemTemplateToken(item.id, token.id)}
+                                          >
+                                            {`{{${item.id}.${token.id}}}`}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    <div className="pg-layout-composer-actions">
+                                      <input
+                                        className="pg-input"
+                                        value={item.tokenIdDraft}
+                                        onChange={(e) => updateCustomItem(item.id, { tokenIdDraft: e.target.value })}
+                                        placeholder="token_id"
+                                      />
+                                      <input
+                                        className="pg-input"
+                                        value={item.tokenLabelDraft}
+                                        onChange={(e) => updateCustomItem(item.id, { tokenLabelDraft: e.target.value })}
+                                        placeholder="Display label"
+                                      />
+                                      <button type="button" className="pg-layout-pattern" onClick={() => addCustomItemToken(item.id)}>+ Token</button>
+                                    </div>
+
+                                    <div className="pg-layout-composer-actions">
+                                      <input
+                                        className="pg-input"
+                                        value={phCustomTokenFilter}
+                                        onChange={(e) => setPhCustomTokenFilter(e.target.value)}
+                                        placeholder="Search tokens"
+                                        aria-label="Search selected item tokens"
+                                      />
+                                      <p className="pg-layout-preview-label">{filteredSelectedItemTokens.length} of {item.tokens.length} token(s)</p>
+                                    </div>
+
+                                    {filteredSelectedItemTokens.map((token) => {
+                                      const tokenIndex = item.tokens.findIndex((entry) => entry.id === token.id);
+                                      return (
+                                      <div className="pg-layout-segment-row" key={token.id}>
+                                        <div className="pg-layout-segment-main">
+                                          <div className="pg-layout-composer-actions">
+                                            <input
+                                              className="pg-input"
+                                              value={token.id}
+                                              onChange={(e) => updateCustomItemToken(item.id, token.id, { id: e.target.value })}
+                                              placeholder="token_id"
+                                            />
+                                            <input
+                                              className="pg-input"
+                                              value={token.label}
+                                              onChange={(e) => updateCustomItemToken(item.id, token.id, { label: e.target.value })}
+                                              placeholder="Label"
+                                            />
+                                          </div>
+                                          <div className="pg-layout-token-list">
+                                            <button
+                                              type="button"
+                                              className="pg-layout-token"
+                                              onClick={() => insertCustomItemTemplateToken(item.id, token.id)}
+                                            >
+                                              {`{{${item.id}.${token.id}}}`}
+                                            </button>
+                                          </div>
+                                        </div>
+                                        <div className="pg-layout-segment-actions">
+                                          <button type="button" className="pg-layout-segment-btn" onClick={() => insertCustomItemTemplateToken(item.id, token.id)}>Use</button>
+                                          <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomItemToken(item.id, token.id, 'up')} disabled={tokenIndex === 0}>↑</button>
+                                          <button type="button" className="pg-layout-segment-btn" onClick={() => moveCustomItemToken(item.id, token.id, 'down')} disabled={tokenIndex === item.tokens.length - 1}>↓</button>
+                                          <button type="button" className="pg-layout-segment-btn" onClick={() => removeCustomItemToken(item.id, token.id)}>×</button>
+                                        </div>
+                                      </div>
+                                      );
+                                    })}
+                                    {filteredSelectedItemTokens.length === 0 && (
+                                      <div className="pg-layout-preview">
+                                        <p className="pg-layout-preview-label">No tokens match this search</p>
+                                        <pre>Try searching by token id or display label.</pre>
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="pg-layout-segment-row">
+                                      <div className="pg-layout-segment-main">
+                                        <div className="pg-layout-composer-actions">
+                                          <input
+                                            className="pg-input"
+                                            value={primaryToken.id}
+                                            onChange={(e) => updateCustomItemToken(item.id, primaryToken.id, { id: e.target.value })}
+                                            placeholder="token_id"
+                                          />
+                                          <input
+                                            className="pg-input"
+                                            value={primaryToken.label}
+                                            onChange={(e) => updateCustomItemToken(item.id, primaryToken.id, { label: e.target.value })}
+                                            placeholder="Label"
+                                          />
+                                          <select
+                                            className="pg-input"
+                                            value={primaryToken.kind}
+                                            onChange={(e) => updateCustomItemToken(item.id, primaryToken.id, { kind: e.target.value as DynamicItemKind })}
+                                          >
+                                            <option value="string">string</option>
+                                            <option value="integer">integer</option>
+                                            <option value="image">image</option>
+                                            <option value="hyperlink">hyperlink</option>
+                                            <option value="list">list</option>
+                                            <option value="repeat">repeat</option>
+                                            <option value="custom">custom</option>
+                                            <option value="table">table</option>
+                                          </select>
+                                        </div>
+                                        <div className="pg-layout-token-list">
+                                          <button
+                                            type="button"
+                                            className="pg-layout-token"
+                                            onClick={() => {
+                                              const tokenText = `{{item.${primaryToken.id}}}`;
+                                              updateCustomItem(item.id, { layoutTemplate: insertTokenIntoTemplate(item.layoutTemplate, tokenText) });
+                                            }}
+                                          >
+                                            {`{{item.${primaryToken.id}}}`}
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div className="pg-layout-segment-actions">
+                                        <button type="button" className="pg-layout-segment-btn" onClick={() => removeCustomItemToken(item.id, primaryToken.id)}>Reset</button>
+                                      </div>
+                                    </div>
+
+                                    <div className="pg-insert-row">
+                                      <label className="pg-label">Layout template</label>
+                                      <textarea
+                                        className="pg-input"
+                                        rows={4}
+                                        value={item.layoutTemplate}
+                                        onChange={(e) => updateCustomItem(item.id, { layoutTemplate: e.target.value })}
+                                        placeholder="{{item.value}}"
+                                      />
+                                    </div>
+
+                                    <div className="pg-layout-token-assist" role="group" aria-label={`${item.id} tokens`}>
+                                      <p className="pg-layout-token-assist-label">Click to insert token</p>
+                                      <div className="pg-layout-token-list">
+                                        {item.tokens.map((token) => (
+                                          <button
+                                            key={token.id}
+                                            type="button"
+                                            className="pg-layout-token"
+                                            onClick={() => {
+                                              const tokenText = `{{item.${token.id}}}`;
+                                              updateCustomItem(item.id, { layoutTemplate: insertTokenIntoTemplate(item.layoutTemplate, tokenText) });
+                                            }}
+                                          >
+                                            {`{{item.${token.id}}}`}
+                                          </button>
+                                        ))}
+                                      </div>
+                                      <div className="pg-layout-patterns">
+                                        <button type="button" className="pg-layout-pattern" onClick={() => updateCustomItem(item.id, { layoutTemplate: `{{item.${primaryToken.id}}}` })}>Single token pattern</button>
+                                      </div>
+                                    </div>
+
+                                    <div className="pg-layout-preview" aria-live="polite">
+                                      <p className="pg-layout-preview-label">Live preview with sample data</p>
+                                      <pre>{applyTemplatePreview(item.layoutTemplate, item.id, item.tokens.map((token) => token.id))}</pre>
+                                    </div>
+                                  </>
+                                )}
+
+                                <div className="pg-layout-template-output">
+                                  <p className="pg-layout-preview-label">Generated item template</p>
+                                  <pre>{itemPreview || '(empty)'}</pre>
+                                </div>
+                              </div>
+                            );
+                          })() : null}
                         </div>
-                      ))}
-                      <div className="pg-layout-composer-actions">
-                        <button type="button" className="pg-layout-pattern" onClick={() => appendCustomNode('text')}>+ Text</button>
-                        <button type="button" className="pg-layout-pattern" onClick={() => appendCustomNode('newline')}>+ Line Break</button>
-                      </div>
+                      )}
                     </div>
                   </div>
-                  <div className="pg-layout-token-assist" role="group" aria-label="Custom layout tokens">
-                    <p className="pg-layout-token-assist-label">Token references (reusable)</p>
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Custom Placeholder Template</label>
+                    <textarea
+                      ref={customPlaceholderTemplateRef}
+                      className="pg-input"
+                      aria-label="Custom placeholder template"
+                      rows={5}
+                      value={phCustomTemplate}
+                      onChange={(e) => setPhCustomTemplate(e.target.value)}
+                      placeholder="{{hero}}\n{{details}}"
+                    />
+                  </div>
+                  <div className="pg-layout-token-assist" role="group" aria-label="Custom placeholder token sets">
+                    <p className="pg-layout-token-assist-label">Insert token set reference</p>
                     <div className="pg-layout-token-list">
-                      {customLayoutTokens.map((token) => (
+                      {customLayoutTokens.map((token, tokenIndex) => (
                         <button
                           key={token}
                           type="button"
                           className="pg-layout-token"
-                          draggable
-                          onDragStart={() => handleCustomTokenDragStart(token.replace(`{{${phCustomBaseVariable}.`, '').replace('}}', ''))}
-                          onClick={() => {
-                            const tokenId = token.replace(`{{${phCustomBaseVariable}.`, '').replace('}}', '');
-                            appendCustomNode('token', tokenId);
-                          }}
+                          onClick={() => insertCustomPlaceholderTokenSet(customItemIds[tokenIndex] || '')}
                         >
                           {token}
                         </button>
                       ))}
                     </div>
-                    <div className="pg-layout-patterns">
-                      <button
-                        type="button"
-                        className="pg-layout-pattern"
-                        disabled={phCustomTokens.length === 0}
-                        onClick={() => {
-                          const firstToken = phCustomTokens[0];
-                          if (!firstToken) return;
-                          setPhCustomLayoutNodes([
-                            createCustomLayoutNode('text', `${firstToken.label || firstToken.id}: `),
-                            createCustomLayoutNode('token', '', firstToken.id),
-                          ]);
-                        }}
-                      >
-                        First token pattern
-                      </button>
-                      <button
-                        type="button"
-                        className="pg-layout-pattern"
-                        disabled={phCustomTokens.length < 2}
-                        onClick={() => {
-                          const firstToken = phCustomTokens[0];
-                          const secondToken = phCustomTokens[1];
-                          if (!firstToken || !secondToken) return;
-                          setPhCustomLayoutNodes([
-                            createCustomLayoutNode('text', `${firstToken.label || firstToken.id}: `),
-                            createCustomLayoutNode('token', '', firstToken.id),
-                            createCustomLayoutNode('newline', '\n'),
-                            createCustomLayoutNode('text', `${secondToken.label || secondToken.id}: `),
-                            createCustomLayoutNode('token', '', secondToken.id),
-                          ]);
-                        }}
-                      >
-                        Two-token pattern
-                      </button>
-                    </div>
                   </div>
                   <div className="pg-layout-template-output">
-                    <p className="pg-layout-preview-label">Generated template</p>
-                    <pre>{customLayoutTemplate || '(empty)'}</pre>
+                    <p className="pg-layout-preview-label">Generated placeholder template</p>
+                    <pre>{phCustomTemplate.trim() || '(empty)'}</pre>
                   </div>
-                  {customLayoutPreview && (
-                    <div className="pg-layout-preview" aria-live="polite">
-                      <p className="pg-layout-preview-label">Live preview with sample data</p>
-                      <pre>{customLayoutPreview}</pre>
-                    </div>
-                  )}
                   <div className="pg-insert-row">
                     <label className="pg-label">Repeat rendering</label>
                     <select className="pg-input" value={phCustomRepeat ? 'true' : 'false'} onChange={(e) => setPhCustomRepeat(e.target.value === 'true')}>

@@ -65,6 +65,57 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
         return valueTypeError;
       }
 
+      if (typed.items !== undefined) {
+        if (!Array.isArray(typed.items)) {
+          return `${path}.items must be an array`;
+        }
+        const itemIds = new Set<string>();
+        for (let i = 0; i < typed.items.length; i += 1) {
+          const item = typed.items[i];
+          if (!isRecord(item)) {
+            return `${path}.items[${i}] must be an object`;
+          }
+          if (typeof item.id !== 'string' || item.id.trim() === '') {
+            return `${path}.items[${i}].id is required`;
+          }
+          if (itemIds.has(item.id)) {
+            return `${path}.items[${i}].id '${item.id}' is duplicated`;
+          }
+          itemIds.add(item.id);
+          if (typeof item.kind !== 'string' || item.kind.trim() === '') {
+            return `${path}.items[${i}].kind is required`;
+          }
+          if (item.layout_template !== undefined && (typeof item.layout_template !== 'string' || item.layout_template.trim() === '')) {
+            return `${path}.items[${i}].layout_template must be a non-empty string when provided`;
+          }
+          if (item.token_registry !== undefined) {
+            if (!isRecord(item.token_registry)) {
+              return `${path}.items[${i}].token_registry must be an object`;
+            }
+            for (const [tokenId, tokenSchema] of Object.entries(item.token_registry)) {
+              if (!PLACEHOLDER_KEY_RE.test(tokenId)) {
+                return `${path}.items[${i}].token_registry key '${tokenId}' is invalid`;
+              }
+              const tokenSchemaError = validateComponentTypeSchema(tokenSchema, `${path}.items[${i}].token_registry.${tokenId}`);
+              if (tokenSchemaError) {
+                return tokenSchemaError;
+              }
+            }
+          }
+          if (item.layout_nodes !== undefined) {
+            if (!Array.isArray(item.layout_nodes)) {
+              return `${path}.items[${i}].layout_nodes must be an array`;
+            }
+            for (let nodeIndex = 0; nodeIndex < item.layout_nodes.length; nodeIndex += 1) {
+              const node = item.layout_nodes[nodeIndex];
+              if (!isRecord(node) || typeof node.kind !== 'string') {
+                return `${path}.items[${i}].layout_nodes[${nodeIndex}] must be an object with kind`;
+              }
+            }
+          }
+        }
+      }
+
       if (typed.token_registry !== undefined) {
         if (!isRecord(typed.token_registry)) {
           return `${path}.token_registry must be an object`;
@@ -84,7 +135,11 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
         if (!Array.isArray(typed.layout_nodes)) {
           return `${path}.layout_nodes must be an array`;
         }
-        const allowedTokenIds = isRecord(typed.token_registry) ? new Set(Object.keys(typed.token_registry)) : new Set<string>();
+        const allowedTokenIds = isRecord(typed.token_registry)
+          ? new Set(Object.keys(typed.token_registry))
+          : Array.isArray(typed.items)
+            ? new Set(typed.items.filter((item): item is Record<string, unknown> => isRecord(item) && typeof item.id === 'string').map((item) => String(item.id)))
+            : new Set<string>();
         for (let i = 0; i < typed.layout_nodes.length; i += 1) {
           const node = typed.layout_nodes[i];
           if (!isRecord(node) || typeof node.kind !== 'string') {

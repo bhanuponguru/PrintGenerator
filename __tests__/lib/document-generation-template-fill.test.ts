@@ -140,6 +140,78 @@ describe('template filling pipeline for list placeholders', () => {
     expect(html).toContain('<li><span>2</span></li>');
     expect(html).toContain('<li><span>3</span></li>');
   });
+
+  it('renders custom placeholder item libraries with item-specific layouts', () => {
+    const template = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'placeholder',
+              attrs: {
+                key: 'brochure',
+                kind: 'custom',
+                schema: {
+                  kind: 'custom',
+                  base_variable: 'item',
+                  value_type: { kind: 'string' },
+                  items: [
+                    {
+                      id: 'title',
+                      kind: 'string',
+                      token_registry: {
+                        value: { kind: 'string' },
+                      },
+                      layout_template: 'Title: {{item.data.value}}',
+                    },
+                    {
+                      id: 'details',
+                      kind: 'custom',
+                      token_registry: {
+                        author: { kind: 'string' },
+                        count: { kind: 'integer' },
+                      },
+                      layout_template: '{{details.data.author}} ({{details.data.count}})',
+                    },
+                  ],
+                  layout_nodes: [
+                    { kind: 'token', token_id: 'title' },
+                    { kind: 'newline' },
+                    { kind: 'token', token_id: 'details' },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const validation = validateDataPointAgainstKeyTypeMap(
+      {
+        brochure: [
+          { value: 'Launch Plan' },
+          { author: 'Ada', count: '2.8' },
+        ],
+      },
+      collectPlaceholderKeyTypeMap(template)
+    );
+
+    expect(validation.missing).toEqual([]);
+    expect(validation.invalid).toEqual([]);
+    expect(validation.normalizedDataPoint.brochure).toEqual({
+      items: [
+        { data: { value: 'Launch Plan' } },
+        { data: { author: 'Ada', count: 2 } },
+      ],
+    });
+
+    const html = renderDocumentHtml(applyTemplateDataPoint(template, validation.normalizedDataPoint));
+    expect(html).toContain('Title: Launch Plan');
+    expect(html).toContain('Ada (2)');
+  });
 });
 
 describe('template filling pipeline equivalence coverage', () => {

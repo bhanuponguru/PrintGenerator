@@ -1,5 +1,5 @@
 import { mergeAttributes, Node } from '@tiptap/core';
-import { ComponentTypeSchema, ContainerTypeSchema, CustomLayoutNode, CustomTypeSchema, ListStyle, ListTypeSchema, RepeatTypeSchema, TableMode, TableTypeSchema } from '@/types/template';
+import { ComponentTypeSchema, ContainerTypeSchema, CustomLayoutNode, CustomPlaceholderItemSchema, CustomTypeSchema, ListStyle, ListTypeSchema, RepeatTypeSchema, TableMode, TableTypeSchema } from '@/types/template';
 
 export interface PlaceholderNodeAttrs {
   key: string;
@@ -7,7 +7,6 @@ export interface PlaceholderNodeAttrs {
   schema: ComponentTypeSchema;
   value: unknown;
   optional?: boolean;
-  fallback?: unknown;
 }
 
 type DOMSpec = [string, ...any[]];
@@ -45,6 +44,29 @@ function normalizeCustomLayoutNodes(value: unknown): CustomLayoutNode[] | undefi
   return nodes.length > 0 ? nodes : undefined;
 }
 
+function normalizeCustomPlaceholderItem(value: unknown): CustomPlaceholderItemSchema | undefined {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id.trim() === '' || typeof value.kind !== 'string') {
+    return undefined;
+  }
+
+  const itemKind = value.kind as ComponentTypeSchema['kind'];
+  const normalized: CustomPlaceholderItemSchema = {
+    kind: itemKind,
+    id: value.id.trim(),
+    ...(typeof value.label === 'string' && value.label.trim() !== '' ? { label: value.label.trim() } : {}),
+    ...(isRecord(value.token_registry)
+      ? { token_registry: Object.fromEntries(Object.entries(value.token_registry).map(([k, v]) => [k, normalizeTypeSchema(v)])) }
+      : {}),
+    ...(isRecord(value.token_labels)
+      ? { token_labels: Object.fromEntries(Object.entries(value.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)])) }
+      : {}),
+    ...(typeof value.layout_template === 'string' && value.layout_template.trim() !== '' ? { layout_template: value.layout_template } : {}),
+    ...(normalizeCustomLayoutNodes(value.layout_nodes) ? { layout_nodes: normalizeCustomLayoutNodes(value.layout_nodes) } : {}),
+  };
+
+  return normalized;
+}
+
 function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
   if (!isRecord(rawSchema) || typeof rawSchema.kind !== 'string') {
     return { kind: 'string' };
@@ -72,6 +94,9 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
     }
     case 'custom': {
       const customSchema = schema as CustomTypeSchema;
+      const items = Array.isArray(customSchema.items)
+        ? customSchema.items.map((item) => normalizeCustomPlaceholderItem(item)).filter((item): item is CustomPlaceholderItemSchema => !!item)
+        : undefined;
       return {
         kind: 'custom',
         base_variable: typeof customSchema.base_variable === 'string' && customSchema.base_variable.trim() !== ''
@@ -79,6 +104,8 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
           : 'item',
         value_type: normalizeTypeSchema(customSchema.value_type),
         layout_template: typeof customSchema.layout_template === 'string' ? customSchema.layout_template : '{{item}}',
+        ...(items ? { items } : {}),
+        ...(normalizeCustomLayoutNodes(customSchema.layout_nodes) ? { layout_nodes: normalizeCustomLayoutNodes(customSchema.layout_nodes) } : {}),
         repeat: customSchema.repeat === true,
         token_registry: isRecord(customSchema.token_registry)
           ? Object.fromEntries(Object.entries(customSchema.token_registry).map(([k, v]) => [k, normalizeTypeSchema(v)]))
@@ -86,7 +113,6 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
         token_labels: isRecord(customSchema.token_labels)
           ? Object.fromEntries(Object.entries(customSchema.token_labels).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)]))
           : undefined,
-        layout_nodes: normalizeCustomLayoutNodes(customSchema.layout_nodes),
       };
     }
     case 'list': {
@@ -171,6 +197,72 @@ function renderCollection(items: unknown[], itemType: ComponentTypeSchema): DOMS
   return items.map((item) => ['div', {}, renderValueBySchema(itemType, item)]);
 }
 
+function resolveCustomItemValue(value: unknown, itemId: string, index: number): unknown {
+  if (Array.isArray(value)) {
+    return value[index];
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (Array.isArray(value.items)) {
+    return value.items[index];
+  }
+
+  if (isRecord(value.data) && itemId in value.data) {
+    return value.data[itemId];
+  }
+
+  if (itemId in value) {
+    return value[itemId];
+  }
+
+  return undefined;
+}
+
+function renderCustomItem(item: CustomPlaceholderItemSchema, value: unknown, index: number): DOMSpec {
+  const itemBase = item.kind === 'custom' ? (typeof item.id === 'string' ? item.id : 'item') : 'item';
+  const itemValue = isRecord(value) && !Array.isArray(value) ? value : { value };
+
+  const tokenRegistry = isRecord(item.token_registry)
+    ? item.token_registry
+    : { value: normalizeTypeSchema({ kind: item.kind === 'custom' ? 'string' : item.kind }) };
+
+  const layout = typeof item.layout_template === 'string' && item.layout_template.trim() !== ''
+    ? item.layout_template
+    : Object.keys(tokenRegistry).length > 0
+      ? Object.entries(tokenRegistry).map(([tokenId]) => `{{${itemBase}.${tokenId}}}`).join(' ')
+      : `{{${itemBase}.value}}`;
+
+  const rendered = renderTemplateString(layout, itemBase, itemValue);
+  return ['div', { 'data-custom-item': item.id, 'data-custom-item-index': String(index) }, rendered];
+}
+
+function renderCustomLayoutNodes(nodes: CustomLayoutNode[] | undefined, items: CustomPlaceholderItemSchema[], value: unknown): DOMSpec[] {
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return items.map((item, index) => renderCustomItem(item, resolveCustomItemValue(value, item.id, index), index));
+  }
+
+  return nodes.map((node, nodeIndex) => {
+    if (node.kind === 'text') {
+      return ['span', { 'data-custom-layout-node': String(nodeIndex) }, node.value];
+    }
+
+    if (node.kind === 'newline') {
+      return ['br'];
+    }
+
+    const itemIndex = items.findIndex((item) => item.id === node.token_id);
+    if (itemIndex === -1) {
+      return ['span', { 'data-custom-layout-node': String(nodeIndex) }, ''];
+    }
+
+    const item = items[itemIndex];
+    return renderCustomItem(item, resolveCustomItemValue(value, item.id, itemIndex), itemIndex);
+  });
+}
+
 function getByPath(value: unknown, path: string): unknown {
   const parts = path.split('.').map((p) => p.trim()).filter(Boolean);
   let current: unknown = value;
@@ -237,6 +329,22 @@ function renderValueBySchema(schema: ComponentTypeSchema, value: unknown): DOMSp
     case 'custom': {
       const baseVariable = schema.base_variable || 'item';
       const layout = schema.layout_template || '{{item}}';
+
+      if (Array.isArray(schema.items) && schema.items.length > 0) {
+        const items = Array.isArray(value)
+          ? value
+          : isRecord(value) && Array.isArray(value.items)
+            ? value.items
+            : Array.isArray(isRecord(value) ? value.data : undefined)
+              ? (value as Record<string, unknown>).data as unknown[]
+              : [];
+
+        return [
+          'div',
+          { 'data-custom': 'true', 'data-custom-items': 'true' },
+          ...renderCustomLayoutNodes(schema.layout_nodes, schema.items, items),
+        ];
+      }
 
       if (schema.repeat) {
         const items = Array.isArray(value)
@@ -692,19 +800,6 @@ export const Placeholder = Node.create({
         default: false,
         parseHTML: (element) => element.getAttribute('data-optional') === 'true',
         renderHTML: (attributes) => attributes.optional ? { 'data-optional': 'true' } : {},
-      },
-      fallback: {
-        default: undefined,
-        parseHTML: (element) => {
-          const raw = element.getAttribute('data-fallback');
-          if (!raw) return undefined;
-          try {
-            return JSON.parse(raw);
-          } catch {
-            return raw;
-          }
-        },
-        renderHTML: (attributes) => attributes.fallback !== undefined ? { 'data-fallback': JSON.stringify(attributes.fallback) } : {},
       },
     };
   },

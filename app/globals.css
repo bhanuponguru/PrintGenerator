@@ -1251,6 +1251,70 @@ select.pg-input option {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.pg-custom-workspace {
+  display: grid;
+  grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.pg-custom-library {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--pg-border);
+  border-radius: 10px;
+  background: #15120d;
+  padding: 8px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.pg-custom-item-card {
+  border: 1px solid var(--pg-border);
+  border-radius: 10px;
+  background: #1c1811;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.pg-custom-item-card-active {
+  border-color: var(--pg-accent);
+  box-shadow: inset 0 0 0 1px rgba(232, 184, 75, 0.25);
+}
+
+.pg-custom-item-select {
+  all: unset;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.pg-custom-item-select:focus-visible {
+  outline: 2px solid var(--pg-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.pg-custom-detail {
+  border: 1px solid var(--pg-border);
+  border-radius: 10px;
+  background: #15120d;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 960px) {
+  .pg-custom-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .pg-custom-library {
+    max-height: none;
+  }
+}
+
 .pg-editor-layout {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
