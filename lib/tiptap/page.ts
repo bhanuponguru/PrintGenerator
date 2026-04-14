@@ -1,4 +1,5 @@
 import { Node } from '@tiptap/core';
+import { renderValueBySchema } from '@/lib/tiptap/placeholder';
 import { PageValue } from '@/types/template';
 
 /** TipTap node payload for rendered page components. */
@@ -88,7 +89,12 @@ export const PageComponent = Node.create({
     }
 
     const value = attrs.value as Record<string, unknown>;
-    const components = (value.components as unknown[]).map((component) => ['div', {}, typeof component === 'string' ? component : JSON.stringify(component)]);
+    const componentTypes = Array.isArray(attrs.component_types) ? attrs.component_types : [];
+    const components = (value.components as unknown[]).map((component, index) => [
+      'div',
+      {},
+      renderValueBySchema((componentTypes[index] as any) || { kind: 'string' }, component),
+    ]);
     
     return ['div', { 
       'data-component': 'page',

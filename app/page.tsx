@@ -11,6 +11,7 @@ import CreateTagModal from './components/CreateTagModal';
 import EditTagModal from './components/EditTagModal';
 import DeleteConfirmModal from './components/DeleteConfirmModal';
 import TagTemplatesModal from './components/TagTemplatesModal';
+import { canGenerateFromTemplate } from '@/lib/template-summary';
 
 export interface Template {
   _id: string;
@@ -148,6 +149,14 @@ export default function Home() {
     ? templates.filter(t => t.tag_ids?.includes(selectedFilterTag))
     : templates;
 
+  const handleGenerateTemplate = (template: Template) => {
+    if (!canGenerateFromTemplate(template.template)) {
+      showToast('This template has no placeholders yet. Add placeholders before generating.', 'error');
+      return;
+    }
+    setGenerateTemplate(template);
+  };
+
   return (
     <div className="pg-root">
       {/* ── Header ── */}
@@ -283,7 +292,7 @@ export default function Home() {
                 tags={tags}
                 onEdit={() => setEditTemplate(t)}
                 onDelete={() => handleDelete(t._id)}
-                onGenerate={() => setGenerateTemplate(t)}
+                onGenerate={() => handleGenerateTemplate(t)}
               />
             ))}
           </div>
@@ -404,7 +413,7 @@ export default function Home() {
           onClose={() => setTagTemplates(null)}
           onEditTemplate={(t) => setEditTemplate(t)}
           onDeleteTemplate={(id) => handleDelete(id)}
-          onGenerateTemplate={(t) => setGenerateTemplate(t)}
+          onGenerateTemplate={(t) => handleGenerateTemplate(t)}
         />
       )}
 

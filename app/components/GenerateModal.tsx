@@ -227,19 +227,84 @@ function tokenValueHint(schema: ComponentTypeSchema | null): string {
   }
 }
 
+function describeTokenConfiguration(schema: ComponentTypeSchema | null): string {
+  if (!schema) return 'text';
+
+  switch (schema.kind) {
+    case 'string':
+      return 'Text · single value';
+    case 'integer':
+      return 'Number · single value';
+    case 'image': {
+      const fields = Array.isArray((schema as Record<string, unknown>).dynamic_fields) && (schema as Record<string, unknown>).dynamic_fields.length > 0
+        ? ((schema as Record<string, unknown>).dynamic_fields as string[]).join(', ')
+        : 'src, alt';
+      return `Image · ${fields}`;
+    }
+    case 'hyperlink': {
+      const fields = Array.isArray((schema as Record<string, unknown>).dynamic_fields) && (schema as Record<string, unknown>).dynamic_fields.length > 0
+        ? ((schema as Record<string, unknown>).dynamic_fields as string[]).join(', ')
+        : 'alias, url';
+      return `Link · ${fields}`;
+    }
+    case 'list':
+      return `List · ${(schema as Record<string, unknown>).style || 'bulleted'}`;
+    case 'table': {
+      const headers = Array.isArray((schema as Record<string, unknown>).headers) && (schema as Record<string, unknown>).headers.length > 0
+        ? (schema as Record<string, unknown>).headers.join(', ')
+        : 'no headers';
+      const caption = typeof (schema as Record<string, unknown>).caption === 'string' && String((schema as Record<string, unknown>).caption).trim() !== ''
+        ? `caption: ${String((schema as Record<string, unknown>).caption).trim()}`
+        : 'caption: none';
+      const mode = (schema as Record<string, unknown>).mode === 'column_data' ? 'column_data' : 'row_data';
+      return `Table · ${mode} · ${headers} · ${caption}`;
+    }
+    case 'repeat':
+      return 'Repeat · repeated items';
+    case 'custom':
+      return 'Custom';
+    default:
+      return schema.kind;
+  }
+}
+
+function resolveDynamicFields(schema: ComponentTypeSchema, defaults: string[]): Set<string> {
+  const raw = (schema as Record<string, unknown>).dynamic_fields;
+  if (Array.isArray(raw) && raw.length > 0) {
+    return new Set(raw.filter((field): field is string => typeof field === 'string'));
+  }
+  return new Set(defaults);
+}
+
+function resolveStaticValues(schema: ComponentTypeSchema): Record<string, unknown> {
+  const raw = (schema as Record<string, unknown>).static_values;
+  if (isRecord(raw)) {
+    return raw;
+  }
+  return {};
+}
+
 function ImageValueEditor({
+  schema,
   value,
   label,
   onChange,
 }: {
+  schema: ComponentTypeSchema;
   value: unknown;
   label: string;
   onChange: (next: unknown) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dynamicFields = resolveDynamicFields(schema, ['src', 'alt']);
+  const staticValues = resolveStaticValues(schema);
   const image = isRecord(value) ? value : {};
-  const src = typeof image.src === 'string' ? image.src : '';
-  const alt = typeof image.alt === 'string' ? image.alt : '';
+  const src = dynamicFields.has('src')
+    ? (typeof image.src === 'string' ? image.src : '')
+    : (typeof staticValues.src === 'string' ? staticValues.src : '');
+  const alt = dynamicFields.has('alt')
+    ? (typeof image.alt === 'string' ? image.alt : '')
+    : (typeof staticValues.alt === 'string' ? staticValues.alt : '');
   const source = typeof image.source === 'string' ? image.source : (src.startsWith('data:') ? 'file' : 'url');
 
   const handleFileChange = async (file: File | undefined) => {
@@ -263,6 +328,7 @@ function ImageValueEditor({
         <select
           className="pg-input"
           value={source}
+          disabled={!dynamicFields.has('src')}
           onChange={(e) => {
             const nextSource = e.target.value === 'file' ? 'file' : 'url';
             onChange({ ...image, src, alt, source: nextSource });
@@ -279,6 +345,7 @@ function ImageValueEditor({
           type="file"
           accept="image/*"
           style={{ display: 'none' }}
+          disabled={!dynamicFields.has('src')}
           onChange={(e) => {
             handleFileChange(e.target.files?.[0]).catch(() => undefined);
           }}
@@ -288,6 +355,8 @@ function ImageValueEditor({
         <input
           className="pg-input"
           value={src}
+          readOnly={!dynamicFields.has('src')}
+          aria-readonly={!dynamicFields.has('src')}
           onChange={(e) => onChange({ ...image, src: e.target.value, alt, source: 'url' })}
           placeholder="https://example.com/image.png"
         />
@@ -303,6 +372,8 @@ function ImageValueEditor({
       <input
         className="pg-input"
         value={alt}
+        readOnly={!dynamicFields.has('alt')}
+        aria-readonly={!dynamicFields.has('alt')}
         onChange={(e) => onChange({ ...image, src, alt: e.target.value, source })}
         placeholder="Alt text"
       />
@@ -512,7 +583,8 @@ function TableValueEditor({
 }) {
   const table = isRecord(value) ? value : {};
   const mode = schema.mode === 'column_data' ? 'column_data' : 'row_data';
-  const caption = typeof table.caption === 'string' ? table.caption : '';
+  const staticValues = resolveStaticValues(schema);
+  const captionText = typeof schema.caption === 'string' && schema.caption.trim() !== '' ? schema.caption.trim() : '';
 
   if (mode === 'column_data') {
     const columns = isRecord(table.columns) ? table.columns : {};
@@ -522,22 +594,32 @@ function TableValueEditor({
       : Array.from(new Set(Object.values(columns).flatMap((col) => (isRecord(col) ? Object.keys(col) : []))));
     const safeColumnNames = columnNames.length > 0 ? columnNames : ['Column 1'];
     const safeRowHeaders = rowHeaders.length > 0 ? rowHeaders : ['Row 1'];
+    const dynamicFields = resolveDynamicFields(schema, safeRowHeaders);
 
-    const emitColumns = (nextColumns: Record<string, Record<string, unknown>>, nextCaption?: string) => {
+    const emitColumns = (nextColumns: Record<string, Record<string, unknown>>) => {
+      const normalizedColumns: Record<string, Record<string, unknown>> = {};
+      Object.entries(nextColumns).forEach(([colName, colData]) => {
+        const current = isRecord(colData) ? { ...colData } : {};
+        safeRowHeaders.forEach((rowHeader) => {
+          if (!dynamicFields.has(rowHeader)) {
+            current[rowHeader] = staticValues[rowHeader] ?? '';
+          }
+        });
+        normalizedColumns[colName] = current;
+      });
       onChange({
-        columns: nextColumns,
-        ...(typeof nextCaption === 'string' && nextCaption.trim() !== '' ? { caption: nextCaption } : {}),
+        columns: normalizedColumns,
       });
     };
 
     return (
       <div className="pg-layout-composer">
-        {caption && (
+        {captionText ? (
           <div className="pg-insert-row">
             <label className="pg-label">Caption</label>
-            <div style={{padding: '4px 8px'}}>{caption}</div>
+            <div className="pg-field-hint">{captionText}</div>
           </div>
-        )}
+        ) : null}
         <div className="pg-sheet-wrap">
           <table className="pg-sheet-table">
             <thead>
@@ -556,19 +638,23 @@ function TableValueEditor({
                     const columnData = isRecord(columns[columnName]) ? columns[columnName] : {};
                     return (
                       <td key={`${columnName}-${rowHeader}`}>
-                        <input
-                          className="pg-input"
-                          value={typeof columnData[rowHeader] === 'string' || typeof columnData[rowHeader] === 'number' ? String(columnData[rowHeader]) : ''}
-                          onChange={(e) => {
-                            const nextColumns: Record<string, Record<string, unknown>> = {};
-                            safeColumnNames.forEach((name) => {
-                              const current = isRecord(columns[name]) ? columns[name] : {};
-                              nextColumns[name] = { ...current };
-                            });
-                            nextColumns[columnName][rowHeader] = e.target.value;
-                            emitColumns(nextColumns, caption);
-                          }}
-                        />
+                        {dynamicFields.has(rowHeader) ? (
+                          <input
+                            className="pg-input"
+                            value={typeof columnData[rowHeader] === 'string' || typeof columnData[rowHeader] === 'number' ? String(columnData[rowHeader]) : ''}
+                            onChange={(e) => {
+                              const nextColumns: Record<string, Record<string, unknown>> = {};
+                              safeColumnNames.forEach((name) => {
+                                const current = isRecord(columns[name]) ? columns[name] : {};
+                                nextColumns[name] = { ...current };
+                              });
+                              nextColumns[columnName][rowHeader] = e.target.value;
+                              emitColumns(nextColumns);
+                            }}
+                          />
+                        ) : (
+                          <span>{typeof staticValues[rowHeader] === 'string' || typeof staticValues[rowHeader] === 'number' ? String(staticValues[rowHeader]) : ''}</span>
+                        )}
                       </td>
                     );
                   })}
@@ -585,19 +671,23 @@ function TableValueEditor({
   const schemaHeaders = Array.isArray(schema.headers) && schema.headers.length > 0 ? schema.headers : [];
   const inferredHeaders = Array.from(new Set(rows.flatMap((row) => (isRecord(row) ? Object.keys(row) : []))));
   const headers = schemaHeaders.length > 0 ? schemaHeaders : (inferredHeaders.length > 0 ? inferredHeaders : ['Column 1']);
+  const dynamicFields = resolveDynamicFields(schema, headers);
 
-  const emitRows = (nextRows: Array<Record<string, unknown>>, nextCaption?: string) => {
+  const emitRows = (nextRows: Array<Record<string, unknown>>) => {
     const normalizedRows = nextRows.map((row) => {
       const normalized: Record<string, unknown> = {};
       headers.forEach((header) => {
-        normalized[header] = row[header] ?? '';
+        if (dynamicFields.has(header)) {
+          normalized[header] = row[header] ?? '';
+        } else {
+          normalized[header] = staticValues[header] ?? '';
+        }
       });
       return normalized;
     });
 
     onChange({
       rows: normalizedRows,
-      ...(typeof nextCaption === 'string' && nextCaption.trim() !== '' ? { caption: nextCaption } : {}),
     });
   };
 
@@ -605,20 +695,24 @@ function TableValueEditor({
     ? rows.map((row) => {
       const normalized: Record<string, unknown> = {};
       headers.forEach((header) => {
-        normalized[header] = isRecord(row) ? row[header] ?? '' : '';
+        if (dynamicFields.has(header)) {
+          normalized[header] = isRecord(row) ? row[header] ?? '' : '';
+        } else {
+          normalized[header] = staticValues[header] ?? '';
+        }
       });
       return normalized;
     })
-    : [Object.fromEntries(headers.map((header) => [header, '']))];
+    : [Object.fromEntries(headers.map((header) => [header, dynamicFields.has(header) ? '' : (staticValues[header] ?? '')]))];
 
   return (
     <div className="pg-layout-composer">
-      {caption && (
+      {captionText ? (
         <div className="pg-insert-row">
           <label className="pg-label">Caption</label>
-          <div style={{padding: '4px 8px'}}>{caption}</div>
+          <div className="pg-field-hint">{captionText}</div>
         </div>
-      )}
+      ) : null}
       <div className="pg-layout-composer-actions">
         <button
           type="button"
@@ -645,15 +739,19 @@ function TableValueEditor({
               <tr key={`row-${rowIndex}`}>
                 {headers.map((header) => (
                   <td key={`row-${rowIndex}-header-${header}`}>
-                    <input
-                      className="pg-input"
-                      value={typeof row[header] === 'string' || typeof row[header] === 'number' ? String(row[header]) : ''}
-                      onChange={(e) => {
-                        const nextRows = [...safeRows];
-                        nextRows[rowIndex] = { ...nextRows[rowIndex], [header]: e.target.value };
-                        emitRows(nextRows);
-                      }}
-                    />
+                    {dynamicFields.has(header) ? (
+                      <input
+                        className="pg-input"
+                        value={typeof row[header] === 'string' || typeof row[header] === 'number' ? String(row[header]) : ''}
+                        onChange={(e) => {
+                          const nextRows = [...safeRows];
+                          nextRows[rowIndex] = { ...nextRows[rowIndex], [header]: e.target.value };
+                            emitRows(nextRows);
+                        }}
+                      />
+                    ) : (
+                      <span>{typeof staticValues[header] === 'string' || typeof staticValues[header] === 'number' ? String(staticValues[header]) : ''}</span>
+                    )}
                   </td>
                 ))}
                 <td>
@@ -798,21 +896,47 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
           <div className="pg-field-hint">
             <strong>image</strong>: {tokenValueHint({ kind: 'image' })}
           </div>
-          <ImageValueEditor value={value} label={label} onChange={onChange} />
+          <ImageValueEditor schema={schema} value={value} label={label} onChange={onChange} />
         </div>
       );
     }
 
     if (schema.kind === 'hyperlink') {
       const link = isRecord(value) ? value : {};
+      const dynamicFields = resolveDynamicFields(schema, ['alias', 'url']);
+      const staticValues = resolveStaticValues(schema);
+      const aliasValue = dynamicFields.has('alias')
+        ? (typeof link.alias === 'string' ? link.alias : '')
+        : (typeof staticValues.alias === 'string' ? staticValues.alias : '');
+      const urlValue = dynamicFields.has('url')
+        ? (typeof link.url === 'string' ? link.url : '')
+        : (typeof staticValues.url === 'string' ? staticValues.url : '');
       return (
         <div className="pg-layout-composer">
           <div className="pg-field-hint">
             <strong>link</strong>: {tokenValueHint({ kind: 'hyperlink' })}
           </div>
           <div className="pg-layout-composer-actions">
-            <input className="pg-input" value={typeof link.alias === 'string' ? link.alias : ''} onChange={(e) => onChange({ ...link, alias: e.target.value })} placeholder="Alias" />
-            <input className="pg-input" value={typeof link.url === 'string' ? link.url : ''} onChange={(e) => onChange({ ...link, url: e.target.value })} placeholder="URL" />
+            {dynamicFields.has('alias') ? (
+              <input
+                className="pg-input"
+                value={aliasValue}
+                onChange={(e) => onChange({ ...link, alias: e.target.value, ...(dynamicFields.has('url') ? {} : { url: urlValue }) })}
+                placeholder="Alias"
+              />
+            ) : (
+              <input className="pg-input" value={aliasValue} readOnly aria-readonly="true" placeholder="Alias" />
+            )}
+            {dynamicFields.has('url') ? (
+              <input
+                className="pg-input"
+                value={urlValue}
+                onChange={(e) => onChange({ ...link, url: e.target.value, ...(dynamicFields.has('alias') ? {} : { alias: aliasValue }) })}
+                placeholder="URL"
+              />
+            ) : (
+              <input className="pg-input" value={urlValue} readOnly aria-readonly="true" placeholder="URL" />
+            )}
           </div>
         </div>
       );
@@ -839,6 +963,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
                         <div className="pg-insert-row" key={`token-${token.id}-${itemIndex}`}>
                           <div>
                             <label className="pg-label">{token.label || token.id}</label>
+                            <div className="pg-field-hint">{describeTokenConfiguration(tokenSchema)}</div>
                             <div className="pg-field-hint">
                               <strong>{tokenKindLabel(tokenSchema)}</strong>: {tokenValueHint(tokenSchema)}
                             </div>
@@ -871,6 +996,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
                 <div className="pg-insert-row" key={`token-${token.id}`}>
                   <div>
                     <label className="pg-label">{token.label || token.id}</label>
+                    <div className="pg-field-hint">{describeTokenConfiguration(tokenSchema)}</div>
                     <div className="pg-field-hint">
                       <strong>{tokenKindLabel(tokenSchema)}</strong>: {tokenValueHint(tokenSchema)}
                     </div>

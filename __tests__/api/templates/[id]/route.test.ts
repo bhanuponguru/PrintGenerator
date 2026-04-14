@@ -87,6 +87,254 @@ describe('GET /api/templates/[id]', () => {
     expect(data.error).toContain('placeholder.attrs.key must be a non-empty string');
   });
 
+  it('should return 400 when table caption schema is not a static string', async () => {
+    const template = await createTestTemplate();
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          template: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'placeholder',
+                    attrs: {
+                      key: 'grades',
+                      schema: {
+                        kind: 'table',
+                        mode: 'row_data',
+                        headers: ['course', 'grade'],
+                        caption: { kind: 'string' },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      }
+    );
+    const params = Promise.resolve({ id: template._id.toString() });
+
+    const response = await PUT(request, { params });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain('caption must be a non-empty string');
+  });
+
+  it('should return 400 when token-library table caption is not a static string', async () => {
+    const template = await createTestTemplate();
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          template: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'placeholder',
+                    attrs: {
+                      key: 'student_details',
+                      schema: {
+                        kind: 'custom',
+                        base_variable: 'token',
+                        value_type: { kind: 'string' },
+                        layout_template: '{{token.rows}}',
+                        token_library: [
+                          {
+                            id: 'rows',
+                            kind: 'table',
+                            mode: 'row_data',
+                            headers: ['course', 'grade'],
+                            caption: { kind: 'string' },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      }
+    );
+    const params = Promise.resolve({ id: template._id.toString() });
+
+    const response = await PUT(request, { params });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain('token_library[0].caption must be a non-empty string');
+  });
+
+  it('should return 400 when token-library image dynamic_fields include unsupported attributes', async () => {
+    const template = await createTestTemplate();
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          template: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'placeholder',
+                    attrs: {
+                      key: 'student_details',
+                      schema: {
+                        kind: 'custom',
+                        base_variable: 'token',
+                        value_type: { kind: 'string' },
+                        layout_template: '{{token.photo}}',
+                        token_library: [
+                          {
+                            id: 'photo',
+                            kind: 'image',
+                            dynamic_fields: ['src', 'title'],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      }
+    );
+    const params = Promise.resolve({ id: template._id.toString() });
+
+    const response = await PUT(request, { params });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("dynamic_fields['title'] is not supported for image tokens");
+  });
+
+  it('should return 400 when custom layout_template references unknown token ids', async () => {
+    const template = await createTestTemplate();
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          template: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'placeholder',
+                    attrs: {
+                      key: 'student_details',
+                      schema: {
+                        kind: 'custom',
+                        base_variable: 'token',
+                        value_type: { kind: 'string' },
+                        layout_template: 'Name: {{token.name}} | Dept: {{token.department}}',
+                        token_library: [
+                          {
+                            id: 'name',
+                            kind: 'string',
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      }
+    );
+    const params = Promise.resolve({ id: template._id.toString() });
+
+    const response = await PUT(request, { params });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("layout_template references unknown token 'department'");
+  });
+
+  it('should return 400 when token-library table column_types contains unsupported schema kinds', async () => {
+    const template = await createTestTemplate();
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          template: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'placeholder',
+                    attrs: {
+                      key: 'student_details',
+                      schema: {
+                        kind: 'custom',
+                        base_variable: 'token',
+                        value_type: { kind: 'string' },
+                        layout_template: '{{token.rows}}',
+                        token_library: [
+                          {
+                            id: 'rows',
+                            kind: 'table',
+                            mode: 'row_data',
+                            headers: ['course', 'grade'],
+                            column_types: {
+                              grade: { kind: 'money' },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      }
+    );
+    const params = Promise.resolve({ id: template._id.toString() });
+
+    const response = await PUT(request, { params });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("column_types.grade.kind 'money' is unsupported");
+  });
+
   it('should return 404 for non-existent template', async () => {
     const nonExistentId = new ObjectId();
     const request = new NextRequest(

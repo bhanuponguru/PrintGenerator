@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { applyTemplateDataPoint, renderDocumentHtml, validateDataPointAgainstKeyTypeMap } from '@/lib/document-generation';
 import {
   createContainerComponent,
+  createFooterComponent,
   createImageComponent,
   createHyperlinkComponent,
   createListComponent,
+  createPageComponent,
+  createHeaderComponent,
   createTableComponent,
 } from '@/lib/tiptap/extensions';
 
@@ -64,18 +67,18 @@ describe('document generation HTML coverage', () => {
             { Item: 'Pen', Qty: 2 },
             { Item: 'Notebook', Qty: 1 },
           ],
-          caption: 'Inventory',
         }, {
           headers: ['Item', 'Qty'],
+          caption: 'Inventory',
         }),
         createTableComponent({
           columns: {
             Sales: { Q1: 10, Q2: 12 },
             Profit: { Q1: 3, Q2: 4 },
           },
-          caption: 'Quarterly',
         }, {
           headers: ['Q1', 'Q2'],
+          caption: 'Quarterly',
         }),
       ],
     };
@@ -120,9 +123,9 @@ describe('document generation HTML coverage', () => {
         }),
         createTableComponent({
           rows: [],
-          caption: 'Empty rows',
         }, {
           headers: ['A', 'B'],
+          caption: 'Empty rows',
         }),
       ],
     };
@@ -141,9 +144,9 @@ describe('document generation HTML coverage', () => {
       content: [
         createTableComponent({
           columns: {},
-          caption: 'Empty matrix',
         }, {
           headers: ['Q1', 'Q2'],
+          caption: 'Empty matrix',
         }),
       ],
     };
@@ -154,6 +157,28 @@ describe('document generation HTML coverage', () => {
     expect(html).toContain('<thead>');
     expect(html).toContain('<tbody>');
     expect(html).not.toContain('undefined');
+  });
+
+  it('renders structured table captions through schema-aware rendering', () => {
+    const template = {
+      type: 'doc',
+      content: [
+        createTableComponent(
+          {
+            rows: [{ Item: 'Pen' }],
+          },
+          {
+            headers: ['Item'],
+            caption: 'Inventory link',
+          }
+        ),
+      ],
+    };
+
+    const html = renderDocumentHtml(template);
+
+    expect(html).toContain('<caption>');
+    expect(html).toContain('Inventory link');
   });
 
   it('preserves sequential container content order', () => {
@@ -211,5 +236,209 @@ describe('document generation HTML coverage', () => {
     expect(template).toEqual(original);
     expect(rendered).not.toEqual(template);
     expect(renderDocumentHtml(rendered)).toContain('Hello Ada');
+  });
+
+  it('renders a no-due form with structural header and footer content', () => {
+    const template = {
+      type: 'doc',
+      content: [
+        createHeaderComponent(
+          {
+            components: [
+              { src: 'https://example.com/logo.png', alt: 'Logo' },
+            ],
+          },
+          {
+            component_types: [{ kind: 'image' }],
+          }
+        ),
+        createPageComponent(
+          {
+            components: [
+              {
+                data: {
+                  name: 'Ada Lovelace',
+                  roll_no: '23',
+                  department: 'CSE',
+                },
+              },
+              'Signature: No due',
+            ],
+          },
+          {
+            component_types: [
+              {
+                kind: 'custom',
+                base_variable: 'student',
+                value_type: { kind: 'string' },
+                layout_template: 'Name: {{student.name}} | Roll: {{student.roll_no}} | Dept: {{student.department}}',
+                token_library: [
+                  { id: 'name', kind: 'string' },
+                  { id: 'roll_no', kind: 'string' },
+                  { id: 'department', kind: 'string' },
+                ],
+              },
+              { kind: 'string' },
+            ],
+            pageNumber: 1,
+          }
+        ),
+        createFooterComponent(
+          {
+            components: ['No due declaration and disclaimer'],
+          },
+          {
+            component_types: [{ kind: 'string' }],
+          }
+        ),
+      ],
+    };
+
+    const html = renderDocumentHtml(template);
+
+    expect(html).toContain('data-component="header"');
+    expect(html).toContain('logo.png');
+    expect(html).toContain('Ada Lovelace');
+    expect(html).toContain('Signature: No due');
+    expect(html).toContain('data-component="footer"');
+    expect(html).toContain('No due declaration and disclaimer');
+  });
+
+  it('renders a grade card with student details and grades tables', () => {
+    const template = {
+      type: 'doc',
+      content: [
+        createHeaderComponent(
+          {
+            components: [{ src: 'https://example.com/logo.png', alt: 'Logo' }],
+          },
+          { component_types: [{ kind: 'image' }] }
+        ),
+        createPageComponent(
+          {
+            components: [
+              {
+                data: {
+                  name: 'Ada Lovelace',
+                  student_id: 'S-001',
+                  program: 'BSc CS',
+                  semester: 'Semester 4',
+                },
+              },
+              {
+                rows: [
+                  { course: 'Algorithms', course_id: 'CS401', grade: 'A' },
+                  { course: 'Databases', course_id: 'CS402', grade: 'A+' },
+                ],
+              },
+            ],
+          },
+          {
+            component_types: [
+              {
+                kind: 'custom',
+                base_variable: 'student',
+                value_type: { kind: 'string' },
+                layout_template: 'Student: {{student.name}} | ID: {{student.student_id}} | Program: {{student.program}} | {{student.semester}}',
+                token_library: [
+                  { id: 'name', kind: 'string' },
+                  { id: 'student_id', kind: 'string' },
+                  { id: 'program', kind: 'string' },
+                  { id: 'semester', kind: 'string' },
+                ],
+              },
+              {
+                kind: 'table',
+                mode: 'row_data',
+                headers: ['course', 'course_id', 'grade'],
+              },
+            ],
+            pageNumber: 1,
+          }
+        ),
+        createFooterComponent(
+          {
+            components: ['This is an electronically generated document'],
+          },
+          {
+            component_types: [{ kind: 'string' }],
+          }
+        ),
+      ],
+    };
+
+    const html = renderDocumentHtml(template);
+
+    expect(html).toContain('Student: Ada Lovelace');
+    expect(html).toContain('CS401');
+    expect(html).toContain('Algorithms');
+    expect(html).toContain('<th>course</th>');
+    expect(html).toContain('<th>course_id</th>');
+    expect(html).toContain('<th>grade</th>');
+    expect(html).toContain('This is an electronically generated document');
+  });
+
+  it('renders transcript pages for all semesters at generation time', () => {
+    const semesters = [
+      {
+        number: 1,
+        rows: [
+          { course: 'Programming 1', course_id: 'CS101', grade: 'A' },
+          { course: 'Math 1', course_id: 'MA101', grade: 'B+' },
+        ],
+      },
+      {
+        number: 2,
+        rows: [
+          { course: 'Programming 2', course_id: 'CS201', grade: 'A+' },
+          { course: 'Data Structures', course_id: 'CS202', grade: 'A' },
+        ],
+      },
+      {
+        number: 3,
+        rows: [
+          { course: 'Operating Systems', course_id: 'CS301', grade: 'A' },
+          { course: 'Networks', course_id: 'CS302', grade: 'B' },
+        ],
+      },
+    ];
+
+    const template = {
+      type: 'doc',
+      content: [
+        createHeaderComponent({ components: [{ src: 'https://example.com/logo.png', alt: 'Logo' }] }, { component_types: [{ kind: 'image' }] }),
+        ...semesters.map((semester) => createPageComponent(
+          {
+            components: [
+              `Semester ${semester.number}`,
+              { rows: semester.rows },
+            ],
+          },
+          {
+            component_types: [
+              { kind: 'string' },
+              {
+                kind: 'table',
+                mode: 'row_data',
+                headers: ['course', 'course_id', 'grade'],
+              },
+            ],
+            pageNumber: semester.number,
+          }
+        )),
+        createFooterComponent({ components: ['This is an electronically generated document'] }, { component_types: [{ kind: 'string' }] }),
+      ],
+    };
+
+    const html = renderDocumentHtml(template);
+
+    expect(html.match(/Semester \d/g)?.length).toBe(3);
+    expect(html.match(/<table/g)?.length).toBe(3);
+    expect(html).toContain('Semester 1');
+    expect(html).toContain('Semester 2');
+    expect(html).toContain('Semester 3');
+    expect(html).toContain('Programming 1');
+    expect(html).toContain('Operating Systems');
+    expect(html).toContain('This is an electronically generated document');
   });
 });

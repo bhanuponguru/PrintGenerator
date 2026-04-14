@@ -4,6 +4,8 @@ import { useState, useMemo } from 'react';
 import { generateHTML } from '@tiptap/html';
 import StarterKit from '@tiptap/starter-kit';
 import { Placeholder } from '@/lib/tiptap/placeholder';
+import { ComponentExtensions } from '@/lib/tiptap/extensions';
+import { countTemplatePlaceholders, escapePreviewHtml, summarizeTemplatePreview } from '@/lib/template-summary';
 import type { Template } from '../page';
 
 import { TagResponse } from '@/types/tag';
@@ -36,17 +38,20 @@ function formatDate(dateStr: string): string {
  */
 export default function TemplateCard({ template, tags, onEdit, onDelete, onGenerate }: TemplateCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const placeholderCount = useMemo(() => countTemplatePlaceholders(template.template), [template.template]);
+  const canGenerate = placeholderCount > 0;
 
   /** Renders the preview area from TipTap JSON, with a fallback summary for older data. */
   const previewHtml = useMemo(() => {
     try {
       if (template.template?.type === 'doc') {
-        return generateHTML(template.template, [StarterKit, Placeholder]);
+        return generateHTML(template.template, [StarterKit, Placeholder, ...ComponentExtensions]);
       }
-      // Legacy / non-TipTap template — show a simple text representation
-      return `<p style="opacity:.5;font-style:italic">${JSON.stringify(template.template, null, 2).slice(0, 200)}…</p>`;
+      const summary = summarizeTemplatePreview(template.template);
+      return `<p style="opacity:.5;font-style:italic">${escapePreviewHtml(summary)}</p>`;
     } catch {
-      return '<p style="opacity:.5;font-style:italic">Unable to render preview</p>';
+      const summary = summarizeTemplatePreview(template.template);
+      return `<p style="opacity:.5;font-style:italic">${escapePreviewHtml(summary)}</p>`;
     }
   }, [template.template]);
 
@@ -65,6 +70,10 @@ export default function TemplateCard({ template, tags, onEdit, onDelete, onGener
         <div className="pg-meta-row">
           <span className="pg-meta-label">Updated</span>
           <span>{formatDate(template.updated_on)}</span>
+        </div>
+        <div className="pg-meta-row">
+          <span className="pg-meta-label">Placeholders</span>
+          <span>{placeholderCount}</span>
         </div>
       </div>
 
@@ -112,9 +121,10 @@ export default function TemplateCard({ template, tags, onEdit, onDelete, onGener
           <button
             className="pg-btn-primary"
             onClick={onGenerate}
-            title="Generate documents from this template"
+            disabled={!canGenerate}
+            title={canGenerate ? 'Fill data and generate documents from this template' : 'Add at least one placeholder before generating'}
           >
-            ⬇ Generate
+            Fill & Generate
           </button>
           <button
             className="pg-btn-ghost"

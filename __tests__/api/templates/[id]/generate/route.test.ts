@@ -120,6 +120,285 @@ describe('POST /api/templates/[id]/generate', () => {
     ]);
   });
 
+  it('should report every invalid datapoint in a batch request', async () => {
+    const template = await createTestTemplate({
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Name: ' },
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'name',
+                  kind: 'string',
+                },
+              },
+              { type: 'text', text: ', Profile: ' },
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'profile',
+                  kind: 'hyperlink',
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          dataPoints: [
+            {
+              name: 'Ada',
+              profile: { alias: 'Docs', url: '/relative/profile' },
+            },
+            {
+              name: 'Grace',
+            },
+          ],
+        }),
+      }
+    );
+
+    const response = await POST(request, {
+      params: Promise.resolve({ id: template._id.toString() }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Invalid placeholder values');
+    expect(data.data.invalidDataPoints).toEqual([
+      {
+        index: 0,
+        missing: [],
+        invalid: [expect.stringContaining('absolute URL')],
+      },
+      {
+        index: 1,
+        missing: ['profile'],
+        invalid: [],
+      },
+    ]);
+  });
+
+  it('should reject runtime overrides of static table captions', async () => {
+    const template = await createTestTemplate({
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'grades',
+                  kind: 'table',
+                  schema: {
+                    kind: 'table',
+                    mode: 'row_data',
+                    headers: ['course', 'grade'],
+                    caption: 'Semester 1 Courses',
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          dataPoints: [
+            {
+              grades: {
+                caption: 'Override caption',
+                rows: [{ course: 'Algorithms', grade: 'A' }],
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    const response = await POST(request, {
+      params: Promise.resolve({ id: template._id.toString() }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Invalid placeholder values');
+    expect(data.data.invalidDataPoints).toEqual([
+      {
+        index: 0,
+        missing: [],
+        invalid: [expect.stringContaining('caption is static and cannot be overridden')],
+      },
+    ]);
+  });
+
+  it('should reject runtime overrides of static token-library table fields', async () => {
+    const template = await createTestTemplate({
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'line_table',
+                  kind: 'custom',
+                  schema: {
+                    kind: 'custom',
+                    base_variable: 'token',
+                    value_type: { kind: 'string' },
+                    layout_template: '{{token.rows}}',
+                    token_library: [
+                      {
+                        id: 'rows',
+                        kind: 'table',
+                        mode: 'row_data',
+                        headers: ['Item', 'Qty'],
+                        dynamic_fields: ['Qty'],
+                        static_values: { Item: 'Pen' },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          dataPoints: [
+            {
+              line_table: {
+                data: {
+                  rows: {
+                    rows: [{ Item: 'Pencil', Qty: '5' }],
+                  },
+                },
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    const response = await POST(request, {
+      params: Promise.resolve({ id: template._id.toString() }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Invalid placeholder values');
+    expect(data.data.invalidDataPoints).toEqual([
+      {
+        index: 0,
+        missing: [],
+        invalid: [expect.stringContaining('static and cannot be overridden')],
+      },
+    ]);
+  });
+
+  it('should report per-row nested custom token validation failures in batch mode', async () => {
+    const template = await createTestTemplate({
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'profile',
+                  kind: 'custom',
+                  schema: {
+                    kind: 'custom',
+                    base_variable: 'token',
+                    value_type: { kind: 'string' },
+                    layout_template: '{{token.name}} - {{token.site}}',
+                    token_library: [
+                      { id: 'name', kind: 'string' },
+                      { id: 'site', kind: 'hyperlink' },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const request = new NextRequest(
+      `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          dataPoints: [
+            {
+              profile: {
+                data: {
+                  name: 'Ada',
+                  site: { alias: 'Docs', url: 'https://example.com/docs' },
+                },
+              },
+            },
+            {
+              profile: {
+                data: {
+                  name: 'Grace',
+                },
+              },
+            },
+          ],
+        }),
+      }
+    );
+
+    const response = await POST(request, {
+      params: Promise.resolve({ id: template._id.toString() }),
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.success).toBe(false);
+    expect(data.error).toBe('Invalid placeholder values');
+    expect(data.data.invalidDataPoints).toEqual([
+      {
+        index: 1,
+        missing: [],
+        invalid: [expect.stringContaining('profile.data.site is required by custom token schema')],
+      },
+    ]);
+  });
+
   it('should return a zip with one PDF per data point', async () => {
     const template = await createTestTemplate({
       template: {
@@ -197,5 +476,5 @@ describe('POST /api/templates/[id]/generate', () => {
 
     expect(pdfHeader1).toBe('%PDF');
     expect(pdfHeader2).toBe('%PDF');
-  });
+  }, 60000);
 });

@@ -581,4 +581,109 @@ describe('template filling pipeline equivalence coverage', () => {
     const html = renderDocumentHtml(applyTemplateDataPoint(template, valid.normalizedDataPoint));
     expect(html).toContain('Name: Ada | URL: https://example.com');
   });
+
+  it('enforces static hyperlink token attributes while allowing dynamic fields', () => {
+    const keyTypeMap = {
+      profile_link: {
+        kind: 'custom',
+        base_variable: 'token',
+        value_type: { kind: 'string' },
+        layout_template: '{{token.link.alias}} - {{token.link.url}}',
+        token_library: [
+          {
+            id: 'link',
+            kind: 'hyperlink',
+            dynamic_fields: ['url'],
+            static_values: { alias: 'Profile' },
+          },
+        ],
+      },
+    };
+
+    const valid = validateDataPointAgainstKeyTypeMap(
+      {
+        profile_link: {
+          data: {
+            link: {
+              url: 'https://example.com/me',
+            },
+          },
+        },
+      },
+      keyTypeMap
+    );
+
+    expect(valid.invalid).toEqual([]);
+    expect((valid.normalizedDataPoint.profile_link as any).data.link.alias).toBe('Profile');
+
+    const invalid = validateDataPointAgainstKeyTypeMap(
+      {
+        profile_link: {
+          data: {
+            link: {
+              alias: 'Override',
+              url: 'https://example.com/me',
+            },
+          },
+        },
+      },
+      keyTypeMap
+    );
+
+    expect(invalid.invalid).toHaveLength(1);
+    expect(invalid.invalid[0]).toContain('static and cannot be overridden');
+  });
+
+  it('enforces static table token fields for custom token_library schemas', () => {
+    const keyTypeMap = {
+      line_table: {
+        kind: 'custom',
+        base_variable: 'token',
+        value_type: { kind: 'string' },
+        layout_template: '{{token.rows}}',
+        token_library: [
+          {
+            id: 'rows',
+            kind: 'table',
+            mode: 'row_data',
+            headers: ['Item', 'Qty'],
+            dynamic_fields: ['Qty'],
+            static_values: { Item: 'Pen' },
+          },
+        ],
+      },
+    };
+
+    const valid = validateDataPointAgainstKeyTypeMap(
+      {
+        line_table: {
+          data: {
+            rows: {
+              rows: [{ Item: 'Pen', Qty: '3' }],
+            },
+          },
+        },
+      },
+      keyTypeMap
+    );
+
+    expect(valid.invalid).toEqual([]);
+    expect(((valid.normalizedDataPoint.line_table as any).data.rows.rows[0]).Item).toBe('Pen');
+
+    const invalid = validateDataPointAgainstKeyTypeMap(
+      {
+        line_table: {
+          data: {
+            rows: {
+              rows: [{ Item: 'Pencil', Qty: '3' }],
+            },
+          },
+        },
+      },
+      keyTypeMap
+    );
+
+    expect(invalid.invalid).toHaveLength(1);
+    expect(invalid.invalid[0]).toContain('static and cannot be overridden');
+  });
 });

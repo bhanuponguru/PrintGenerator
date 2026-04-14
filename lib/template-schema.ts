@@ -18,6 +18,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const PLACEHOLDER_KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
+function extractTemplateTokens(template: string): string[] {
+  const matches = template.match(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_\.]*)\s*\}\}/g) || [];
+  return matches.map((match) => match.replace(/[{}]/g, '').trim());
+}
+
 function validateComponentTypeSchema(schema: unknown, path: string): string | null {
   if (!isRecord(schema)) {
     return `${path} must be an object`;
@@ -131,12 +136,139 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
         }
       }
 
+      const tokenLibraryIds = new Set<string>();
+      if (typed.token_library !== undefined) {
+        if (!Array.isArray(typed.token_library)) {
+          return `${path}.token_library must be an array`;
+        }
+
+        for (let i = 0; i < typed.token_library.length; i += 1) {
+          const token = typed.token_library[i];
+          if (!isRecord(token)) {
+            return `${path}.token_library[${i}] must be an object`;
+          }
+          if (typeof token.id !== 'string' || token.id.trim() === '') {
+            return `${path}.token_library[${i}].id is required`;
+          }
+          if (!PLACEHOLDER_KEY_RE.test(token.id)) {
+            return `${path}.token_library[${i}].id '${token.id}' is invalid`;
+          }
+          if (tokenLibraryIds.has(token.id)) {
+            return `${path}.token_library[${i}].id '${token.id}' is duplicated`;
+          }
+          tokenLibraryIds.add(token.id);
+
+          if (typeof token.kind !== 'string' || token.kind.trim() === '') {
+            return `${path}.token_library[${i}].kind is required`;
+          }
+
+          if (token.dynamic_fields !== undefined) {
+            if (!Array.isArray(token.dynamic_fields)) {
+              return `${path}.token_library[${i}].dynamic_fields must be an array`;
+            }
+            for (const field of token.dynamic_fields) {
+              if (typeof field !== 'string' || field.trim() === '') {
+                return `${path}.token_library[${i}].dynamic_fields must contain non-empty strings`;
+              }
+            }
+          }
+
+          if (token.static_values !== undefined && !isRecord(token.static_values)) {
+            return `${path}.token_library[${i}].static_values must be an object`;
+          }
+
+          if (token.kind === 'list') {
+            if (token.item_type !== undefined) {
+              const itemTypeError = validateComponentTypeSchema(token.item_type, `${path}.token_library[${i}].item_type`);
+              if (itemTypeError) {
+                return itemTypeError;
+              }
+            }
+          }
+
+          if (token.kind === 'table') {
+            if (token.caption !== undefined) {
+              if (typeof token.caption !== 'string' || token.caption.trim() === '') {
+                return `${path}.token_library[${i}].caption must be a non-empty string`;
+              }
+            }
+
+            if (token.column_types !== undefined) {
+              if (!isRecord(token.column_types)) {
+                return `${path}.token_library[${i}].column_types must be an object`;
+              }
+              for (const [columnName, columnType] of Object.entries(token.column_types)) {
+                const columnTypeError = validateComponentTypeSchema(columnType, `${path}.token_library[${i}].column_types.${columnName}`);
+                if (columnTypeError) {
+                  return columnTypeError;
+                }
+              }
+            }
+
+            if (token.row_types !== undefined) {
+              if (!isRecord(token.row_types)) {
+                return `${path}.token_library[${i}].row_types must be an object`;
+              }
+              for (const [rowName, rowType] of Object.entries(token.row_types)) {
+                const rowTypeError = validateComponentTypeSchema(rowType, `${path}.token_library[${i}].row_types.${rowName}`);
+                if (rowTypeError) {
+                  return rowTypeError;
+                }
+              }
+            }
+          }
+
+          if (token.kind === 'image') {
+            const allowedFields = new Set(['src', 'alt']);
+            if (token.dynamic_fields !== undefined) {
+              for (const field of token.dynamic_fields) {
+                if (!allowedFields.has(field)) {
+                  return `${path}.token_library[${i}].dynamic_fields['${field}'] is not supported for image tokens`;
+                }
+              }
+            }
+          }
+
+          if (token.kind === 'hyperlink') {
+            const allowedFields = new Set(['alias', 'url']);
+            if (token.dynamic_fields !== undefined) {
+              for (const field of token.dynamic_fields) {
+                if (!allowedFields.has(field)) {
+                  return `${path}.token_library[${i}].dynamic_fields['${field}'] is not supported for hyperlink tokens`;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const baseVariable = typed.base_variable.trim();
+      const templateTokens = extractTemplateTokens(typed.layout_template);
+      const registryIds = isRecord(typed.token_registry) ? new Set(Object.keys(typed.token_registry)) : new Set<string>();
+      const knownTokenIds = tokenLibraryIds.size > 0 ? tokenLibraryIds : registryIds;
+      for (const tokenRef of templateTokens) {
+        if (tokenRef === baseVariable) {
+          continue;
+        }
+
+        if (!tokenRef.startsWith(`${baseVariable}.`)) {
+          return `${path}.layout_template token reference '${tokenRef}' must use '{{${baseVariable}.tokenId}}' format`;
+        }
+
+        const tokenId = tokenRef.slice(`${baseVariable}.`.length).split('.')[0] || '';
+        if (knownTokenIds.size > 0 && !knownTokenIds.has(tokenId)) {
+          return `${path}.layout_template references unknown token '${tokenId}'`;
+        }
+      }
+
       if (typed.layout_nodes !== undefined) {
         if (!Array.isArray(typed.layout_nodes)) {
           return `${path}.layout_nodes must be an array`;
         }
         const allowedTokenIds = isRecord(typed.token_registry)
           ? new Set(Object.keys(typed.token_registry))
+          : tokenLibraryIds.size > 0
+            ? tokenLibraryIds
           : Array.isArray(typed.items)
             ? new Set(typed.items.filter((item): item is Record<string, unknown> => isRecord(item) && typeof item.id === 'string').map((item) => String(item.id)))
             : new Set<string>();
@@ -204,9 +336,8 @@ function validateComponentTypeSchema(schema: unknown, path: string): string | nu
     case 'table': {
       const caption = typed.caption;
       if (caption !== undefined) {
-        const captionError = validateComponentTypeSchema(caption, `${path}.caption`);
-        if (captionError) {
-          return captionError;
+        if (typeof caption !== 'string' || caption.trim() === '') {
+          return `${path}.caption must be a non-empty string`;
         }
       }
 
@@ -354,14 +485,16 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
       ? attrs.kind
       : (isRecord(attrs.schema) && typeof attrs.schema.kind === 'string' ? String(attrs.schema.kind) : 'string');
 
-    // Derive the schema from the node structure
+    // Validate explicit schema payloads when provided; fall back to derived schema for legacy attrs.
+    const explicitSchema = isRecord(attrs.schema) ? attrs.schema : null;
     const derivedSchema = deriveSchemaFromChildren(kind, attrs, node.content);
-    const schemaError = validateComponentTypeSchema(derivedSchema, `Placeholder key '${String(attrs.key)}' type`);
+    const schemaToValidate = explicitSchema || derivedSchema;
+    const schemaError = validateComponentTypeSchema(schemaToValidate, `Placeholder key '${String(attrs.key)}' type`);
     if (schemaError) {
       return schemaError;
     }
 
-    const schema = derivedSchema as unknown as Record<string, unknown>;
+    const schema = schemaToValidate as unknown as Record<string, unknown>;
     if (schema.kind === 'list' && schema.style !== undefined) {
       const style = schema.style;
       if (style !== 'bulleted' && style !== 'numbered' && style !== 'plain') {

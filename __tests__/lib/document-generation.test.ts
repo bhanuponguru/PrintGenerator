@@ -122,7 +122,6 @@ describe('document-generation typed placeholders', () => {
       {
         report: {
           kind: 'table',
-          caption: { kind: 'string' },
         },
       }
     );

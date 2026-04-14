@@ -28,6 +28,7 @@ import {
   TableMode,
   TableRowDataValue,
   TableTypeSchema,
+  TokenLibraryItemSchema,
 } from '@/types/template';
 
 /** User-supplied data keyed by placeholder names. */
@@ -163,6 +164,9 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
       const items = Array.isArray(customSchema.items)
         ? customSchema.items.map((item) => normalizeCustomItemSchema(item)).filter((item): item is CustomPlaceholderItemSchema => !!item)
         : undefined;
+      const tokenLibrary = Array.isArray(customSchema.token_library)
+        ? customSchema.token_library.map((item) => normalizeTokenLibraryItem(item)).filter((item): item is TokenLibraryItemSchema => !!item)
+        : undefined;
       return {
         kind: 'custom',
         base_variable: typeof customSchema.base_variable === 'string' && customSchema.base_variable.trim() !== ''
@@ -170,6 +174,7 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
           : 'item',
         value_type: normalizeTypeSchema(customSchema.value_type),
         ...(items ? { items } : {}),
+        ...(tokenLibrary ? { token_library: tokenLibrary } : {}),
         layout_template: typeof customSchema.layout_template === 'string' ? customSchema.layout_template : '{{item}}',
         repeat: customSchema.repeat === true,
         token_registry: normalizeSchemaMap(customSchema.token_registry),
@@ -214,7 +219,13 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
         dynamic_headers: tableSchema.dynamic_headers,
         column_types: normalizeSchemaMap(tableSchema.column_types),
         row_types: normalizeSchemaMap(tableSchema.row_types),
-        caption: tableSchema.caption ? normalizeTypeSchema(tableSchema.caption) : undefined,
+        caption: typeof tableSchema.caption === 'string' && tableSchema.caption.trim() !== '' ? tableSchema.caption.trim() : undefined,
+        ...(Array.isArray((schema as Record<string, unknown>).dynamic_fields)
+          ? { dynamic_fields: ((schema as Record<string, unknown>).dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string') }
+          : {}),
+        ...(isRecord((schema as Record<string, unknown>).static_values)
+          ? { static_values: (schema as Record<string, unknown>).static_values as Record<string, unknown> }
+          : {}),
       };
     }
     default:
@@ -268,6 +279,43 @@ function normalizeCustomItemSchema(rawItem: unknown): CustomPlaceholderItemSchem
     ...(typeof rawItem.layout_template === 'string' ? { layout_template: rawItem.layout_template } : {}),
     ...(Array.isArray(rawItem.layout_nodes) ? { layout_nodes: rawItem.layout_nodes } : {}),
   };
+}
+
+function normalizeTokenLibraryItem(rawItem: unknown): TokenLibraryItemSchema | undefined {
+  if (!isRecord(rawItem) || typeof rawItem.id !== 'string' || rawItem.id.trim() === '' || typeof rawItem.kind !== 'string') {
+    return undefined;
+  }
+
+  const kind = rawItem.kind as ComponentTypeSchema['kind'];
+  const normalized: TokenLibraryItemSchema = {
+    id: rawItem.id.trim(),
+    kind,
+    ...(typeof rawItem.label === 'string' && rawItem.label.trim() !== '' ? { label: rawItem.label.trim() } : {}),
+    ...(Array.isArray(rawItem.dynamic_fields)
+      ? { dynamic_fields: rawItem.dynamic_fields.filter((field): field is string => typeof field === 'string' && field.trim() !== '') }
+      : {}),
+    ...(isRecord(rawItem.static_values)
+      ? { static_values: Object.fromEntries(Object.entries(rawItem.static_values)) }
+      : {}),
+  };
+
+  if (kind === 'list') {
+    normalized.item_type = isRecord(rawItem.item_type) ? normalizeTypeSchema(rawItem.item_type) : defaultStringSchema();
+    normalized.style = normalizeListStyle(rawItem.style);
+  }
+
+  if (kind === 'table') {
+    normalized.mode = rawItem.mode === 'column_data' ? 'column_data' : 'row_data';
+    normalized.headers = Array.isArray(rawItem.headers)
+      ? rawItem.headers.filter((header): header is string => typeof header === 'string' && header.trim() !== '')
+      : undefined;
+    normalized.dynamic_headers = typeof rawItem.dynamic_headers === 'boolean' ? rawItem.dynamic_headers : undefined;
+    normalized.column_types = normalizeSchemaMap(rawItem.column_types);
+    normalized.row_types = normalizeSchemaMap(rawItem.row_types);
+    normalized.caption = typeof rawItem.caption === 'string' && rawItem.caption.trim() !== '' ? rawItem.caption.trim() : undefined;
+  }
+
+  return normalized;
 }
 
 function replaceTextTokens(value: string, dataPoint: DataPoint): string {
@@ -537,16 +585,44 @@ function validateAndNormalizeValue(
       if (!isRecord(value)) {
         return { ok: false, error: `${path} must be an image object` };
       }
-      if (typeof value.src !== 'string' || value.src.trim() === '') {
+
+      const dynamicFieldsRaw = (schema as Record<string, unknown>).dynamic_fields;
+      const dynamicFields = new Set(
+        Array.isArray(dynamicFieldsRaw)
+          ? dynamicFieldsRaw.filter((field): field is string => typeof field === 'string')
+          : ['src', 'alt']
+      );
+      const staticValues = isRecord((schema as Record<string, unknown>).static_values)
+        ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+        : {};
+
+      const src = dynamicFields.has('src')
+        ? value.src
+        : staticValues.src;
+      const alt = dynamicFields.has('alt')
+        ? value.alt
+        : (staticValues.alt ?? '');
+
+      if (dynamicFields.has('src') && (typeof src !== 'string' || src.trim() === '')) {
         return { ok: false, error: `${path}.src must be a non-empty string` };
       }
-      if (typeof value.alt !== 'string') {
+      if (!dynamicFields.has('src') && typeof value.src === 'string' && value.src !== src) {
+        return { ok: false, error: `${path}.src is static and cannot be overridden` };
+      }
+
+      if (typeof src !== 'string' || src.trim() === '') {
+        return { ok: false, error: `${path}.src must be a non-empty string` };
+      }
+      if (typeof alt !== 'string') {
         return { ok: false, error: `${path}.alt must be a string` };
+      }
+      if (!dynamicFields.has('alt') && typeof value.alt === 'string' && value.alt !== alt) {
+        return { ok: false, error: `${path}.alt is static and cannot be overridden` };
       }
 
       const normalized: ImageValue = {
-        src: value.src,
-        alt: value.alt,
+        src,
+        alt,
         ...(typeof value.source === 'string' ? { source: value.source as ImageValue['source'] } : {}),
         ...(typeof value.mime_type === 'string' ? { mime_type: value.mime_type } : {}),
         ...(typeof value.file_name === 'string' ? { file_name: value.file_name } : {}),
@@ -559,14 +635,34 @@ function validateAndNormalizeValue(
       if (!isRecord(value)) {
         return { ok: false, error: `${path} must be a hyperlink object` };
       }
-      if (typeof value.alias !== 'string' || value.alias.trim() === '') {
+
+      const dynamicFieldsRaw = (schema as Record<string, unknown>).dynamic_fields;
+      const dynamicFields = new Set(
+        Array.isArray(dynamicFieldsRaw)
+          ? dynamicFieldsRaw.filter((field): field is string => typeof field === 'string')
+          : ['alias', 'url']
+      );
+      const staticValues = isRecord((schema as Record<string, unknown>).static_values)
+        ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+        : {};
+
+      const alias = dynamicFields.has('alias') ? value.alias : staticValues.alias;
+      const url = dynamicFields.has('url') ? value.url : staticValues.url;
+
+      if (typeof alias !== 'string' || alias.trim() === '') {
         return { ok: false, error: `${path}.alias must be a non-empty string` };
       }
-      if (typeof value.url !== 'string' || value.url.trim() === '') {
+      if (!dynamicFields.has('alias') && typeof value.alias === 'string' && value.alias !== alias) {
+        return { ok: false, error: `${path}.alias is static and cannot be overridden` };
+      }
+      if (typeof url !== 'string' || url.trim() === '') {
         return { ok: false, error: `${path}.url must be a non-empty string` };
       }
+      if (!dynamicFields.has('url') && typeof value.url === 'string' && value.url !== url) {
+        return { ok: false, error: `${path}.url is static and cannot be overridden` };
+      }
       try {
-        const parsedUrl = new URL(value.url);
+        const parsedUrl = new URL(url);
         if (!parsedUrl.protocol || !parsedUrl.hostname) {
           return { ok: false, error: `${path}.url must be an absolute URL` };
         }
@@ -575,8 +671,8 @@ function validateAndNormalizeValue(
       }
 
       const normalized: HyperlinkValue = {
-        alias: value.alias,
-        url: value.url,
+        alias,
+        url,
       };
 
       return { ok: true, value: normalized };
@@ -614,9 +710,58 @@ function validateAndNormalizeValue(
       const customSchema = schema as CustomTypeSchema;
       const valueType = normalizeTypeSchema(customSchema.value_type);
       const tokenRegistry = normalizeSchemaMap(customSchema.token_registry);
+      const tokenLibrary = Array.isArray(customSchema.token_library)
+        ? customSchema.token_library.map((item) => normalizeTokenLibraryItem(item)).filter((item): item is TokenLibraryItemSchema => !!item)
+        : [];
       const items = Array.isArray(customSchema.items)
         ? customSchema.items.map((item) => normalizeCustomItemSchema(item)).filter((item): item is CustomPlaceholderItemSchema => !!item)
         : [];
+
+      const tokenLibraryToSchema = (item: TokenLibraryItemSchema): ComponentTypeSchema => {
+        if (item.kind === 'list') {
+          return {
+            kind: 'list',
+            item_type: item.item_type ? normalizeTypeSchema(item.item_type) : defaultStringSchema(),
+            style: normalizeListStyle(item.style),
+          };
+        }
+
+        if (item.kind === 'image') {
+          return {
+            kind: 'image',
+            ...(Array.isArray(item.dynamic_fields) ? { dynamic_fields: item.dynamic_fields } : {}),
+            ...(isRecord(item.static_values) ? { static_values: item.static_values } : {}),
+          } as ComponentTypeSchema;
+        }
+
+        if (item.kind === 'hyperlink') {
+          return {
+            kind: 'hyperlink',
+            ...(Array.isArray(item.dynamic_fields) ? { dynamic_fields: item.dynamic_fields } : {}),
+            ...(isRecord(item.static_values) ? { static_values: item.static_values } : {}),
+          } as ComponentTypeSchema;
+        }
+
+        if (item.kind === 'table') {
+          return {
+            kind: 'table',
+            mode: item.mode === 'column_data' ? 'column_data' : 'row_data',
+            headers: item.headers,
+            dynamic_headers: item.dynamic_headers,
+            column_types: normalizeSchemaMap(item.column_types),
+            row_types: normalizeSchemaMap(item.row_types),
+            caption: item.caption ? normalizeTypeSchema(item.caption) : undefined,
+            ...(Array.isArray(item.dynamic_fields) ? { dynamic_fields: item.dynamic_fields } : {}),
+            ...(isRecord(item.static_values) ? { static_values: item.static_values } : {}),
+          };
+        }
+
+        return normalizeTypeSchema({ kind: item.kind });
+      };
+
+      const effectiveTokenRegistry = tokenLibrary.length > 0
+        ? Object.fromEntries(tokenLibrary.map((item) => [item.id, tokenLibraryToSchema(item)]))
+        : tokenRegistry;
 
       const normalizeItemSchema = (itemSchema: CustomPlaceholderItemSchema): ComponentTypeSchema => {
         if (itemSchema.kind === 'custom' || itemSchema.token_registry) {
@@ -640,16 +785,16 @@ function validateAndNormalizeValue(
           return { ok: false as const, error: `${tokenPath} must be an object keyed by token ids` };
         }
 
-        if (!tokenRegistry || Object.keys(tokenRegistry).length === 0) {
+        if (!effectiveTokenRegistry || Object.keys(effectiveTokenRegistry).length === 0) {
           const nestedValidation = validateAndNormalizeValue(candidate, valueType, tokenPath);
           if (!nestedValidation.ok) return nestedValidation;
           return { ok: true as const, value: nestedValidation.value };
         }
 
         const normalizedTokenData: Record<string, ComponentValue> = {};
-        for (const [tokenId, tokenSchema] of Object.entries(tokenRegistry)) {
+        for (const [tokenId, tokenSchema] of Object.entries(effectiveTokenRegistry)) {
           if (!(tokenId in candidate)) {
-            return { ok: false as const, error: `${tokenPath}.${tokenId} is required by token registry` };
+            return { ok: false as const, error: `${tokenPath}.${tokenId} is required by custom token schema` };
           }
           const tokenValidation = validateAndNormalizeValue(candidate[tokenId], tokenSchema, `${tokenPath}.${tokenId}`);
           if (!tokenValidation.ok) return tokenValidation;
@@ -820,13 +965,8 @@ function validateAndNormalizeValue(
         return { ok: false, error: `${path} cannot have both rows[] and columns{}` };
       }
 
-      let captionValue: ComponentValue | undefined;
-      if (schema.caption && value.caption !== undefined) {
-        const captionResult = validateAndNormalizeValue(value.caption, schema.caption, `${path}.caption`);
-        if (!captionResult.ok) {
-          return captionResult;
-        }
-        captionValue = captionResult.value;
+      if (value.caption !== undefined) {
+        return { ok: false, error: `${path}.caption is static and cannot be overridden` };
       }
 
       if (hasRows) {
@@ -841,6 +981,14 @@ function validateAndNormalizeValue(
           ? headers
           : Array.from(new Set(rows.flatMap((row) => (isRecord(row) ? Object.keys(row) : []))));
         const columnTypes = config?.column_types || schema.column_types || {};
+        const dynamicFields = new Set(
+          Array.isArray((schema as Record<string, unknown>).dynamic_fields)
+            ? ((schema as Record<string, unknown>).dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string')
+            : inferredHeaders
+        );
+        const staticValues = isRecord((schema as Record<string, unknown>).static_values)
+          ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+          : {};
         for (let i = 0; i < rows.length; i += 1) {
           const row = rows[i];
           if (!isRecord(row)) {
@@ -851,11 +999,22 @@ function validateAndNormalizeValue(
             if (!(header in row)) {
               return { ok: false, error: `${path}.rows[${i}] missing header '${header}'` };
             }
+            if (!dynamicFields.has(header)) {
+              const staticValue = staticValues[header] ?? '';
+              if (row[header] !== staticValue) {
+                return { ok: false, error: `${path}.rows[${i}].${header} is static and cannot be overridden` };
+              }
+            }
           }
         }
 
         const normalizedRows: Array<Record<string, unknown>> = rows.map((row) => {
           const rowObj = isRecord(row) ? { ...row } : {};
+          for (const header of inferredHeaders) {
+            if (!dynamicFields.has(header)) {
+              rowObj[header] = staticValues[header] ?? '';
+            }
+          }
           for (const [header, headerSchema] of Object.entries(columnTypes)) {
             if (!(header in rowObj)) continue;
             const cellValidation = validateAndNormalizeValue(rowObj[header], headerSchema, `${path}.${header}`);
@@ -867,7 +1026,6 @@ function validateAndNormalizeValue(
         });
 
         const normalized: TableRowDataValue = {
-          ...(captionValue !== undefined ? { caption: captionValue } : {}),
           rows: normalizedRows,
         };
 
@@ -884,6 +1042,14 @@ function validateAndNormalizeValue(
         ? headers
         : Array.from(new Set(Object.values(columns).flatMap((col) => (isRecord(col) ? Object.keys(col) : []))));
       const rowTypes = config?.row_types || schema.row_types || {};
+      const dynamicFields = new Set(
+        Array.isArray((schema as Record<string, unknown>).dynamic_fields)
+          ? ((schema as Record<string, unknown>).dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string')
+          : inferredHeaders
+      );
+      const staticValues = isRecord((schema as Record<string, unknown>).static_values)
+        ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+        : {};
       for (const colName of Object.keys(columns)) {
         const col = columns[colName];
         if (!isRecord(col)) {
@@ -900,6 +1066,14 @@ function validateAndNormalizeValue(
       const normalizedColumns: Record<string, Record<string, unknown>> = {};
       for (const [colName, col] of Object.entries(columns)) {
         const colObj = isRecord(col) ? { ...col } : {};
+        for (const rowHeader of inferredHeaders) {
+          if (!dynamicFields.has(rowHeader)) {
+            const staticValue = staticValues[rowHeader] ?? '';
+            if (colObj[rowHeader] !== staticValue) {
+              return { ok: false, error: `${path}.columns['${colName}'].${rowHeader} is static and cannot be overridden` };
+            }
+          }
+        }
         for (const [rowHeader, rowSchema] of Object.entries(rowTypes)) {
           if (!(rowHeader in colObj)) continue;
           const cellValidation = validateAndNormalizeValue(colObj[rowHeader], rowSchema, `${path}.${colName}.${rowHeader}`);
@@ -907,11 +1081,15 @@ function validateAndNormalizeValue(
             colObj[rowHeader] = cellValidation.value;
           }
         }
+        for (const rowHeader of inferredHeaders) {
+          if (!dynamicFields.has(rowHeader)) {
+            colObj[rowHeader] = staticValues[rowHeader] ?? '';
+          }
+        }
         normalizedColumns[colName] = colObj;
       }
 
       const normalized: TableColumnDataValue = {
-        ...(captionValue !== undefined ? { caption: captionValue } : {}),
         columns: normalizedColumns,
       };
 

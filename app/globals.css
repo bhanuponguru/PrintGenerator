@@ -1251,6 +1251,46 @@ select.pg-input option {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.pg-custom-template-editor {
+  border: 1px solid var(--pg-border);
+  border-radius: 10px;
+  background: #17140f;
+  overflow: hidden;
+}
+
+.pg-custom-template-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--pg-border);
+  background: #201b13;
+}
+
+.pg-custom-template-canvas {
+  padding: 8px;
+}
+
+.pg-custom-template-prosemirror {
+  min-height: 130px;
+  border: 1px solid var(--pg-border);
+  border-radius: 8px;
+  background: #13110c;
+  color: var(--pg-text);
+  padding: 10px;
+  outline: none;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.pg-custom-template-prosemirror p {
+  margin: 0 0 6px;
+}
+
+.pg-custom-template-prosemirror p:last-child {
+  margin-bottom: 0;
+}
+
 .pg-custom-workspace {
   display: grid;
   grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);

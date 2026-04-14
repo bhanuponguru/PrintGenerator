@@ -85,6 +85,12 @@ function normalizeTokenLibraryItem(value: unknown): TokenLibraryItemSchema | und
       : {}),
     ...(typeof value.layout_template === 'string' && value.layout_template.trim() !== '' ? { layout_template: value.layout_template } : {}),
     ...(normalizeCustomLayoutNodes(value.layout_nodes) ? { layout_nodes: normalizeCustomLayoutNodes(value.layout_nodes) } : {}),
+    ...(Array.isArray(value.dynamic_fields)
+      ? { dynamic_fields: value.dynamic_fields.filter((field): field is string => typeof field === 'string' && field.trim() !== '') }
+      : {}),
+    ...(isRecord(value.static_values)
+      ? { static_values: Object.fromEntries(Object.entries(value.static_values)) }
+      : {}),
   };
 
   if (kind === 'list') {
@@ -98,6 +104,7 @@ function normalizeTokenLibraryItem(value: unknown): TokenLibraryItemSchema | und
       ? value.headers.filter((header): header is string => typeof header === 'string' && header.trim() !== '')
       : undefined;
     normalized.dynamic_headers = typeof value.dynamic_headers === 'boolean' ? value.dynamic_headers : undefined;
+    normalized.caption = typeof value.caption === 'string' && value.caption.trim() !== '' ? value.caption.trim() : undefined;
   }
 
   return normalized;
@@ -207,7 +214,7 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
         row_types: isRecord(tableSchema.row_types)
           ? Object.fromEntries(Object.entries(tableSchema.row_types).map(([k, v]) => [k, normalizeTypeSchema(v)]))
           : undefined,
-        caption: tableSchema.caption ? normalizeTypeSchema(tableSchema.caption) : undefined,
+        caption: typeof tableSchema.caption === 'string' && tableSchema.caption.trim() !== '' ? tableSchema.caption.trim() : undefined,
       };
     }
     default:
@@ -329,11 +336,18 @@ function renderTemplateString(template: string, baseVariable: string, value: unk
       return typeof projected === 'object' ? JSON.stringify(projected) : String(projected);
     }
 
+    // Backward-compatible fallback for legacy templates that used bare token IDs.
+    if (!token.includes('.') && isRecord(value) && token in value) {
+      const projected = value[token];
+      if (projected === null || projected === undefined) return '';
+      return typeof projected === 'object' ? JSON.stringify(projected) : String(projected);
+    }
+
     return '';
   });
 }
 
-function renderValueBySchema(schema: ComponentTypeSchema, value: unknown): DOMSpec {
+export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown): DOMSpec {
   switch (schema.kind) {
     case 'string':
     case 'integer':
@@ -442,8 +456,8 @@ function renderValueBySchema(schema: ComponentTypeSchema, value: unknown): DOMSp
       const mode: TableMode = schema.mode || (Array.isArray(tableValue.rows) ? 'row_data' : 'column_data');
       const headers = schema.headers && schema.headers.length > 0 ? schema.headers : inferTableHeaders(tableValue, mode);
 
-      const captionNode = tableValue.caption !== undefined
-        ? ['caption', {}, typeof tableValue.caption === 'string' ? tableValue.caption : JSON.stringify(tableValue.caption)]
+      const captionNode = schema.caption && tableValue.caption !== undefined
+        ? ['caption', {}, renderValueBySchema(schema.caption, tableValue.caption)]
         : null;
 
       if (mode === 'row_data') {
@@ -574,7 +588,7 @@ export function deriveSchemaFromChildren(kind: string, attrs: Record<string, unk
       headers,
       dynamic_headers: !headers || headers.length === 0,
       ...(mode === 'row_data' ? { column_types: typeMap } : { row_types: typeMap }),
-      ...(attrs.caption !== undefined ? { caption: normalizeTypeSchema(attrs.caption) } : {}),
+      ...(typeof attrs.caption === 'string' && attrs.caption.trim() !== '' ? { caption: attrs.caption.trim() } : {}),
     };
   }
 

@@ -34,7 +34,9 @@ import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
   ComponentExtensions,
   createHyperlinkComponent,
+  createHeaderComponent,
   createImageComponent,
+  createFooterComponent,
   createTableComponent,
   deriveSchemaFromChildren,
   validateContainerAttrs,
@@ -74,7 +76,11 @@ interface TokenLibraryItemDraft {
   // For table tokens
   tableMode?: 'row_data' | 'column_data';
   tableHeaders?: string[];
+  tableHeaderDraft?: string;
   dynamicHeaders?: boolean;
+  tableCaption?: string;
+  dynamicFields?: string[];
+  staticValues?: Record<string, unknown>;
   // For nesting (complex tokens)
   nestedTokens?: TokenLibraryItemDraft[];
 }
@@ -183,11 +189,47 @@ function createCustomLayoutNode(kind: CustomLayoutNodeKind, value: string, token
 
 /** Create a new typed token for the token library */
 function createTokenLibraryItem(id: string, kind: TokenKind, label?: string): TokenLibraryItemDraft {
+  const dynamicFields = kind === 'hyperlink'
+    ? ['alias', 'url']
+    : kind === 'image'
+      ? ['src', 'alt']
+      : kind === 'table'
+        ? ['Column_1', 'Column_2']
+      : undefined;
+
   return {
     id,
     label: label || id,
     kind,
+    ...(dynamicFields ? { dynamicFields } : {}),
+    ...(kind === 'table' ? { tableHeaders: ['Column_1', 'Column_2'], tableHeaderDraft: '', tableCaption: '', staticValues: {} } : {}),
   };
+}
+
+function describeTokenLibraryItem(token: TokenLibraryItemDraft): string {
+  if (token.kind === 'table') {
+    const headers = (token.tableHeaders || []).join(', ') || 'no headers';
+    const mode = token.tableMode || 'row_data';
+    const caption = token.tableCaption && token.tableCaption.trim() !== '' ? `caption: ${token.tableCaption.trim()}` : 'caption: none';
+    const dynamicFields = Array.isArray(token.dynamicFields) && token.dynamicFields.length > 0 ? `dynamic: ${token.dynamicFields.join(', ')}` : 'dynamic: all';
+    return `Table · ${mode} · ${headers} · ${caption} · ${dynamicFields}`;
+  }
+
+  if (token.kind === 'hyperlink') {
+    const dynamicFields = Array.isArray(token.dynamicFields) && token.dynamicFields.length > 0 ? token.dynamicFields.join(', ') : 'alias, url';
+    return `Link · ${dynamicFields}`;
+  }
+
+  if (token.kind === 'image') {
+    const dynamicFields = Array.isArray(token.dynamicFields) && token.dynamicFields.length > 0 ? token.dynamicFields.join(', ') : 'src, alt';
+    return `Image · ${dynamicFields}`;
+  }
+
+  if (token.kind === 'list') {
+    return `List · ${token.listStyle || 'bulleted'} · ${token.itemType || 'string'}`;
+  }
+
+  return token.kind;
 }
 
 function createCustomTokenDraft(id: string, label: string, kind: DynamicItemKind): CustomTokenDraft {
@@ -257,6 +299,47 @@ function applyTemplatePreview(template: string, baseVariable: string, fields: st
 
     return '';
   });
+}
+
+function normalizeCustomTokenReferences(template: string, baseVariable: string, tokenIds: string[]): string {
+  if (!template.trim()) {
+    return template;
+  }
+
+  const safeBase = KEY_RE.test(baseVariable.trim()) ? baseVariable.trim() : 'item';
+  const tokenIdSet = new Set(tokenIds.filter((tokenId) => KEY_RE.test(tokenId)));
+
+  return template.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_\.]*)\s*\}\}/g, (match, token: string) => {
+    if (token === safeBase || token.startsWith(`${safeBase}.`)) {
+      return `{{${token}}}`;
+    }
+
+    if (!token.includes('.') && tokenIdSet.has(token)) {
+      return `{{${safeBase}.${token}}}`;
+    }
+
+    return match;
+  });
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function textTemplateToHtml(template: string): string {
+  if (!template.trim()) {
+    return '<p></p>';
+  }
+
+  return template
+    .split(/\r?\n/)
+    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .join('');
 }
 
 function defaultSchemaForKind(kind: PlaceholderKind): ComponentTypeSchema {
@@ -420,7 +503,7 @@ export default function TemplateEditor({
   const [phRepeatLayoutTemplate, setPhRepeatLayoutTemplate] = useState('');
   const [phRepeatLayoutFields, setPhRepeatLayoutFields] = useState<string[]>(['name', 'value']);
   const [phRepeatLayoutFieldDraft, setPhRepeatLayoutFieldDraft] = useState('');
-  const [phCustomItems, setPhCustomItems] = useState<CustomPlaceholderItemDraft[]>([]);
+  const [phCustomItems, setPhCustomItems] = useState<TokenLibraryItemDraft[]>([]);
   const [phCustomItemIdDraft, setPhCustomItemIdDraft] = useState('');
   const [phCustomItemLabelDraft, setPhCustomItemLabelDraft] = useState('');
   const [phCustomSelectedItemId, setPhCustomSelectedItemId] = useState('');
@@ -431,8 +514,8 @@ export default function TemplateEditor({
   const [phCustomLayoutNodes, setPhCustomLayoutNodes] = useState<CustomLayoutNodeDraft[]>([]);
   const [phCustomRepeat, setPhCustomRepeat] = useState(false);
   const customTokenDragRef = useRef<string | null>(null);
-  const customItemTemplateRef = useRef<HTMLTextAreaElement | null>(null);
-  const customPlaceholderTemplateRef = useRef<HTMLTextAreaElement | null>(null);
+  const isSyncingCustomTemplateRef = useRef(false);
+  const customTokenIdsRef = useRef<string[]>([]);
 
   const repeatLayoutTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [phTableMode, setPhTableMode] = useState<TableMode>('row_data');
@@ -440,7 +523,7 @@ export default function TemplateEditor({
   const [phTableHeaderDraft, setPhTableHeaderDraft] = useState('');
   const [phTableColumnKinds, setPhTableColumnKinds] = useState<Record<string, PlaceholderKind>>({});
   const [phTableRowKinds, setPhTableRowKinds] = useState<Record<string, PlaceholderKind>>({});
-
+  const [phTableCaptionText, setPhTableCaptionText] = useState('');
   const [imageSrc, setImageSrc] = useState('https://example.com/logo.png');
   const [imageAlt, setImageAlt] = useState('Logo');
 
@@ -501,6 +584,57 @@ export default function TemplateEditor({
   useEffect(() => () => {
     editor?.destroy();
   }, [editor]);
+
+  const customTemplateEditor = useEditor({
+    extensions: [
+      StarterKit.configure({ codeBlock: false }),
+      Highlight,
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    ],
+    content: textTemplateToHtml(phCustomTemplate),
+    editorProps: {
+      attributes: {
+        class: 'pg-custom-template-prosemirror',
+        'aria-label': 'Custom placeholder template',
+      },
+    },
+    onUpdate({ editor: ed }) {
+      if (isSyncingCustomTemplateRef.current) return;
+      const canonical = normalizeCustomTokenReferences(
+        ed.getText({ blockSeparator: '\n' }),
+        'token',
+        customTokenIdsRef.current
+      );
+      setPhCustomTemplate(canonical);
+    },
+    immediatelyRender: false,
+  });
+
+  useEffect(() => () => {
+    customTemplateEditor?.destroy();
+  }, [customTemplateEditor]);
+
+  useEffect(() => {
+    customTokenIdsRef.current = phCustomItems.map((token) => token.id);
+  }, [phCustomItems]);
+
+  useEffect(() => {
+    if (!customTemplateEditor) return;
+    const current = normalizeCustomTokenReferences(
+      customTemplateEditor.getText({ blockSeparator: '\n' }),
+      'token',
+      phCustomItems.map((token) => token.id)
+    );
+    const next = normalizeCustomTokenReferences(
+      phCustomTemplate,
+      'token',
+      phCustomItems.map((token) => token.id)
+    );
+    if (current === next) return;
+    isSyncingCustomTemplateRef.current = true;
+    customTemplateEditor.commands.setContent(textTemplateToHtml(next), false);
+    isSyncingCustomTemplateRef.current = false;
+  }, [customTemplateEditor, phCustomTemplate, phCustomItems]);
 
   const active = (name: string, opts?: object) => (editor?.isActive(name, opts) ? ' pg-tb-active' : '');
   const activeAlign = (align: 'left' | 'center' | 'right' | 'justify') => (editor?.isActive({ textAlign: align }) ? ' pg-tb-active' : '');
@@ -701,6 +835,23 @@ export default function TemplateEditor({
       kind: phCustomTokenKindDraft,
     };
 
+    if (phCustomTokenKindDraft === 'hyperlink') {
+      newToken.dynamicFields = ['alias', 'url'];
+      newToken.staticValues = {};
+    }
+
+    if (phCustomTokenKindDraft === 'image') {
+      newToken.dynamicFields = ['src', 'alt'];
+      newToken.staticValues = {};
+    }
+
+    if (phCustomTokenKindDraft === 'table') {
+      newToken.tableHeaders = ['Column_1', 'Column_2'];
+      newToken.dynamicFields = ['Column_1', 'Column_2'];
+      newToken.staticValues = {};
+      newToken.tableHeaderDraft = '';
+    }
+
     setPhCustomItems((prev) => [...prev, newToken as any]);
     setPhCustomSelectedItemId(nextId);
     setPhCustomItemIdDraft('');
@@ -759,24 +910,20 @@ export default function TemplateEditor({
   }, []);
 
   const insertCustomPlaceholderTokenSet = useCallback((tokenId: string) => {
-    const tokenText = `{{${tokenId}}}`;
-    const textarea = customPlaceholderTemplateRef.current;
-    if (!textarea) {
-      setPhCustomTemplate((prev) => insertTokenIntoTemplate(prev, tokenText));
+    const tokenText = `{{token.${tokenId}}}`;
+    if (customTemplateEditor) {
+      customTemplateEditor.chain().focus().insertContent(tokenText).run();
+      const next = normalizeCustomTokenReferences(
+        customTemplateEditor.getText({ blockSeparator: '\n' }),
+        'token',
+        phCustomItems.map((token) => token.id)
+      );
+      setPhCustomTemplate(next);
       return;
     }
 
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? textarea.value.length;
-    const nextTemplate = `${textarea.value.slice(0, start)}${tokenText}${textarea.value.slice(end)}`;
-    const caret = start + tokenText.length;
-    setPhCustomTemplate(nextTemplate);
-
-    requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(caret, caret);
-    });
-  }, []);
+    setInsertError('Custom template editor is initializing. Try again.');
+  }, [customTemplateEditor, phCustomItems]);
 
   const appendCustomNode = useCallback((kind: CustomLayoutNodeKind, tokenId?: string) => {
     setPhCustomLayoutNodes((prev) => [...prev, createCustomLayoutNode(kind, kind === 'newline' ? '\n' : '', tokenId)]);
@@ -886,14 +1033,18 @@ export default function TemplateEditor({
     }
 
     if (phKind === 'custom') {
-      const placeholderTemplate = phCustomTemplate.trim();
+      const canonicalTemplate = normalizeCustomTokenReferences(
+        phCustomTemplate.trim(),
+        'token',
+        phCustomItems.map((token) => token.id)
+      );
 
       if (phCustomItems.length === 0) {
         setInsertError('Custom placeholders require at least one token in the token library.');
         return;
       }
 
-      if (!placeholderTemplate) {
+      if (!canonicalTemplate) {
         setInsertError('Custom placeholder template is required.');
         return;
       }
@@ -916,6 +1067,17 @@ export default function TemplateEditor({
           if (token.tableMode) schemaBase.mode = token.tableMode;
           if (token.tableHeaders && token.tableHeaders.length > 0) schemaBase.headers = token.tableHeaders;
           if (token.dynamicHeaders !== undefined) schemaBase.dynamic_headers = token.dynamicHeaders;
+          if (token.tableCaption && token.tableCaption.trim() !== '') {
+            schemaBase.caption = token.tableCaption.trim();
+          }
+        }
+
+        if (Array.isArray(token.dynamicFields) && token.dynamicFields.length > 0) {
+          schemaBase.dynamic_fields = token.dynamicFields;
+        }
+
+        if (token.staticValues && Object.keys(token.staticValues).length > 0) {
+          schemaBase.static_values = token.staticValues;
         }
 
         return schemaBase;
@@ -925,7 +1087,7 @@ export default function TemplateEditor({
         kind: 'custom',
         base_variable: 'token',
         value_type: defaultSchemaForKind('string'),
-        layout_template: placeholderTemplate,
+        layout_template: canonicalTemplate,
         repeat: phCustomRepeat,
         token_library: tokenLibrarySchema,
       };
@@ -938,6 +1100,7 @@ export default function TemplateEditor({
         mode: phTableMode,
         dynamic_headers: headers.length === 0,
         ...(headers.length > 0 ? { headers } : {}),
+        ...(phTableCaptionText.trim() ? { caption: phTableCaptionText.trim() } : {}),
       };
 
       if (phTableMode === 'row_data') {
@@ -979,7 +1142,7 @@ export default function TemplateEditor({
     setPhKey('');
     setInsertError('');
     setInsertPanel(null);
-  }, [editor, phKey, phKind, phListStyle, phListItemKind, phRepeatItemKind, phRepeatMinItems, phRepeatMaxItems, phRepeatBaseVariable, phRepeatLayoutTemplate, phCustomTemplate, phCustomRepeat, phCustomItems, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds]);
+  }, [editor, phKey, phKind, phListStyle, phListItemKind, phRepeatItemKind, phRepeatMinItems, phRepeatMaxItems, phRepeatBaseVariable, phRepeatLayoutTemplate, phCustomTemplate, phCustomRepeat, phCustomItems, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds, phTableCaptionText, tableCaption]);
 
   const insertImageComponent = useCallback(() => {
     try {
@@ -1032,8 +1195,8 @@ export default function TemplateEditor({
         });
 
         const node = createTableComponent(
-          { rows, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) },
-          { headers }
+          { rows },
+          { headers, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) }
         );
         editor?.chain().focus().insertContent(node as any).run();
       } else {
@@ -1057,8 +1220,8 @@ export default function TemplateEditor({
         );
 
         const node = createTableComponent(
-          { columns, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) },
-          { headers: rowHeaders }
+          { columns },
+          { headers: rowHeaders, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) }
         );
         editor?.chain().focus().insertContent(node as any).run();
       }
@@ -1072,6 +1235,16 @@ export default function TemplateEditor({
 
   const insertPageBreak = useCallback(() => {
     editor?.chain().focus().insertContent({ type: 'pageBreakComponent' }).run();
+  }, [editor]);
+
+  const insertHeaderComponent = useCallback(() => {
+    const node = createHeaderComponent({ components: [] });
+    editor?.chain().focus().insertContent(node as any).run();
+  }, [editor]);
+
+  const insertFooterComponent = useCallback(() => {
+    const node = createFooterComponent({ components: [] });
+    editor?.chain().focus().insertContent(node as any).run();
   }, [editor]);
 
   return (
@@ -1179,6 +1352,12 @@ export default function TemplateEditor({
         </button>
         <button type="button" className="pg-tb-btn" onMouseDown={cmd(insertPageBreak)} title="Insert page break">
           <SeparatorHorizontal size={16} />
+        </button>
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(insertHeaderComponent)} title="Insert header component">
+          H
+        </button>
+        <button type="button" className="pg-tb-btn" onMouseDown={cmd(insertFooterComponent)} title="Insert footer component">
+          F
         </button>
 
         <span className="pg-tb-sep" aria-hidden="true" />
@@ -1365,7 +1544,7 @@ export default function TemplateEditor({
                       {phCustomItems.length === 0 ? (
                         <div className="pg-layout-preview">
                           <p className="pg-layout-preview-label">Token library is empty</p>
-                          <pre>Create tokens, then reference them in the placeholder template with {`{{tokenId}}`}.</pre>
+                          <pre>Create tokens, then reference them in the placeholder template with {`{{token.tokenId}}`}.</pre>
                         </div>
                       ) : (
                         <div className="pg-custom-workspace">
@@ -1426,6 +1605,7 @@ export default function TemplateEditor({
                                   />
                                   <span className="pg-layout-segment pg-layout-segment-token">{token.kind}</span>
                                 </div>
+                                <p className="pg-layout-preview-label">{describeTokenLibraryItem(token)}</p>
 
                                 {token.kind === 'list' && (
                                   <>
@@ -1479,8 +1659,223 @@ export default function TemplateEditor({
                                         style={{ width: 'auto', marginLeft: 8 }}
                                       />
                                     </div>
+                                    <div className="pg-layout-composer-actions">
+                                      <label className="pg-label">Caption</label>
+                                      <input
+                                        className="pg-input"
+                                        value={token.tableCaption || ''}
+                                        onChange={(e) => updateCustomItem(token.id, { tableCaption: e.target.value })}
+                                        placeholder="Quarterly summary"
+                                      />
+                                    </div>
+
+                                    <div className="pg-layout-composer-actions">
+                                      <label className="pg-label">Headers</label>
+                                    </div>
+                                    <div className="pg-layout-composer">
+                                      <div className="pg-layout-composer-actions">
+                                        <input
+                                          className="pg-input"
+                                          value={token.tableHeaderDraft || ''}
+                                          onChange={(e) => updateCustomItem(token.id, { tableHeaderDraft: e.target.value })}
+                                          placeholder="header_name"
+                                        />
+                                        <button
+                                          type="button"
+                                          className="pg-layout-pattern"
+                                          onClick={() => {
+                                            const nextHeader = normalizeIdentifierDraft(token.tableHeaderDraft || '');
+                                            if (!nextHeader || !KEY_RE.test(nextHeader)) {
+                                              setInsertError('Table header name is invalid. Use letters/digits/underscore and start with letter or _.');
+                                              return;
+                                            }
+
+                                            const uniqueHeaders = unique([...(token.tableHeaders || []), nextHeader]);
+                                            const dynamicSet = new Set(Array.isArray(token.dynamicFields) ? token.dynamicFields : uniqueHeaders);
+                                            const nextDynamic = uniqueHeaders.filter((header) => dynamicSet.has(header));
+                                            const nextStaticValues = token.staticValues && typeof token.staticValues === 'object' && !Array.isArray(token.staticValues)
+                                              ? { ...token.staticValues }
+                                              : {};
+                                            Object.keys(nextStaticValues).forEach((key) => {
+                                              if (!uniqueHeaders.includes(key)) delete nextStaticValues[key];
+                                            });
+
+                                            updateCustomItem(token.id, {
+                                              tableHeaders: uniqueHeaders,
+                                              dynamicFields: nextDynamic,
+                                              staticValues: nextStaticValues,
+                                              tableHeaderDraft: '',
+                                            });
+                                          }}
+                                        >
+                                          + Header
+                                        </button>
+                                      </div>
+                                      <div className="pg-layout-token-list">
+                                        {(token.tableHeaders || []).map((header) => (
+                                          <span key={header} className="pg-layout-segment pg-layout-segment-token">
+                                            {header}
+                                            <button
+                                              type="button"
+                                              className="pg-layout-segment-btn"
+                                              style={{ marginLeft: 6 }}
+                                              onClick={() => {
+                                                const nextHeaders = (token.tableHeaders || []).filter((item) => item !== header);
+                                                const nextDynamic = Array.isArray(token.dynamicFields)
+                                                  ? token.dynamicFields.filter((item) => item !== header)
+                                                  : [];
+                                                const nextStaticValues = token.staticValues && typeof token.staticValues === 'object' && !Array.isArray(token.staticValues)
+                                                  ? { ...token.staticValues }
+                                                  : {};
+                                                delete nextStaticValues[header];
+                                                updateCustomItem(token.id, {
+                                                  tableHeaders: nextHeaders.length > 0 ? nextHeaders : ['Column_1', 'Column_2'],
+                                                  dynamicFields: nextDynamic.length > 0 ? nextDynamic : ['Column_1', 'Column_2'],
+                                                  staticValues: nextStaticValues,
+                                                });
+                                              }}
+                                              aria-label={`Remove ${header}`}
+                                            >
+                                              ×
+                                            </button>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {(token.tableHeaders || []).map((header) => {
+                                      const dynamicSet = new Set(Array.isArray(token.dynamicFields) && token.dynamicFields.length > 0
+                                        ? token.dynamicFields
+                                        : (token.tableHeaders || []));
+                                      const isDynamic = dynamicSet.has(header);
+                                      const staticValues = token.staticValues && typeof token.staticValues === 'object' && !Array.isArray(token.staticValues)
+                                        ? token.staticValues
+                                        : {};
+                                      return (
+                                        <div className="pg-layout-composer-actions" key={`${token.id}-field-${header}`}>
+                                          <label className="pg-label">{header}</label>
+                                          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <input
+                                              type="checkbox"
+                                              checked={isDynamic}
+                                              onChange={(e) => {
+                                                const next = new Set(dynamicSet);
+                                                if (e.target.checked) {
+                                                  next.add(header);
+                                                } else {
+                                                  next.delete(header);
+                                                }
+                                                updateCustomItem(token.id, { dynamicFields: Array.from(next) });
+                                              }}
+                                            />
+                                            Dynamic
+                                          </label>
+                                          {!isDynamic ? (
+                                            <input
+                                              className="pg-input"
+                                              value={typeof staticValues[header] === 'string' || typeof staticValues[header] === 'number' ? String(staticValues[header]) : ''}
+                                              onChange={(e) => {
+                                                const nextStatic = { ...(staticValues as Record<string, unknown>), [header]: e.target.value };
+                                                updateCustomItem(token.id, { staticValues: nextStatic });
+                                              }}
+                                              placeholder="Static value"
+                                            />
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
                                   </>
                                 )}
+
+                                {token.kind === 'hyperlink' && (() => {
+                                  const dynamicSet = new Set(Array.isArray(token.dynamicFields) && token.dynamicFields.length > 0
+                                    ? token.dynamicFields
+                                    : ['alias', 'url']);
+                                  const staticValues = token.staticValues && typeof token.staticValues === 'object' && !Array.isArray(token.staticValues)
+                                    ? token.staticValues
+                                    : {};
+                                  return (
+                                    <>
+                                      {['alias', 'url'].map((field) => {
+                                        const isDynamic = dynamicSet.has(field);
+                                        return (
+                                          <div className="pg-layout-composer-actions" key={`${token.id}-${field}`}>
+                                            <label className="pg-label">{field}</label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                              <input
+                                                type="checkbox"
+                                                checked={isDynamic}
+                                                onChange={(e) => {
+                                                  const next = new Set(dynamicSet);
+                                                  if (e.target.checked) next.add(field);
+                                                  else next.delete(field);
+                                                  updateCustomItem(token.id, { dynamicFields: Array.from(next) });
+                                                }}
+                                              />
+                                              Dynamic
+                                            </label>
+                                            {!isDynamic ? (
+                                              <input
+                                                className="pg-input"
+                                                value={typeof staticValues[field] === 'string' ? String(staticValues[field]) : ''}
+                                                onChange={(e) => {
+                                                  const nextStatic = { ...(staticValues as Record<string, unknown>), [field]: e.target.value };
+                                                  updateCustomItem(token.id, { staticValues: nextStatic });
+                                                }}
+                                                placeholder={`Static ${field}`}
+                                              />
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })}
+                                    </>
+                                  );
+                                })()}
+
+                                {token.kind === 'image' && (() => {
+                                  const dynamicSet = new Set(Array.isArray(token.dynamicFields) && token.dynamicFields.length > 0
+                                    ? token.dynamicFields
+                                    : ['src', 'alt']);
+                                  const staticValues = token.staticValues && typeof token.staticValues === 'object' && !Array.isArray(token.staticValues)
+                                    ? token.staticValues
+                                    : {};
+                                  return (
+                                    <>
+                                      {['src', 'alt'].map((field) => {
+                                        const isDynamic = dynamicSet.has(field);
+                                        return (
+                                          <div className="pg-layout-composer-actions" key={`${token.id}-${field}`}>
+                                            <label className="pg-label">{field}</label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                              <input
+                                                type="checkbox"
+                                                checked={isDynamic}
+                                                onChange={(e) => {
+                                                  const next = new Set(dynamicSet);
+                                                  if (e.target.checked) next.add(field);
+                                                  else next.delete(field);
+                                                  updateCustomItem(token.id, { dynamicFields: Array.from(next) });
+                                                }}
+                                              />
+                                              Dynamic
+                                            </label>
+                                            {!isDynamic ? (
+                                              <input
+                                                className="pg-input"
+                                                value={typeof staticValues[field] === 'string' ? String(staticValues[field]) : ''}
+                                                onChange={(e) => {
+                                                  const nextStatic = { ...(staticValues as Record<string, unknown>), [field]: e.target.value };
+                                                  updateCustomItem(token.id, { staticValues: nextStatic });
+                                                }}
+                                                placeholder={`Static ${field}`}
+                                              />
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })}
+                                    </>
+                                  );
+                                })()}
 
                                 <div className="pg-layout-template-output">
                                   <p className="pg-layout-preview-label">Token properties</p>
@@ -1495,15 +1890,43 @@ export default function TemplateEditor({
                   </div>
                   <div className="pg-insert-row">
                     <label className="pg-label">Custom Placeholder Template</label>
-                    <textarea
-                      ref={customPlaceholderTemplateRef}
-                      className="pg-input"
-                      aria-label="Custom placeholder template"
-                      rows={5}
-                      value={phCustomTemplate}
-                      onChange={(e) => setPhCustomTemplate(e.target.value)}
-                      placeholder="{{token1}}\n{{token2}}"
-                    />
+                    <div className="pg-custom-template-editor" aria-label="Custom placeholder editor">
+                      <div className="pg-custom-template-toolbar" role="toolbar" aria-label="Custom placeholder template toolbar">
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive('bold') ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().toggleBold().run())} title="Bold">
+                          <Bold size={14} />
+                        </button>
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive('italic') ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().toggleItalic().run())} title="Italic">
+                          <Italic size={14} />
+                        </button>
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive('highlight') ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().toggleHighlight().run())} title="Highlight">
+                          <Highlighter size={14} />
+                        </button>
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive('bulletList') ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().toggleBulletList().run())} title="Bullet list">
+                          <List size={14} />
+                        </button>
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive('orderedList') ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().toggleOrderedList().run())} title="Ordered list">
+                          <ListOrdered size={14} />
+                        </button>
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive({ textAlign: 'left' }) ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().setTextAlign('left').run())} title="Align left">
+                          <AlignLeft size={14} />
+                        </button>
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive({ textAlign: 'center' }) ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().setTextAlign('center').run())} title="Align center">
+                          <AlignCenter size={14} />
+                        </button>
+                        <button type="button" className={`pg-tb-btn${customTemplateEditor?.isActive({ textAlign: 'right' }) ? ' pg-tb-active' : ''}`} onMouseDown={cmd(() => customTemplateEditor?.chain().focus().setTextAlign('right').run())} title="Align right">
+                          <AlignRight size={14} />
+                        </button>
+                        <button type="button" className="pg-tb-btn" onMouseDown={cmd(() => customTemplateEditor?.chain().focus().undo().run())} title="Undo" disabled={!customTemplateEditor?.can().undo()}>
+                          <Undo size={14} />
+                        </button>
+                        <button type="button" className="pg-tb-btn" onMouseDown={cmd(() => customTemplateEditor?.chain().focus().redo().run())} title="Redo" disabled={!customTemplateEditor?.can().redo()}>
+                          <Redo size={14} />
+                        </button>
+                      </div>
+                      <div className="pg-custom-template-canvas">
+                        <EditorContent editor={customTemplateEditor} />
+                      </div>
+                    </div>
                   </div>
                   <div className="pg-layout-token-assist" role="group" aria-label="Token references">
                     <p className="pg-layout-token-assist-label">Insert token reference (or drag-drop from library)</p>
@@ -1515,7 +1938,7 @@ export default function TemplateEditor({
                           className="pg-layout-token"
                           onClick={() => insertCustomPlaceholderTokenSet(token.id)}
                         >
-                          {`{{${token.id}}}`}
+                          {`{{token.${token.id}}}`}
                         </button>
                       ))}
                     </div>
@@ -1573,6 +1996,16 @@ export default function TemplateEditor({
                         ))}
                       </div>
                     </div>
+                  </div>
+
+                  <div className="pg-insert-row">
+                    <label className="pg-label">Caption</label>
+                    <input
+                      className="pg-input"
+                      value={phTableCaptionText}
+                      onChange={(e) => setPhTableCaptionText(e.target.value)}
+                      placeholder="Quarterly summary"
+                    />
                   </div>
 
                   {phTableHeaders.length > 0 && (

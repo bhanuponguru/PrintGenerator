@@ -194,12 +194,13 @@ describe('TipTap component validators (destructive)', () => {
   it('creates a table component node from row data schema', () => {
     const node = createTableComponent({
       rows: [{ Item: 'Pen', Qty: 2 }],
-      caption: 'Inventory',
     }, {
       headers: ['Item', 'Qty'],
+      caption: 'Inventory',
     });
 
     expect(node.type).toBe('tableComponent');
     expect(node.attrs.headers).toEqual(['Item', 'Qty']);
+    expect(node.attrs.caption).toBe('Inventory');
   });
 });

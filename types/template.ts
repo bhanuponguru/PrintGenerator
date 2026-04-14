@@ -94,6 +94,9 @@ export interface TokenLibraryItemSchema extends BaseTypeSchema {
   dynamic_headers?: boolean; // for table tokens
   column_types?: Record<string, ComponentTypeSchema>; // for table tokens
   row_types?: Record<string, ComponentTypeSchema>; // for table tokens
+  caption?: string; // static caption for table tokens
+  dynamic_fields?: string[]; // dynamic attributes for image/hyperlink/table tokens
+  static_values?: Record<string, unknown>; // fixed values for non-dynamic attributes
 }
 
 /** @deprecated Use TokenLibraryItemSchema instead */
@@ -140,7 +143,7 @@ export interface TableTypeSchema extends BaseTypeSchema {
   dynamic_headers?: boolean;
   column_types?: Record<string, ComponentTypeSchema>;
   row_types?: Record<string, ComponentTypeSchema>;
-  caption?: ComponentTypeSchema;
+  caption?: string; // static caption defined at template creation time
 }
 
 /** Union of every placeholder schema supported by the editor and backend. */

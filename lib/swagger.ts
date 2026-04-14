@@ -142,7 +142,8 @@ export const getApiDocs = () => {
                 items: { type: 'string' },
               },
               caption: {
-                $ref: '#/components/schemas/ComponentTypeSchema',
+                type: 'string',
+                description: 'Static table caption set at template creation time',
               },
               component_types: {
                 type: 'array',

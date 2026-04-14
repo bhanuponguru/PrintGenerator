@@ -140,12 +140,62 @@ describe('GenerateModal premium visual/json workflow', () => {
     expect(screen.getAllByText('Name').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Age').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Photo').length).toBeGreaterThan(0);
+    expect(screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Image · src, alt'))).length).toBeGreaterThan(0);
     expect(
       screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Enter plain text.'))).length
     ).toBeGreaterThan(0);
     expect(
       screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Enter a numeric value.'))).length
     ).toBeGreaterThan(0);
+  });
+
+  it('shows a readable summary for table token-library items', () => {
+    const template = {
+      ...buildTemplate(),
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'grades',
+                  kind: 'custom',
+                  schema: {
+                    kind: 'custom',
+                    base_variable: 'token',
+                    value_type: { kind: 'string' },
+                    layout_template: '{{token.rows}}',
+                    token_library: [
+                      {
+                        id: 'rows',
+                        label: 'Rows',
+                        kind: 'table',
+                        mode: 'row_data',
+                        headers: ['course', 'grade'],
+                        caption: 'Semester 1 Courses',
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    render(
+      <GenerateModal
+        template={template as any}
+        onClose={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByText((_, el) => Boolean(el?.textContent?.includes('Table · row_data · course, grade · caption: Semester 1 Courses'))).length).toBeGreaterThan(0);
   });
 
   it('syncs visual token fields into JSON workspace', async () => {
@@ -236,6 +286,7 @@ describe('GenerateModal premium visual/json workflow', () => {
                     kind: 'table',
                     mode: 'row_data',
                     headers: ['Subject', 'Score'],
+                    caption: 'Semester 1',
                   },
                 },
               },
@@ -271,11 +322,13 @@ describe('GenerateModal premium visual/json workflow', () => {
     await user.clear(rowOneCells[1] as HTMLInputElement);
     await user.type(rowOneCells[1] as HTMLInputElement, '95');
 
+    expect(marksScope.getByText('Semester 1')).toBeTruthy();
+
     await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
     const jsonPreview = screen.getByLabelText('JSON Preview');
-    expect(jsonPreview.textContent).toContain('Mathematics');
     expect(jsonPreview.textContent).toContain('Physics');
     expect(jsonPreview.textContent).toContain('95');
+    expect(jsonPreview.textContent).not.toContain('Semester 1');
   });
 
   it('edits repeat placeholders visually and syncs JSON', async () => {
@@ -332,5 +385,135 @@ describe('GenerateModal premium visual/json workflow', () => {
     expect(jsonArea.textContent).toContain('line_items');
     expect(jsonArea.textContent).toContain('Pen');
     expect(jsonArea.textContent).toContain('Paper');
+  });
+
+  it('respects dynamic/static hyperlink token attributes in custom placeholders', async () => {
+    const user = userEvent.setup();
+
+    const template = {
+      ...buildTemplate(),
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'profile_link',
+                  kind: 'custom',
+                  schema: {
+                    kind: 'custom',
+                    base_variable: 'token',
+                    value_type: { kind: 'string' },
+                    layout_template: '{{token.link}}',
+                    token_library: [
+                      {
+                        id: 'link',
+                        label: 'Profile Link',
+                        kind: 'hyperlink',
+                        dynamic_fields: ['url'],
+                        static_values: { alias: 'Profile' },
+                      },
+                          {
+                            id: 'table_rows',
+                            label: 'Table Rows',
+                            kind: 'table',
+                            mode: 'row_data',
+                            headers: ['Item', 'Qty'],
+                            caption: 'Inventory',
+                          },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    render(
+      <GenerateModal
+        template={template as any}
+        onClose={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+
+    const profileRow = screen.getAllByText('profile_link')[0].closest('.pg-insert-row') as HTMLElement;
+    const profileScope = within(profileRow);
+    expect(profileScope.getByDisplayValue('Profile')).toBeTruthy();
+    const urlInput = profileScope.getByPlaceholderText('URL') as HTMLInputElement;
+    await user.clear(urlInput);
+    await user.type(urlInput, 'https://example.com/me');
+
+    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
+    const jsonPreview = screen.getByLabelText('JSON Preview');
+    expect(jsonPreview.textContent).toContain('Profile');
+    expect(jsonPreview.textContent).toContain('https://example.com/me');
+  });
+
+  it('respects dynamic/static table token columns in custom placeholders', async () => {
+    const user = userEvent.setup();
+
+    const template = {
+      ...buildTemplate(),
+      template: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'placeholder',
+                attrs: {
+                  key: 'line_table',
+                  kind: 'custom',
+                  schema: {
+                    kind: 'custom',
+                    base_variable: 'token',
+                    value_type: { kind: 'string' },
+                    layout_template: '{{token.rows}}',
+                    token_library: [
+                      {
+                        id: 'rows',
+                        label: 'Rows',
+                        kind: 'table',
+                        mode: 'row_data',
+                        headers: ['Item', 'Qty'],
+                        dynamic_fields: ['Qty'],
+                        static_values: { Item: 'Pen' },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    render(
+      <GenerateModal
+        template={template as any}
+        onClose={vi.fn()}
+        onError={vi.fn()}
+      />
+    );
+
+    const tableRow = screen.getAllByText('line_table')[0].closest('.pg-insert-row') as HTMLElement;
+    const tableScope = within(tableRow);
+    const qtyInput = tableScope.getAllByRole('textbox').find((input) => !(input as HTMLInputElement).readOnly) as HTMLInputElement;
+    expect(qtyInput).toBeTruthy();
+    await user.clear(qtyInput);
+    await user.type(qtyInput, '5');
+
+    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
+    const jsonPreview = screen.getByLabelText('JSON Preview');
+    expect(jsonPreview.textContent).toContain('Pen');
+    expect(jsonPreview.textContent).toContain('5');
   });
 });

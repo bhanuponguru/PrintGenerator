@@ -8,7 +8,7 @@ export interface TableComponentNode {
   attrs: {
     value: TableRowDataValue | TableColumnDataValue;
     headers: string[];
-    caption?: unknown;
+    caption?: string;
     [key: string]: unknown;
   };
 }
@@ -37,8 +37,8 @@ export function validateTableAttrs(attrs: Record<string, unknown>): string | nul
     return 'tableComponent.attrs.headers must be an array of non-empty strings';
   }
 
-  if ('caption' in attrs && attrs.caption !== undefined && attrs.caption !== null && !isRecord(attrs.caption) && typeof attrs.caption !== 'string') {
-    return 'tableComponent.attrs.caption must be a component object or string when provided';
+  if ('caption' in attrs && attrs.caption !== undefined && typeof attrs.caption !== 'string') {
+    return 'tableComponent.attrs.caption must be a string when provided';
   }
 
   if (hasRows) {
@@ -68,9 +68,16 @@ export function createTableComponent(
   data: TableRowDataValue | TableColumnDataValue,
   attrs: Record<string, unknown> = {}
 ): TableComponentNode {
+  const resolvedCaption = typeof attrs.caption === 'string' && attrs.caption.trim() !== ''
+    ? attrs.caption.trim()
+    : typeof (data as Record<string, unknown>).caption === 'string' && (data as Record<string, unknown>).caption.trim() !== ''
+      ? String((data as Record<string, unknown>).caption).trim()
+      : undefined;
+
   const mergedAttrs = {
     ...attrs,
     headers: Array.isArray(attrs.headers) ? attrs.headers : [],
+    ...(resolvedCaption !== undefined ? { caption: resolvedCaption } : {}),
     value: data,
   };
 
@@ -112,10 +119,10 @@ export const TableComponent = Node.create({
 
     const headers = attrs.headers as string[];
     const value = attrs.value as Record<string, unknown>;
-    const caption = value.caption;
+    const caption = typeof attrs.caption === 'string' ? attrs.caption : (typeof value.caption === 'string' ? value.caption : undefined);
 
     const captionNode = caption
-      ? ['caption', {}, typeof caption === 'string' ? caption : JSON.stringify(caption)]
+      ? ['caption', {}, caption]
       : null;
 
     if (Array.isArray(value.rows)) {
