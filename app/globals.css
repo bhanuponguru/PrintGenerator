@@ -929,7 +929,7 @@ select.pg-input option {
 }
 
 .pg-prosemirror {
-  background: #ffffff;
+  background: var(--pg-paper-bg, #ffffff);
   color: #000000;
   width: 210mm;
   min-height: 297mm;
@@ -937,6 +937,7 @@ select.pg-input option {
   /* 1 inch approx margins */
   margin: 0 auto;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 24px 38px 3px rgba(0, 0, 0, 0.14);
+  transition: background-color 0.2s ease;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 14px;
   line-height: 1.5;
@@ -1754,4 +1755,273 @@ select.pg-input option {
     border-right: none;
     border-bottom: 1px solid var(--pg-border);
   }
+}
+
+/* ─── Color Picker Host (toolbar button wrapper) ──────────── */
+.pg-color-picker-host {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ─── Colored bar below toolbar icon (current color indicator) */
+.pg-tb-color-bar {
+  display: block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease;
+}
+
+/* Stacked icon + bar layout for color buttons */
+.pg-tb-color-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 5px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--pg-text-muted);
+  cursor: pointer;
+  transition: all var(--pg-ease);
+  user-select: none;
+  line-height: 1;
+}
+
+.pg-tb-color-btn:hover {
+  color: var(--pg-text);
+  background: var(--pg-surface);
+  border-color: var(--pg-border);
+}
+
+.pg-tb-color-btn.pg-tb-active {
+  color: var(--pg-accent) !important;
+  background: var(--pg-accent-dim) !important;
+  border-color: rgba(232, 184, 75, 0.25) !important;
+}
+
+/* ─── Color Popover Panel ─────────────────────────────────── */
+.pg-color-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 400;
+  background: #1e1b14;
+  border: 1px solid var(--pg-border);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  width: 224px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
+  animation: pgSlideUp 0.15s ease;
+}
+
+/* Ensure popover doesn't clip on the left side of the toolbar */
+.pg-color-popover-right {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.pg-color-auto-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  margin-bottom: 8px;
+  background: transparent;
+  border: 1px solid var(--pg-border);
+  border-radius: 5px;
+  color: var(--pg-text);
+  font-family: var(--pg-font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--pg-ease), border-color var(--pg-ease);
+  white-space: nowrap;
+}
+
+.pg-color-auto-btn:hover {
+  background: var(--pg-surface-raise);
+  border-color: var(--pg-text-muted);
+}
+
+.pg-color-auto-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--pg-border);
+  background: linear-gradient(135deg, #fff 50%, #000 50%);
+  flex-shrink: 0;
+}
+
+/* ─── Color Section Heading ───────────────────────────────── */
+.pg-color-section-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--pg-text-muted);
+  margin: 0 0 5px;
+}
+
+/* ─── Color Swatch Grid ───────────────────────────────────── */
+.pg-color-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.pg-color-grid--standard {
+  margin-bottom: 0;
+}
+
+.pg-color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  outline: none;
+}
+
+.pg-color-swatch:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+  z-index: 1;
+  position: relative;
+}
+
+.pg-color-swatch.pg-swatch-active {
+  box-shadow: 0 0 0 2px var(--pg-accent);
+  transform: scale(1.1);
+}
+
+/* Shade row swatches (slightly smaller height) */
+.pg-color-grid--theme .pg-color-swatch {
+  height: 14px;
+}
+
+/* Base row is taller to distinguish */
+.pg-color-grid--theme .pg-color-swatch:nth-child(-n+10) {
+  height: 18px;
+  border-radius: 2px 2px 0 0;
+}
+
+/* ─── Style Panel for Component-Specific Styles ───────────── */
+.pg-style-panel {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--pg-border);
+  background: #1c1912;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  animation: pgSlideUp 0.15s ease;
+}
+
+.pg-style-panel-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--pg-text-muted);
+  white-space: nowrap;
+}
+
+.pg-style-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pg-style-section + .pg-style-section {
+  border-left: 1px solid var(--pg-border);
+  padding-left: 10px;
+}
+
+/* Compact color swatch row for style panel */
+.pg-style-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.pg-style-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  outline: none;
+}
+
+.pg-style-swatch:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.pg-style-swatch.pg-swatch-active {
+  box-shadow: 0 0 0 2px var(--pg-accent);
+}
+
+/* Style panel toggle button */
+.pg-tb-style-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--pg-text-muted);
+  font-family: var(--pg-font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--pg-ease);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.pg-tb-style-btn:hover {
+  color: var(--pg-text);
+  background: var(--pg-surface);
+  border-color: var(--pg-border);
+}
+
+.pg-tb-style-btn.pg-tb-active {
+  color: var(--pg-accent) !important;
+  background: var(--pg-accent-dim) !important;
+  border-color: rgba(232, 184, 75, 0.25) !important;
+}
+
+/* Container bg color preview chip */
+.pg-container-bg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--pg-border);
+  font-size: 10px;
+  color: var(--pg-text-muted);
+}
+
+.pg-container-bg-preview {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.15);
 }

@@ -4,6 +4,8 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
+import { Color } from '@tiptap/extension-color';
+import { TextStyle } from '@tiptap/extension-text-style';
 import { generateHTML } from '@tiptap/html';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -13,6 +15,7 @@ import {
   AlignRight,
   Bold,
   Braces,
+  ChevronDown,
   FileImage,
   Heading1,
   Heading2,
@@ -23,6 +26,7 @@ import {
   List,
   ListOrdered,
   Minus,
+  Paintbrush,
   Redo,
   SeparatorHorizontal,
   Strikethrough,
@@ -492,6 +496,14 @@ export default function TemplateEditor({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [selectedBlockStyle, setSelectedBlockStyle] = useState<'paragraph' | 'h1' | 'h2' | 'h3'>('paragraph');
 
+  // ── Color picker state ──────────────────────────────────────
+  const [colorPickerOpen, setColorPickerOpen] = useState<'text' | 'highlight' | 'bg' | null>(null);
+  const [activeTextColor, setActiveTextColor] = useState('#000000');
+  const [activeHighlightColor, setActiveHighlightColor] = useState('#ffff00');
+  const [containerBgColor, setContainerBgColor] = useState('');
+  const [isStylePanelOpen, setIsStylePanelOpen] = useState(false);
+  const colorPickerHostRef = useRef<HTMLDivElement>(null);
+
   const [phKey, setPhKey] = useState('');
   const [phKind, setPhKind] = useState<PlaceholderKind>('string');
   const [phListStyle, setPhListStyle] = useState<ListStyle>('bulleted');
@@ -544,7 +556,9 @@ export default function TemplateEditor({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false }),
-      Highlight,
+      Highlight.configure({ multicolor: true }),
+      TextStyle,
+      Color,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Placeholder,
       ...ComponentExtensions,
@@ -638,6 +652,66 @@ export default function TemplateEditor({
 
   const active = (name: string, opts?: object) => (editor?.isActive(name, opts) ? ' pg-tb-active' : '');
   const activeAlign = (align: 'left' | 'center' | 'right' | 'justify') => (editor?.isActive({ textAlign: align }) ? ' pg-tb-active' : '');
+
+  // Close color pickers when clicking outside
+  useEffect(() => {
+    if (!colorPickerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (colorPickerHostRef.current && !colorPickerHostRef.current.contains(e.target as Node)) {
+        setColorPickerOpen(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [colorPickerOpen]);
+
+  // ── Color palette definition ────────────────────────────────
+  // Theme colors: 10 columns (base tones) × 6 rows (base + 5 tints/shades)
+  const THEME_COLORS: string[][] = [
+    // Row 0: base
+    ['#FFFFFF', '#000000', '#EEECE1', '#1F497D', '#4F81BD', '#C0504D', '#9BBB59', '#8064A2', '#4BACC6', '#F79646'],
+    // Row 1: 80% tint
+    ['#F2F2F2', '#808080', '#DDD9C3', '#C6D9F0', '#DBE5F1', '#F2DCDB', '#EBF1DD', '#E5E0EC', '#DBEEF3', '#FDEADA'],
+    // Row 2: 60% tint
+    ['#D8D8D8', '#595959', '#C4BD97', '#8DB3E2', '#B8CCE4', '#E6B9B8', '#D7E4BC', '#CCC1D9', '#B7DDE8', '#FBD5B5'],
+    // Row 3: 40% tint / base
+    ['#BFBFBF', '#404040', '#938953', '#548DD4', '#95B3D7', '#DA9694', '#C3D69B', '#B2A2C7', '#92CDDC', '#FAC08F'],
+    // Row 4: 25% shade
+    ['#A5A5A5', '#262626', '#494429', '#17375E', '#366092', '#953734', '#76923C', '#5F497A', '#31849B', '#E36C09'],
+    // Row 5: 50% shade
+    ['#7F7F7F', '#0C0C0C', '#1D1B10', '#0F243E', '#243F60', '#632423', '#4F6228', '#3f3151', '#215868', '#974806'],
+  ];
+
+  const STANDARD_COLORS: string[] = [
+    '#C00000', '#FF0000', '#FFC000', '#FFFF00', '#92D050',
+    '#00B050', '#00B0F0', '#0070C0', '#002060', '#7030A0',
+  ];
+
+  // Quick palette for style panel (compact)
+  const QUICK_COLORS: string[] = [
+    'transparent', '#FFFFFF', '#F2F2F2', '#FFFBE6', '#FFF3CD', '#D4EDDA',
+    '#D1ECF1', '#CCE5FF', '#F8D7DA', '#E2D9F3', '#1c1a16',
+  ];
+
+  const applyTextColor = (color: string) => {
+    setActiveTextColor(color);
+    setColorPickerOpen(null);
+    if (color === 'auto') {
+      editor?.chain().focus().unsetColor().run();
+    } else {
+      editor?.chain().focus().setColor(color).run();
+    }
+  };
+
+  const applyHighlightColor = (color: string) => {
+    setActiveHighlightColor(color);
+    setColorPickerOpen(null);
+    if (color === 'auto') {
+      editor?.chain().focus().unsetHighlight().run();
+    } else {
+      editor?.chain().focus().setHighlight({ color }).run();
+    }
+  };
 
   const cmd = (fn: () => void) => (e: React.MouseEvent) => {
     e.preventDefault();
@@ -970,7 +1044,9 @@ export default function TemplateEditor({
     try {
       setPreviewHtml(generateHTML(editor.getJSON(), [
         StarterKit,
-        Highlight,
+        Highlight.configure({ multicolor: true }),
+        TextStyle,
+        Color,
         TextAlign.configure({ types: ['heading', 'paragraph'] }),
         Placeholder,
         ...ComponentExtensions,
@@ -1247,6 +1323,54 @@ export default function TemplateEditor({
     editor?.chain().focus().insertContent(node as any).run();
   }, [editor]);
 
+  // ── Color Swatch Picker sub-component ──────────────────────
+  const ColorSwatchPicker = ({
+    kind,
+    onSelect,
+    onAuto,
+    activeColor,
+  }: {
+    kind: 'text' | 'highlight' | 'bg';
+    onSelect: (color: string) => void;
+    onAuto: () => void;
+    activeColor: string;
+  }) => (
+    <div className="pg-color-popover" onMouseDown={(e) => e.stopPropagation()}>
+      <button type="button" className="pg-color-auto-btn" onClick={onAuto}>
+        <span className="pg-color-auto-swatch" />
+        Automatic
+      </button>
+
+      <p className="pg-color-section-label">Theme Colors</p>
+      <div className="pg-color-grid pg-color-grid--theme">
+        {THEME_COLORS.flat().map((color, idx) => (
+          <button
+            key={`${kind}-theme-${idx}`}
+            type="button"
+            className={`pg-color-swatch${activeColor === color ? ' pg-swatch-active' : ''}`}
+            style={{ background: color }}
+            title={color}
+            onClick={() => onSelect(color)}
+          />
+        ))}
+      </div>
+
+      <p className="pg-color-section-label" style={{ marginTop: 6 }}>Standard Colors</p>
+      <div className="pg-color-grid pg-color-grid--standard">
+        {STANDARD_COLORS.map((color, idx) => (
+          <button
+            key={`${kind}-std-${idx}`}
+            type="button"
+            className={`pg-color-swatch${activeColor === color ? ' pg-swatch-active' : ''}`}
+            style={{ background: color }}
+            title={color}
+            onClick={() => onSelect(color)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className={`pg-tiptap-wrapper${hasError ? ' pg-tiptap-error' : ''}`}>
       <div className="pg-tiptap-toolbar" role="toolbar" aria-label="Editor toolbar">
@@ -1285,9 +1409,125 @@ export default function TemplateEditor({
         <button type="button" className={`pg-tb-btn${active('strike')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleStrike().run())} title="Strikethrough">
           <Strikethrough size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${active('highlight')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleHighlight().run())} title="Highlight">
-          <Highlighter size={16} />
-        </button>
+
+        <span className="pg-tb-sep" aria-hidden="true" />
+
+        {/* ── Text Color Button ── */}
+        <div className="pg-color-picker-host" ref={colorPickerHostRef}>
+          <button
+            type="button"
+            className={`pg-tb-color-btn${colorPickerOpen === 'text' ? ' pg-tb-active' : ''}`}
+            title="Text color"
+            onClick={() => setColorPickerOpen(colorPickerOpen === 'text' ? null : 'text')}
+            aria-label="Text color"
+            id="tb-text-color-btn"
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <span style={{ fontWeight: 700, fontSize: 14, lineHeight: 1, fontFamily: 'serif' }}>A</span>
+              <ChevronDown size={10} />
+            </span>
+            <span className="pg-tb-color-bar" style={{ background: activeTextColor === 'auto' ? '#000' : activeTextColor }} />
+          </button>
+          {colorPickerOpen === 'text' && (
+            <ColorSwatchPicker
+              kind="text"
+              activeColor={activeTextColor}
+              onSelect={applyTextColor}
+              onAuto={() => applyTextColor('auto')}
+            />
+          )}
+        </div>
+
+        {/* ── Highlight / Text Background Color Button ── */}
+        <div className="pg-color-picker-host" ref={colorPickerOpen === 'highlight' ? colorPickerHostRef : undefined}>
+          <button
+            type="button"
+            className={`pg-tb-color-btn${colorPickerOpen === 'highlight' ? ' pg-tb-active' : ''}`}
+            title="Text highlight color"
+            onClick={() => setColorPickerOpen(colorPickerOpen === 'highlight' ? null : 'highlight')}
+            aria-label="Highlight color"
+            id="tb-highlight-color-btn"
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Highlighter size={13} />
+              <ChevronDown size={10} />
+            </span>
+            <span className="pg-tb-color-bar" style={{ background: activeHighlightColor === 'auto' ? 'transparent' : activeHighlightColor, border: activeHighlightColor === 'auto' ? '1px dashed #666' : 'none' }} />
+          </button>
+          {colorPickerOpen === 'highlight' && (
+            <ColorSwatchPicker
+              kind="highlight"
+              activeColor={activeHighlightColor}
+              onSelect={applyHighlightColor}
+              onAuto={() => applyHighlightColor('auto')}
+            />
+          )}
+        </div>
+
+        {/* ── Container / Paragraph Background Color Button ── */}
+        <div className="pg-color-picker-host" ref={colorPickerOpen === 'bg' ? colorPickerHostRef : undefined}>
+          <button
+            type="button"
+            className={`pg-tb-color-btn${colorPickerOpen === 'bg' ? ' pg-tb-active' : ''}`}
+            title="Background color"
+            onClick={() => setColorPickerOpen(colorPickerOpen === 'bg' ? null : 'bg')}
+            aria-label="Background color"
+            id="tb-bg-color-btn"
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Paintbrush size={13} />
+              <ChevronDown size={10} />
+            </span>
+            <span className="pg-tb-color-bar" style={{ background: containerBgColor || '#1c1a16', border: !containerBgColor ? '1px dashed #666' : 'none' }} />
+          </button>
+          {colorPickerOpen === 'bg' && (
+            <div className="pg-color-popover" onMouseDown={(e) => e.stopPropagation()}>
+              <button type="button" className="pg-color-auto-btn" onClick={() => { setContainerBgColor(''); setColorPickerOpen(null); }}>
+                <span className="pg-color-auto-swatch" />
+                None / Transparent
+              </button>
+              <p className="pg-color-section-label">Quick Colors</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                {QUICK_COLORS.map((c, idx) => (
+                  <button
+                    key={`bg-quick-${idx}`}
+                    type="button"
+                    className={`pg-color-swatch${containerBgColor === c ? ' pg-swatch-active' : ''}`}
+                    style={{ background: c === 'transparent' ? 'transparent' : c, border: c === 'transparent' ? '1px dashed #555' : '1px solid rgba(0,0,0,0.25)', width: 22, height: 22 }}
+                    title={c}
+                    onClick={() => { setContainerBgColor(c === 'transparent' ? '' : c); setColorPickerOpen(null); }}
+                  />
+                ))}
+              </div>
+              <p className="pg-color-section-label" style={{ marginTop: 4 }}>Theme Colors</p>
+              <div className="pg-color-grid pg-color-grid--theme">
+                {THEME_COLORS.flat().map((color, idx) => (
+                  <button
+                    key={`bg-theme-${idx}`}
+                    type="button"
+                    className={`pg-color-swatch${containerBgColor === color ? ' pg-swatch-active' : ''}`}
+                    style={{ background: color }}
+                    title={color}
+                    onClick={() => { setContainerBgColor(color); setColorPickerOpen(null); }}
+                  />
+                ))}
+              </div>
+              <p className="pg-color-section-label" style={{ marginTop: 6 }}>Standard Colors</p>
+              <div className="pg-color-grid pg-color-grid--standard">
+                {STANDARD_COLORS.map((color, idx) => (
+                  <button
+                    key={`bg-std-${idx}`}
+                    type="button"
+                    className={`pg-color-swatch${containerBgColor === color ? ' pg-swatch-active' : ''}`}
+                    style={{ background: color }}
+                    title={color}
+                    onClick={() => { setContainerBgColor(color); setColorPickerOpen(null); }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
@@ -1362,10 +1602,108 @@ export default function TemplateEditor({
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
+        {/* ── Styles /  Style panel toggle ── */}
+        <button
+          type="button"
+          className={`pg-tb-style-btn${isStylePanelOpen ? ' pg-tb-active' : ''}`}
+          onClick={() => setIsStylePanelOpen((s) => !s)}
+          title="Component styles"
+          id="tb-style-panel-btn"
+        >
+          Styles ▾
+        </button>
+
+        <span className="pg-tb-sep" aria-hidden="true" />
+
         <button type="button" className="pg-tb-btn pg-tb-btn--accent" onMouseDown={cmd(openPreview)} title="Preview document">
           Preview
         </button>
       </div>
+
+      {/* ── Style Panel (component-specific settings) ── */}
+      {isStylePanelOpen && (
+        <div className="pg-style-panel" role="region" aria-label="Component styles">
+          <span className="pg-style-panel-label">Styles:</span>
+
+          {/* Text Color quick swatch */}
+          <div className="pg-style-section">
+            <span className="pg-style-panel-label">Text</span>
+            <div className="pg-style-color-row">
+              {['#000000', '#1F497D', '#C00000', '#4F6228', '#7030A0', '#0070C0', '#FFFFFF'].map((c) => (
+                <button
+                  key={`st-text-${c}`}
+                  type="button"
+                  className={`pg-style-swatch${activeTextColor === c ? ' pg-swatch-active' : ''}`}
+                  style={{ background: c, border: c === '#FFFFFF' ? '1px solid #555' : '1px solid rgba(0,0,0,0.25)' }}
+                  title={`Text color ${c}`}
+                  onClick={() => applyTextColor(c)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Highlight Color quick swatch */}
+          <div className="pg-style-section">
+            <span className="pg-style-panel-label">Highlight</span>
+            <div className="pg-style-color-row">
+              {['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF', '#FFA500', '#FF6666', '#92D050', '#00B0F0'].map((c) => (
+                <button
+                  key={`st-hl-${c}`}
+                  type="button"
+                  className={`pg-style-swatch${activeHighlightColor === c ? ' pg-swatch-active' : ''}`}
+                  style={{ background: c }}
+                  title={`Highlight ${c}`}
+                  onClick={() => applyHighlightColor(c)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Container background color */}
+          <div className="pg-style-section">
+            <span className="pg-style-panel-label">Background</span>
+            <div className="pg-style-color-row">
+              {QUICK_COLORS.map((c, idx) => (
+                <button
+                  key={`st-bg-${idx}`}
+                  type="button"
+                  className={`pg-style-swatch${containerBgColor === (c === 'transparent' ? '' : c) ? ' pg-swatch-active' : ''}`}
+                  style={{ background: c === 'transparent' ? 'transparent' : c, border: c === 'transparent' ? '1px dashed #666' : '1px solid rgba(0,0,0,0.25)' }}
+                  title={c}
+                  onClick={() => setContainerBgColor(c === 'transparent' ? '' : c)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* List style picker */}
+          <div className="pg-style-section">
+            <span className="pg-style-panel-label">List</span>
+            <button type="button" className={`pg-tb-btn${active('bulletList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleBulletList().run())} title="Bullet list">
+              <List size={14} /> Bullet
+            </button>
+            <button type="button" className={`pg-tb-btn${active('orderedList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())} title="Numbered list">
+              <ListOrdered size={14} /> Number
+            </button>
+          </div>
+
+          {/* Active background chip */}
+          {containerBgColor && (
+            <div className="pg-container-bg-chip">
+              <span className="pg-container-bg-preview" style={{ background: containerBgColor }} />
+              {containerBgColor}
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', color: 'var(--pg-text-muted)', cursor: 'pointer', padding: 0, marginLeft: 2, fontSize: 12, lineHeight: 1 }}
+                onClick={() => setContainerBgColor('')}
+                aria-label="Clear background color"
+              >
+                ×
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {insertPanel && (
         <div className="pg-insert-panel">
@@ -2369,7 +2707,7 @@ export default function TemplateEditor({
       )}
 
       <div className="pg-editor-layout">
-        <div className="pg-editor-pane">
+        <div className="pg-editor-pane" style={{ '--pg-paper-bg': containerBgColor || '#ffffff' } as React.CSSProperties}>
           <EditorContent editor={editor} className="pg-tiptap-content" />
         </div>
       </div>

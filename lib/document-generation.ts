@@ -1,6 +1,8 @@
 import { generateHTML } from '@tiptap/html';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
+import { Color } from '@tiptap/extension-color';
+import { TextStyle } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
 import puppeteer, { Browser } from 'puppeteer';
 import { Placeholder } from '@/lib/tiptap/placeholder';
@@ -1180,7 +1182,9 @@ export function validateDataPointAgainstPlaceholderConfigMap(
 export function renderDocumentHtml(documentJson: Record<string, unknown>): string {
   return generateHTML(documentJson, [
     StarterKit,
-    Highlight,
+    Highlight.configure({ multicolor: true }),
+    TextStyle,
+    Color,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Placeholder,
     ...ComponentExtensions,
