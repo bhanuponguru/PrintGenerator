@@ -110,6 +110,52 @@ function normalizeTokenLibraryItem(value: unknown): TokenLibraryItemSchema | und
   return normalized;
 }
 
+function tokenLibraryItemToSchema(item: TokenLibraryItemSchema): ComponentTypeSchema {
+  if (item.kind === 'list') {
+    return {
+      kind: 'list',
+      item_type: item.item_type ? normalizeTypeSchema(item.item_type) : { kind: 'string' },
+      style: normalizeListStyle(item.style),
+    };
+  }
+
+  if (item.kind === 'table') {
+    return {
+      kind: 'table',
+      mode: item.mode === 'column_data' ? 'column_data' : 'row_data',
+      headers: Array.isArray(item.headers) ? item.headers : undefined,
+      dynamic_headers: typeof item.dynamic_headers === 'boolean' ? item.dynamic_headers : undefined,
+      column_types: isRecord(item.column_types)
+        ? Object.fromEntries(Object.entries(item.column_types).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+        : undefined,
+      row_types: isRecord(item.row_types)
+        ? Object.fromEntries(Object.entries(item.row_types).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+        : undefined,
+      caption: typeof item.caption === 'string' && item.caption.trim() !== '' ? item.caption.trim() : undefined,
+      ...(Array.isArray(item.dynamic_fields) ? { dynamic_fields: item.dynamic_fields } : {}),
+      ...(isRecord(item.static_values) ? { static_values: item.static_values } : {}),
+    };
+  }
+
+  if (item.kind === 'image') {
+    return {
+      kind: 'image',
+      ...(Array.isArray(item.dynamic_fields) ? { dynamic_fields: item.dynamic_fields } : {}),
+      ...(isRecord(item.static_values) ? { static_values: item.static_values } : {}),
+    } as ComponentTypeSchema;
+  }
+
+  if (item.kind === 'hyperlink') {
+    return {
+      kind: 'hyperlink',
+      ...(Array.isArray(item.dynamic_fields) ? { dynamic_fields: item.dynamic_fields } : {}),
+      ...(isRecord(item.static_values) ? { static_values: item.static_values } : {}),
+    } as ComponentTypeSchema;
+  }
+
+  return normalizeTypeSchema({ kind: item.kind });
+}
+
 function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
   if (!isRecord(rawSchema) || typeof rawSchema.kind !== 'string') {
     return { kind: 'string' };
@@ -284,8 +330,8 @@ function renderCustomItem(item: CustomPlaceholderItemSchema, value: unknown, ind
       ? Object.entries(tokenRegistry).map(([tokenId]) => `{{${itemBase}.${tokenId}}}`).join(' ')
       : `{{${itemBase}.value}}`;
 
-  const rendered = renderTemplateString(layout, itemBase, itemValue);
-  return ['div', { 'data-custom-item': item.id, 'data-custom-item-index': String(index) }, rendered];
+  const rendered = renderTemplateBySchema(layout, itemBase, itemValue, tokenRegistry);
+  return ['div', { 'data-custom-item': item.id, 'data-custom-item-index': String(index) }, ...rendered];
 }
 
 function renderCustomLayoutNodes(nodes: CustomLayoutNode[] | undefined, items: CustomPlaceholderItemSchema[], value: unknown): DOMSpec[] {
@@ -347,6 +393,62 @@ function renderTemplateString(template: string, baseVariable: string, value: unk
   });
 }
 
+function renderTemplateBySchema(
+  template: string,
+  baseVariable: string,
+  value: unknown,
+  tokenSchemaMap?: Record<string, ComponentTypeSchema>
+): Array<string | DOMSpec> {
+  const segments: Array<string | DOMSpec> = [];
+  const tokenRe = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_\.]*)\s*\}\}/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRe.exec(template)) !== null) {
+    const [raw, token] = match;
+    if (match.index > lastIndex) {
+      segments.push(template.slice(lastIndex, match.index));
+    }
+
+    let projected: unknown;
+    let tokenSchema: ComponentTypeSchema | undefined;
+    const prefix = `${baseVariable}.`;
+
+    if (token === baseVariable) {
+      projected = value;
+    } else if (token.startsWith(prefix)) {
+      const tokenPath = token.slice(prefix.length);
+      projected = getByPath(value, tokenPath);
+      const tokenId = tokenPath.split('.')[0] || '';
+      tokenSchema = tokenSchemaMap?.[tokenId];
+    } else if (!token.includes('.') && isRecord(value) && token in value) {
+      projected = value[token];
+      tokenSchema = tokenSchemaMap?.[token];
+    }
+
+    if (projected !== undefined && projected !== null) {
+      if (tokenSchema) {
+        if ((tokenSchema.kind === 'string' || tokenSchema.kind === 'integer')
+          && (typeof projected === 'string' || typeof projected === 'number' || typeof projected === 'boolean')) {
+          segments.push(String(projected));
+        } else {
+          segments.push(renderValueBySchema(tokenSchema, projected));
+        }
+      } else if (typeof projected === 'string' || typeof projected === 'number' || typeof projected === 'boolean') {
+        segments.push(String(projected));
+      }
+    }
+
+    lastIndex = match.index + raw.length;
+  }
+
+  if (lastIndex < template.length) {
+    segments.push(template.slice(lastIndex));
+  }
+
+  return segments.length > 0 ? segments : [''];
+}
+
 export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown): DOMSpec {
   switch (schema.kind) {
     case 'string':
@@ -385,6 +487,11 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
     case 'custom': {
       const baseVariable = schema.base_variable || 'item';
       const layout = schema.layout_template || '{{item}}';
+      const tokenSchemaMap = Array.isArray(schema.token_library)
+        ? Object.fromEntries(schema.token_library.map((item) => [item.id, tokenLibraryItemToSchema(item)]))
+        : isRecord(schema.token_registry)
+          ? Object.fromEntries(Object.entries(schema.token_registry).map(([k, v]) => [k, normalizeTypeSchema(v)]))
+          : undefined;
 
       if (Array.isArray(schema.items) && schema.items.length > 0) {
         const items = Array.isArray(value)
@@ -411,12 +518,12 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
         return [
           'div',
           { 'data-custom': 'true', 'data-custom-repeat': 'true' },
-          ...items.map((item) => ['div', { 'data-custom-item': 'true' }, renderTemplateString(layout, baseVariable, item)]),
+          ...items.map((item) => ['div', { 'data-custom-item': 'true' }, ...renderTemplateBySchema(layout, baseVariable, item, tokenSchemaMap)]),
         ];
       }
 
       const dataValue = isRecord(value) && 'data' in value ? value.data : value;
-      return ['div', { 'data-custom': 'true' }, renderTemplateString(layout, baseVariable, dataValue)];
+      return ['div', { 'data-custom': 'true' }, ...renderTemplateBySchema(layout, baseVariable, dataValue, tokenSchemaMap)];
     }
 
     case 'list': {
@@ -456,8 +563,8 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
       const mode: TableMode = schema.mode || (Array.isArray(tableValue.rows) ? 'row_data' : 'column_data');
       const headers = schema.headers && schema.headers.length > 0 ? schema.headers : inferTableHeaders(tableValue, mode);
 
-      const captionNode = schema.caption && tableValue.caption !== undefined
-        ? ['caption', {}, renderValueBySchema(schema.caption, tableValue.caption)]
+      const captionNode = typeof schema.caption === 'string' && schema.caption.trim() !== ''
+        ? ['caption', {}, schema.caption]
         : null;
 
       if (mode === 'row_data') {

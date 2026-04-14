@@ -750,7 +750,7 @@ function validateAndNormalizeValue(
             dynamic_headers: item.dynamic_headers,
             column_types: normalizeSchemaMap(item.column_types),
             row_types: normalizeSchemaMap(item.row_types),
-            caption: item.caption ? normalizeTypeSchema(item.caption) : undefined,
+            caption: typeof item.caption === 'string' && item.caption.trim() !== '' ? item.caption.trim() : undefined,
             ...(Array.isArray(item.dynamic_fields) ? { dynamic_fields: item.dynamic_fields } : {}),
             ...(isRecord(item.static_values) ? { static_values: item.static_values } : {}),
           };
