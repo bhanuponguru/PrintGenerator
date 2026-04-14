@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type { Template } from '../page';
 import type { ComponentTypeSchema } from '@/types/template';
 import { deriveSchemaFromChildren } from '@/lib/tiptap/extensions';
@@ -22,7 +22,7 @@ type RenderSchemaEditor = (
   value: unknown,
   onChange: (next: unknown) => void,
   label: string
-) => JSX.Element;
+) => React.JSX.Element;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -49,7 +49,7 @@ function collectPlaceholderDerivedSchemaMap(template: Record<string, any>): Reco
     }
 
     if (node.type === 'placeholder') {
-      const attrs = isRecord(node.attrs) ? node.attrs : {};
+      const attrs = (isRecord(node.attrs) ? node.attrs : {}) as Record<string, any>;
       const key = typeof attrs.key === 'string' ? attrs.key.trim() : '';
       if (key) {
         const kind = typeof attrs.schema?.kind === 'string'
@@ -123,7 +123,7 @@ function generateExampleValue(schema: ComponentTypeSchema | null): unknown {
     case 'custom': {
       // Handle new token_library model
       if (Array.isArray(schema.token_library) && schema.token_library.length > 0) {
-        const tokenSchemas = Object.fromEntries(
+        const tokenSchemas: Record<string, ComponentTypeSchema> = Object.fromEntries(
           schema.token_library.map((token: any) => [token.id, { kind: token.kind, ...token } as ComponentTypeSchema])
         );
         const tokenData = Object.fromEntries(
@@ -236,27 +236,32 @@ function describeTokenConfiguration(schema: ComponentTypeSchema | null): string 
     case 'integer':
       return 'Number · single value';
     case 'image': {
-      const fields = Array.isArray((schema as Record<string, unknown>).dynamic_fields) && (schema as Record<string, unknown>).dynamic_fields.length > 0
-        ? ((schema as Record<string, unknown>).dynamic_fields as string[]).join(', ')
+      const s = schema as import('@/types/template').ImageTypeSchema;
+      const fields = Array.isArray(s.dynamic_fields) && s.dynamic_fields.length > 0
+        ? s.dynamic_fields.join(', ')
         : 'src, alt';
       return `Image · ${fields}`;
     }
     case 'hyperlink': {
-      const fields = Array.isArray((schema as Record<string, unknown>).dynamic_fields) && (schema as Record<string, unknown>).dynamic_fields.length > 0
-        ? ((schema as Record<string, unknown>).dynamic_fields as string[]).join(', ')
+      const s = schema as import('@/types/template').HyperlinkTypeSchema;
+      const fields = Array.isArray(s.dynamic_fields) && s.dynamic_fields.length > 0
+        ? s.dynamic_fields.join(', ')
         : 'alias, url';
       return `Link · ${fields}`;
     }
-    case 'list':
-      return `List · ${(schema as Record<string, unknown>).style || 'bulleted'}`;
+    case 'list': {
+      const s = schema as import('@/types/template').ListTypeSchema;
+      return `List · ${s.style || 'bulleted'}`;
+    }
     case 'table': {
-      const headers = Array.isArray((schema as Record<string, unknown>).headers) && (schema as Record<string, unknown>).headers.length > 0
-        ? (schema as Record<string, unknown>).headers.join(', ')
+      const s = schema as import('@/types/template').TableTypeSchema;
+      const headers = Array.isArray(s.headers) && s.headers.length > 0
+        ? s.headers.join(', ')
         : 'no headers';
-      const caption = typeof (schema as Record<string, unknown>).caption === 'string' && String((schema as Record<string, unknown>).caption).trim() !== ''
-        ? `caption: ${String((schema as Record<string, unknown>).caption).trim()}`
+      const caption = typeof s.caption === 'string' && s.caption.trim() !== ''
+        ? `caption: ${s.caption.trim()}`
         : 'caption: none';
-      const mode = (schema as Record<string, unknown>).mode === 'column_data' ? 'column_data' : 'row_data';
+      const mode = s.mode === 'column_data' ? 'column_data' : 'row_data';
       return `Table · ${mode} · ${headers} · ${caption}`;
     }
     case 'repeat':
@@ -264,20 +269,22 @@ function describeTokenConfiguration(schema: ComponentTypeSchema | null): string 
     case 'custom':
       return 'Custom';
     default:
-      return schema.kind;
+      return (schema as any).kind || 'unknown';
   }
 }
 
 function resolveDynamicFields(schema: ComponentTypeSchema, defaults: string[]): Set<string> {
-  const raw = (schema as Record<string, unknown>).dynamic_fields;
+  const s = schema as any;
+  const raw = s.dynamic_fields;
   if (Array.isArray(raw) && raw.length > 0) {
-    return new Set(raw.filter((field): field is string => typeof field === 'string'));
+    return new Set(raw.filter((field: unknown): field is string => typeof field === 'string'));
   }
   return new Set(defaults);
 }
 
 function resolveStaticValues(schema: ComponentTypeSchema): Record<string, unknown> {
-  const raw = (schema as Record<string, unknown>).static_values;
+  const s = schema as any;
+  const raw = s.static_values;
   if (isRecord(raw)) {
     return raw;
   }
@@ -403,10 +410,10 @@ function CollectionEditor({
     : Array.isArray(collection.items)
       ? collection.items
       : [];
-  const style = kind === 'list' && typeof collection.style === 'string'
-    ? collection.style
+  const style = kind === 'list' && typeof (collection as any).style === 'string'
+    ? (collection as any).style
     : kind === 'list'
-      ? schema.style || 'bulleted'
+      ? (schema as any).style || 'bulleted'
       : undefined;
 
   const emit = (nextItems: unknown[], nextStyle?: string) => {
@@ -511,8 +518,9 @@ function CompositeEditor({
   const composite = isRecord(value) ? value : {};
   const components = Array.isArray(composite.components) ? composite.components : [];
 
-  if (schema.kind === 'container' && schema.mode === 'repeat') {
-    const itemType = schema.item_type || { kind: 'string' as const };
+  if (schema.kind === 'container' && (schema as any).mode === 'repeat') {
+    const s = schema as any;
+    const itemType = s.item_type || { kind: 'string' as const };
     return (
       <div className="pg-layout-composer" aria-label={label}>
         {components.map((component, index) => (
@@ -957,7 +965,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
                 return (
                   <div className="pg-layout-composer" key={`custom-item-${itemIndex}`}>
                     <div className="pg-layout-token-assist-label">Item {itemIndex + 1}</div>
-                    {schema.token_library.map((token: any) => {
+                    {(schema.token_library || []).map((token: any) => {
                       const tokenSchema = { kind: token.kind, ...token } as ComponentTypeSchema;
                       return (
                         <div className="pg-insert-row" key={`token-${token.id}-${itemIndex}`}>

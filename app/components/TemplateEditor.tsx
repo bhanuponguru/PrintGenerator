@@ -632,7 +632,7 @@ export default function TemplateEditor({
     );
     if (current === next) return;
     isSyncingCustomTemplateRef.current = true;
-    customTemplateEditor.commands.setContent(textTemplateToHtml(next), false);
+    customTemplateEditor.commands.setContent(textTemplateToHtml(next));
     isSyncingCustomTemplateRef.current = false;
   }, [customTemplateEditor, phCustomTemplate, phCustomItems]);
 

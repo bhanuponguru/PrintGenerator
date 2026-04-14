@@ -161,7 +161,7 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
     return { kind: 'string' };
   }
 
-  const schema = rawSchema as ComponentTypeSchema;
+  const schema = rawSchema as any as ComponentTypeSchema;
 
   switch (schema.kind) {
     case 'string':
@@ -237,11 +237,11 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
     case 'page':
     case 'header':
     case 'footer': {
-      const compositeSchema = schema as ContainerTypeSchema;
+      const compositeSchema = schema as any;
       return {
         kind: compositeSchema.kind,
         component_types: Array.isArray(compositeSchema.component_types)
-          ? compositeSchema.component_types.map((item) => normalizeTypeSchema(item))
+          ? compositeSchema.component_types.map((item: any) => normalizeTypeSchema(item))
           : [],
       } as ComponentTypeSchema;
     }
@@ -704,10 +704,10 @@ export function deriveSchemaFromChildren(kind: string, attrs: Record<string, unk
   }
 
   if (kind === 'image' || kind === 'hyperlink' || kind === 'integer' || kind === 'string') {
-    return { kind: kind as ComponentTypeSchema['kind'] };
+    return { kind: kind as ComponentTypeSchema['kind'] } as ComponentTypeSchema;
   }
 
-  return { kind: (kind || 'string') as ComponentTypeSchema['kind'] };
+  return { kind: (kind || 'string') as ComponentTypeSchema['kind'] } as ComponentTypeSchema;
 }
 
 export function substitutePlaceholderValue(attrs: PlaceholderNodeAttrs, nextValue: unknown): PlaceholderNodeAttrs {

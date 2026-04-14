@@ -5,6 +5,7 @@ import {
   renderDocumentHtml,
   validateDataPointAgainstKeyTypeMap,
 } from '@/lib/document-generation';
+import type { PlaceholderKeyTypeMap } from '@/types/template';
 
 function buildListPlaceholderTemplate(key: string, style: 'bulleted' | 'numbered' | 'plain', itemType: 'string' | 'integer' = 'string') {
   return {
@@ -276,7 +277,7 @@ describe('template filling pipeline equivalence coverage', () => {
   });
 
   it('returns missing and invalid keys in one validation pass', () => {
-    const keyTypeMap = {
+    const keyTypeMap: PlaceholderKeyTypeMap = {
       name: { kind: 'string' },
       count: { kind: 'integer' },
       site: { kind: 'hyperlink' },
@@ -326,9 +327,9 @@ describe('template filling pipeline equivalence coverage', () => {
     const validation = validateDataPointAgainstKeyTypeMap(
       { name: 'Ada', count: '7.8' },
       {
-        name: { kind: 'string' },
-        count: { kind: 'integer' },
-      }
+        name: { kind: 'string' as const },
+        count: { kind: 'integer' as const },
+      } as PlaceholderKeyTypeMap
     );
 
     expect(validation.invalid).toEqual([]);
@@ -367,9 +368,9 @@ describe('template filling pipeline equivalence coverage', () => {
         docs: { alias: 'Docs', url: 'https://example.com/docs' },
       },
       {
-        logo: { kind: 'image' },
-        docs: { kind: 'hyperlink' },
-      }
+        logo: { kind: 'image' as const },
+        docs: { kind: 'hyperlink' as const },
+      } as PlaceholderKeyTypeMap
     );
 
     expect(validation.invalid).toEqual([]);
@@ -402,13 +403,13 @@ describe('template filling pipeline equivalence coverage', () => {
       },
       {
         pair: {
-          kind: 'container',
+          kind: 'container' as const,
           component_types: [
-            { kind: 'string' },
-            { kind: 'hyperlink' },
+            { kind: 'string' as const },
+            { kind: 'hyperlink' as const },
           ],
         },
-      }
+      } as PlaceholderKeyTypeMap
     );
 
     expect(validation.invalid).toEqual([]);
@@ -517,7 +518,7 @@ describe('template filling pipeline equivalence coverage', () => {
   });
 
   it('validates custom values against token registry and renders tokenized layout', () => {
-    const keyTypeMap = {
+    const keyTypeMap: PlaceholderKeyTypeMap = {
       profile: {
         kind: 'custom',
         base_variable: 'item',
@@ -583,7 +584,7 @@ describe('template filling pipeline equivalence coverage', () => {
   });
 
   it('enforces static hyperlink token attributes while allowing dynamic fields', () => {
-    const keyTypeMap = {
+    const keyTypeMap: PlaceholderKeyTypeMap = {
       profile_link: {
         kind: 'custom',
         base_variable: 'token',
@@ -635,7 +636,7 @@ describe('template filling pipeline equivalence coverage', () => {
   });
 
   it('enforces static table token fields for custom token_library schemas', () => {
-    const keyTypeMap = {
+    const keyTypeMap: PlaceholderKeyTypeMap = {
       line_table: {
         kind: 'custom',
         base_variable: 'token',

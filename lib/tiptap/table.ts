@@ -70,8 +70,8 @@ export function createTableComponent(
 ): TableComponentNode {
   const resolvedCaption = typeof attrs.caption === 'string' && attrs.caption.trim() !== ''
     ? attrs.caption.trim()
-    : typeof (data as Record<string, unknown>).caption === 'string' && (data as Record<string, unknown>).caption.trim() !== ''
-      ? String((data as Record<string, unknown>).caption).trim()
+    : typeof data.caption === 'string' && (data.caption as string).trim() !== ''
+      ? (data.caption as string).trim()
       : undefined;
 
   const mergedAttrs = {

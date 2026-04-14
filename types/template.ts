@@ -19,10 +19,14 @@ export interface IntegerTypeSchema extends BaseTypeSchema {
 
 export interface ImageTypeSchema extends BaseTypeSchema {
   kind: 'image';
+  dynamic_fields?: string[];
+  static_values?: Record<string, unknown>;
 }
 
 export interface HyperlinkTypeSchema extends BaseTypeSchema {
   kind: 'hyperlink';
+  dynamic_fields?: string[];
+  static_values?: Record<string, unknown>;
 }
 
 export interface ListTypeSchema extends BaseTypeSchema {
@@ -144,6 +148,8 @@ export interface TableTypeSchema extends BaseTypeSchema {
   column_types?: Record<string, ComponentTypeSchema>;
   row_types?: Record<string, ComponentTypeSchema>;
   caption?: string; // static caption defined at template creation time
+  dynamic_fields?: string[];
+  static_values?: Record<string, unknown>;
 }
 
 /** Union of every placeholder schema supported by the editor and backend. */

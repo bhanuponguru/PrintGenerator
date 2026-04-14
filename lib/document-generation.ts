@@ -1,5 +1,7 @@
 import { generateHTML } from '@tiptap/html';
 import StarterKit from '@tiptap/starter-kit';
+import Highlight from '@tiptap/extension-highlight';
+import TextAlign from '@tiptap/extension-text-align';
 import puppeteer, { Browser } from 'puppeteer';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
@@ -220,11 +222,11 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
         column_types: normalizeSchemaMap(tableSchema.column_types),
         row_types: normalizeSchemaMap(tableSchema.row_types),
         caption: typeof tableSchema.caption === 'string' && tableSchema.caption.trim() !== '' ? tableSchema.caption.trim() : undefined,
-        ...(Array.isArray((schema as Record<string, unknown>).dynamic_fields)
-          ? { dynamic_fields: ((schema as Record<string, unknown>).dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string') }
+        ...(Array.isArray(tableSchema.dynamic_fields)
+          ? { dynamic_fields: tableSchema.dynamic_fields.filter((field): field is string => typeof field === 'string') }
           : {}),
-        ...(isRecord((schema as Record<string, unknown>).static_values)
-          ? { static_values: (schema as Record<string, unknown>).static_values as Record<string, unknown> }
+        ...(isRecord(tableSchema.static_values)
+          ? { static_values: tableSchema.static_values }
           : {}),
       };
     }
@@ -586,14 +588,15 @@ function validateAndNormalizeValue(
         return { ok: false, error: `${path} must be an image object` };
       }
 
-      const dynamicFieldsRaw = (schema as Record<string, unknown>).dynamic_fields;
+      const imageSchema = schema as ImageTypeSchema;
+      const dynamicFieldsRaw = imageSchema.dynamic_fields;
       const dynamicFields = new Set(
         Array.isArray(dynamicFieldsRaw)
           ? dynamicFieldsRaw.filter((field): field is string => typeof field === 'string')
           : ['src', 'alt']
       );
-      const staticValues = isRecord((schema as Record<string, unknown>).static_values)
-        ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+      const staticValues = isRecord(imageSchema.static_values)
+        ? (imageSchema.static_values as Record<string, unknown>)
         : {};
 
       const src = dynamicFields.has('src')
@@ -636,14 +639,15 @@ function validateAndNormalizeValue(
         return { ok: false, error: `${path} must be a hyperlink object` };
       }
 
-      const dynamicFieldsRaw = (schema as Record<string, unknown>).dynamic_fields;
+      const hyperlinkSchema = schema as HyperlinkTypeSchema;
+      const dynamicFieldsRaw = hyperlinkSchema.dynamic_fields;
       const dynamicFields = new Set(
         Array.isArray(dynamicFieldsRaw)
           ? dynamicFieldsRaw.filter((field): field is string => typeof field === 'string')
           : ['alias', 'url']
       );
-      const staticValues = isRecord((schema as Record<string, unknown>).static_values)
-        ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+      const staticValues = isRecord(hyperlinkSchema.static_values)
+        ? (hyperlinkSchema.static_values as Record<string, unknown>)
         : {};
 
       const alias = dynamicFields.has('alias') ? value.alias : staticValues.alias;
@@ -819,7 +823,7 @@ function validateAndNormalizeValue(
         for (let i = 0; i < rawItems.length; i += 1) {
           const itemResult = validateTokenObject(rawItems[i], `${path}[${i}]`);
           if (!itemResult.ok) return itemResult;
-          normalizedItems.push(itemResult.value);
+          normalizedItems.push(itemResult.value as ComponentValue);
         }
 
         return { ok: true, value: { data: { items: normalizedItems } } };
@@ -981,13 +985,14 @@ function validateAndNormalizeValue(
           ? headers
           : Array.from(new Set(rows.flatMap((row) => (isRecord(row) ? Object.keys(row) : []))));
         const columnTypes = config?.column_types || schema.column_types || {};
+        const tableSchema = schema as TableTypeSchema;
         const dynamicFields = new Set(
-          Array.isArray((schema as Record<string, unknown>).dynamic_fields)
-            ? ((schema as Record<string, unknown>).dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string')
+          Array.isArray(tableSchema.dynamic_fields)
+            ? (tableSchema.dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string')
             : inferredHeaders
         );
-        const staticValues = isRecord((schema as Record<string, unknown>).static_values)
-          ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+        const staticValues = isRecord(tableSchema.static_values)
+          ? (tableSchema.static_values as Record<string, unknown>)
           : {};
         for (let i = 0; i < rows.length; i += 1) {
           const row = rows[i];
@@ -1042,13 +1047,14 @@ function validateAndNormalizeValue(
         ? headers
         : Array.from(new Set(Object.values(columns).flatMap((col) => (isRecord(col) ? Object.keys(col) : []))));
       const rowTypes = config?.row_types || schema.row_types || {};
+      const tableSchema = schema as TableTypeSchema;
       const dynamicFields = new Set(
-        Array.isArray((schema as Record<string, unknown>).dynamic_fields)
-          ? ((schema as Record<string, unknown>).dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string')
+        Array.isArray(tableSchema.dynamic_fields)
+          ? (tableSchema.dynamic_fields as unknown[]).filter((field): field is string => typeof field === 'string')
           : inferredHeaders
       );
-      const staticValues = isRecord((schema as Record<string, unknown>).static_values)
-        ? ((schema as Record<string, unknown>).static_values as Record<string, unknown>)
+      const staticValues = isRecord(tableSchema.static_values)
+        ? (tableSchema.static_values as Record<string, unknown>)
         : {};
       for (const colName of Object.keys(columns)) {
         const col = columns[colName];
@@ -1172,7 +1178,13 @@ export function validateDataPointAgainstPlaceholderConfigMap(
  */
 /** Renders a TipTap document JSON blob into standalone HTML. */
 export function renderDocumentHtml(documentJson: Record<string, unknown>): string {
-  return generateHTML(documentJson, [StarterKit, Placeholder, ...ComponentExtensions]);
+  return generateHTML(documentJson, [
+    StarterKit,
+    Highlight,
+    TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    Placeholder,
+    ...ComponentExtensions,
+  ]);
 }
 
 /**

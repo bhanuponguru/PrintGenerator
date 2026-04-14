@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TagManagementSection from '@/app/components/TagManagementSection';
@@ -80,7 +80,7 @@ describe('Tag Management UI', () => {
     it('creates a tag and calls onSuccess on success', async () => {
       const user = userEvent.setup();
       const onSuccess = vi.fn();
-      (global.fetch as vi.Mock).mockResolvedValueOnce({
+      (global.fetch as Mock).mockResolvedValueOnce({
         json: async () => ({ success: true, data: { id: '3' } }),
       });
 
@@ -106,7 +106,7 @@ describe('Tag Management UI', () => {
   describe('EditTagModal', () => {
     it('loads the current tag name and sends the updated value', async () => {
       const user = userEvent.setup();
-      (global.fetch as vi.Mock).mockResolvedValueOnce({
+      (global.fetch as Mock).mockResolvedValueOnce({
         json: async () => ({ success: true }),
       });
 
@@ -133,7 +133,7 @@ describe('Tag Management UI', () => {
     it('creates a tag inline and shows it after the parent rerenders with the new tags list', async () => {
       const user = userEvent.setup();
       const onTagCreated = vi.fn();
-      (global.fetch as vi.Mock).mockResolvedValueOnce({
+      (global.fetch as Mock).mockResolvedValueOnce({
         json: async () => ({ success: true, data: { id: 'inline-tag-id' } }),
       });
 

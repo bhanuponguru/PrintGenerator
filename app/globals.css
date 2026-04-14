@@ -921,8 +921,9 @@ select.pg-input option {
 .pg-tiptap-content {
   background: var(--pg-code-bg);
   padding: 40px 20px;
-  display: flex;
-  justify-content: center;
+  display: block;
+  width: 100%;
+  overflow-x: auto;
   overflow-y: auto;
   max-height: 65vh;
 }
