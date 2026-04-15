@@ -1,10 +1,49 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from 'prosemirror-state';
 
-const PAGE_DIMENSIONS: Record<string, number> = {
-  'A4': 1122,
-  'A3': 1587,
-};
+// A4 at 96 dpi = 794px wide, 1122px tall. We track height.
+const A4_HEIGHT_PX = 1122;
+
+const RULER_CLASS = 'pg-page-ruler';
+
+function injectRulers(container: HTMLElement, editorDom: HTMLElement) {
+  // Remove stale rulers
+  container.querySelectorAll(`.${RULER_CLASS}`).forEach((el) => el.remove());
+
+  const docHeight = editorDom.scrollHeight;
+  const numRulers = Math.floor(docHeight / A4_HEIGHT_PX);
+
+  // We need the offset of the editor relative to the container to position rulers correctly
+  const containerRect = container.getBoundingClientRect();
+  const editorRect = editorDom.getBoundingClientRect();
+  const editorOffsetTop = editorRect.top - containerRect.top + container.scrollTop;
+
+  for (let i = 1; i <= numRulers; i++) {
+    const ruler = document.createElement('div');
+    ruler.className = RULER_CLASS;
+    ruler.setAttribute('aria-hidden', 'true');
+    ruler.style.cssText = [
+      'position: absolute',
+      `top: ${editorOffsetTop + i * A4_HEIGHT_PX}px`,
+      'left: 0',
+      'right: 0',
+      'height: 0',
+      'pointer-events: none',
+      'z-index: 4',
+    ].join(';');
+
+    const line = document.createElement('div');
+    line.className = `${RULER_CLASS}__line`;
+    ruler.appendChild(line);
+
+    const label = document.createElement('span');
+    label.className = `${RULER_CLASS}__label`;
+    label.textContent = `— Page ${i + 1} —`;
+    ruler.appendChild(label);
+
+    container.appendChild(ruler);
+  }
+}
 
 export const PaginationPlugin = Extension.create({
   name: 'paginationPlugin',
@@ -13,54 +52,33 @@ export const PaginationPlugin = Extension.create({
     return [
       new Plugin({
         key: new PluginKey('paginationPlugin'),
-        appendTransaction(transactions, oldState, newState) {
-          const doc = newState.doc;
-          let needsUpdate = false;
-          let tr = newState.tr;
 
-          // Enforce that the Document only contains PageComponents at the top level.
-          // Or at least starts with one.
-          if (doc.childCount === 0) {
-            return null;
-          }
+        view: (editorView) => {
+          // The scrollable container wrapping the editor canvas
+          const container = editorView.dom.parentElement;
 
-          const firstChild = doc.child(0);
-          if (firstChild.type.name !== 'pageComponent') {
-            // Tiptap might add default paragraphs, we should wrap or replace them.
-          }
+          const update = () => {
+            if (!container) return;
+            injectRulers(container, editorView.dom);
+          };
 
-          return needsUpdate ? tr : null;
+          // Initial render
+          requestAnimationFrame(update);
+
+          return {
+            update: (_view, prevState) => {
+              // Re-draw rulers whenever the document changes (content may have grown)
+              if (!_view.state.doc.eq(prevState.doc)) {
+                requestAnimationFrame(update);
+              }
+            },
+            destroy: () => {
+              container?.querySelectorAll(`.${RULER_CLASS}`).forEach((el) => el.remove());
+            },
+          };
         },
-        view: () => ({
-          update: (view, prevState) => {
-            if (view.state.doc.eq(prevState.doc)) {
-              return;
-            }
-
-            // A simple DOM observer to detect height overflow and split.
-            // Since Prosemirror maps nodes to DOM, we can query them.
-            const pageElements = view.dom.querySelectorAll('div[data-component="page"]');
-            
-            pageElements.forEach((pageEl, index) => {
-              const size = pageEl.getAttribute('data-size') || 'A4';
-              const orientation = pageEl.getAttribute('data-orientation') || 'portrait';
-              
-              let maxHeight = PAGE_DIMENSIONS[size] || PAGE_DIMENSIONS['A4'];
-              if (orientation === 'landscape' && size === 'A4') {
-                maxHeight = 794; // approx A4 landscape height
-              }
-
-              if (pageEl.clientHeight > maxHeight) {
-                // If it's an atom block, we can't deep-slice cursor positions directly using prosemirror ranges.
-                // We dispatch a custom event or console warning for the user so the nodeview can handle splitting the internal attrs array.
-                console.log(`Page ${index + 1} overflowed ${maxHeight}px (current: ${pageEl.clientHeight}px)`);
-                // For a robust implementation, the React NodeView for the Page should detect this 
-                // and slice `attrs.value.components` into a new PageComponent.
-              }
-            });
-          },
-        }),
       }),
     ];
   },
 });
+

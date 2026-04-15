@@ -926,6 +926,8 @@ select.pg-input option {
   overflow-x: auto;
   overflow-y: auto;
   max-height: 65vh;
+  /* Required so absolute page-ruler elements stay inside this container */
+  position: relative;
 }
 
 .pg-prosemirror {
@@ -986,15 +988,21 @@ select.pg-input option {
   color: #444444;
 }
 
-/* Placeholder cursor caret indicator */
-.pg-prosemirror p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
+.pg-prosemirror p.is-editor-empty:first-child::before,
+.pg-prosemirror header[data-component="header"] p.is-empty::before,
+.pg-prosemirror footer[data-component="footer"] p.is-empty::before {
+  content: "Type your content here...";
   float: left;
   color: var(--pg-text-muted);
   pointer-events: none;
   height: 0;
   font-style: italic;
   font-size: 13px;
+  opacity: 0.5;
+}
+
+.pg-prosemirror > p.is-empty:first-child::before {
+  content: attr(data-placeholder);
 }
 
 /* ─── Inline Placeholder node chip (rendered in ProseMirror) */
@@ -1103,6 +1111,99 @@ select.pg-input option {
   letter-spacing: 0.1em;
   color: var(--pg-text-muted);
   white-space: nowrap;
+}
+
+.pg-prosemirror header[data-component="header"] {
+  display: block;
+  width: 100%;
+  /* Slight blue-tinted dashed border at bottom to visually separate */
+  border-bottom: 2px dashed rgba(100, 180, 255, 0.5);
+  padding: 10px 10px 8px;
+  margin-bottom: 20px;
+  color: #111111;
+  background: rgba(100, 180, 255, 0.04);
+  border-radius: 4px 4px 0 0;
+  min-height: 36px;
+  position: relative;
+}
+
+.pg-prosemirror header[data-component="header"]:empty::before {
+  content: '⬡ HEADER CONTENT';
+  opacity: 0.5;
+  display: block;
+  padding: 6px 0;
+  text-align: center;
+  color: #6ab0f5;
+  font-size: 11px;
+  font-family: var(--pg-font-mono);
+  letter-spacing: 0.12em;
+}
+
+.pg-prosemirror header[data-component="header"].ProseMirror-selectednode {
+  outline: 2px solid rgba(100, 180, 255, 0.7);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.pg-prosemirror footer[data-component="footer"] {
+  display: block;
+  width: 100%;
+  /* Orange-tinted dashed border at top */
+  border-top: 2px dashed rgba(255, 160, 80, 0.5);
+  padding: 8px 10px 10px;
+  margin-top: 20px;
+  color: #111111;
+  background: rgba(255, 160, 80, 0.04);
+  border-radius: 0 0 4px 4px;
+  min-height: 36px;
+  position: relative;
+}
+
+.pg-prosemirror footer[data-component="footer"]:empty::before {
+  content: '⬡ FOOTER CONTENT';
+  opacity: 0.5;
+  display: block;
+  padding: 6px 0;
+  text-align: center;
+  color: #f0a060;
+  font-size: 11px;
+  font-family: var(--pg-font-mono);
+  letter-spacing: 0.12em;
+}
+
+.pg-prosemirror footer[data-component="footer"].ProseMirror-selectednode {
+  outline: 2px solid rgba(255, 160, 80, 0.7);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ─── Automatic page-ruler overlay (injected by PaginationPlugin) */
+.pg-page-ruler {
+  /* Absolutely positioned inside .pg-tiptap-content */
+  pointer-events: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: visible;
+}
+
+.pg-page-ruler__line {
+  flex: 1;
+  border-top: 2px dashed rgba(232, 184, 75, 0.28);
+  display: block;
+}
+
+.pg-page-ruler__label {
+  font-size: 9px;
+  font-family: var(--pg-font-mono);
+  letter-spacing: 0.15em;
+  color: rgba(232, 184, 75, 0.45);
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  position: relative;
+  top: -1px;
 }
 
 /* ─── Editor footer (detected keys) ─────────────────────── */
@@ -1458,6 +1559,29 @@ select.pg-input option {
   font-family: Arial, Helvetica, sans-serif;
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* ─── WYSIWYG iframe preview ─────────────────────────────── */
+.pg-modal--preview {
+  width: min(94vw, 960px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-modal-body--preview {
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  background: #d8d8d8;
+}
+
+.pg-preview-iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 72vh;
+  border: none;
+  display: block;
 }
 
 .pg-preview-body h1,

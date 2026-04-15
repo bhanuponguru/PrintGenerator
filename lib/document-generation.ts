@@ -1202,13 +1202,56 @@ export function renderDocumentHtml(documentJson: Record<string, unknown>): strin
   ]);
 }
 
+
 /**
  * Wraps generated document HTML content with an appropriate skeletal structure
  * including necessary root styling constraints, and meta properties.
  * @param contentHtml The core document representation content to append to body.
  * @returns A complete HTML page string ready for final rendering layout.
  */
-function buildHtmlDocument(contentHtml: string): string {
+function stripInvisibleColors(html: string): string {
+  // Replace inline color styles that are near-white (would be invisible on a white PDF page).
+  // This is caused by the editor's dark-mode theme coloring text light gray.
+  return html.replace(/style="([^"]*)"/g, (match, styles: string) => {
+    // Remove color declarations that are very light (near white)
+    const cleaned = styles.replace(/color:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)/g, (_m, r, g, b) => {
+      const brightness = (Number(r) + Number(g) + Number(b)) / 3;
+      // If average brightness > 200 out of 255, treat as near-white — strip it
+      return brightness > 200 ? '' : `color: rgb(${r}, ${g}, ${b})`;
+    });
+    const trimmed = cleaned.replace(/;\s*;/g, ';').replace(/^;|;$/g, '').trim();
+    return trimmed ? `style="${trimmed}"` : '';
+  });
+}
+
+/** Extracts header/footer from generated HTML and returns all three parts separately. */
+export function extractHeaderFooter(rawHtml: string): {
+  bodyHtml: string;
+  headerHtml: string;
+  footerHtml: string;
+} {
+  let bodyHtml = stripInvisibleColors(rawHtml);
+  let headerHtml = '';
+  let footerHtml = '';
+
+  const headerMatch = bodyHtml.match(/<header[^>]*data-component="header"[^>]*>[\s\S]*?<\/header>/);
+  if (headerMatch) {
+    // Strip the outer <header> tag so we only keep the inner content
+    headerHtml = headerMatch[0].replace(/^<header[^>]*>|<\/header>$/g, '');
+    bodyHtml = bodyHtml.replace(headerMatch[0], '');
+  }
+
+  const footerMatch = bodyHtml.match(/<footer[^>]*data-component="footer"[^>]*>[\s\S]*?<\/footer>/);
+  if (footerMatch) {
+    footerHtml = footerMatch[0].replace(/^<footer[^>]*>|<\/footer>$/g, '');
+    bodyHtml = bodyHtml.replace(footerMatch[0], '');
+  }
+
+  return { bodyHtml, headerHtml, footerHtml };
+}
+
+/** Wraps body HTML in a complete page-ready HTML document. */
+function buildHtmlDocument(bodyHtml: string): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -1217,7 +1260,7 @@ function buildHtmlDocument(contentHtml: string): string {
     <style>${DOCUMENT_CSS}</style>
   </head>
   <body>
-    ${contentHtml}
+    ${bodyHtml}
   </body>
 </html>`;
 }
@@ -1241,41 +1284,62 @@ async function getBrowser(): Promise<Browser> {
 }
 
 /**
- * Creates an A4 formatted PDF file as a Uint8Array buffer dynamically instantiated
- * from provided valid HTML string content via headless browser automation.
- * @param html The stringified complete markup tree layout definition for printing.
- * @returns A byte array constituting the rendered ready-to-save PDF file structure.
+ * Creates an A4 formatted PDF file as a Uint8Array buffer.
+ * Header and footer are pinned to every page using Puppeteer's native
+ * headerTemplate / footerTemplate — the only reliable mechanism for true
+ * page-edge headers/footers regardless of content length.
  */
 export async function createPdfFromDocumentHtml(html: string): Promise<Uint8Array> {
-  // Reuse our headless singleton avoiding excessive expensive heavy spawn jobs continuously
   const browser = await getBrowser();
-  
-  // Allocate a brand new isolated viewer tab completely untethered from concurrent request loads
   const page = await browser.newPage();
 
   try {
-    // Inject our dynamically built complete Document AST straight down to layout 
-    // waiting exclusively until background asynchronous fonts/images fully finalize 
-    await page.setContent(buildHtmlDocument(html), {
-      waitUntil: 'networkidle0',
-    });
+    // Separate header / footer from body content
+    const { bodyHtml, headerHtml, footerHtml } = extractHeaderFooter(html);
 
-    // Execute standard headless PDF conversion rendering utilizing basic paper profiles
+    // Puppeteer's headerTemplate / footerTemplate require a complete HTML snippet.
+    // They are injected at the EXACT top/bottom margin area and REPEAT on every page.
+    // The font-size must be set here; Puppeteer resets it to 0 by default.
+    const TEMPLATE_CSS = `
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10px;
+      line-height: 1.4;
+      color: #333;
+      width: 100%;
+      padding: 0 12mm;
+      box-sizing: border-box;
+    `;
+
+    const headerTemplate = headerHtml
+      ? `<div style="${TEMPLATE_CSS}">${headerHtml}</div>`
+      : '<span></span>'; // must be non-empty or Puppeteer ignores displayHeaderFooter
+
+    const footerTemplate = footerHtml
+      ? `<div style="${TEMPLATE_CSS}">${footerHtml}</div>`
+      : '<span></span>';
+
+    // Expand top/bottom margins so Puppeteer has room to draw the templates
+    const topMargin    = headerHtml ? '28mm' : '12mm';
+    const bottomMargin = footerHtml ? '28mm' : '12mm';
+
+    await page.setContent(buildHtmlDocument(bodyHtml), { waitUntil: 'networkidle0' });
+
     const pdfBuffer = await page.pdf({
       format: 'A4',
-      printBackground: true, // Guarantees explicit background CSS styling triggers correctly
+      printBackground: true,
+      displayHeaderFooter: !!(headerHtml || footerHtml),
+      headerTemplate,
+      footerTemplate,
       margin: {
-        top: '12mm',
+        top: topMargin,
         right: '12mm',
-        bottom: '12mm',
+        bottom: bottomMargin,
         left: '12mm',
       },
     });
 
-    // Extract raw memory array ensuring format agnostic client transferability safely 
     return new Uint8Array(pdfBuffer);
   } finally {
-    // Mandate isolated resource deallocation avoiding catastrophic browser memory leakage
     await page.close();
   }
 }

@@ -35,6 +35,7 @@ import {
   Underline as UnderlineIcon,
 } from 'lucide-react';
 import { Placeholder } from '@/lib/tiptap/placeholder';
+import { PaginationPlugin } from '@/lib/tiptap/pagination-plugin';
 import {
   ComponentExtensions,
   createHyperlinkComponent,
@@ -494,6 +495,7 @@ export default function TemplateEditor({
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [previewHtml, setPreviewHtml] = useState('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewSrcdoc, setPreviewSrcdoc] = useState('');
   const [selectedBlockStyle, setSelectedBlockStyle] = useState<'paragraph' | 'h1' | 'h2' | 'h3'>('paragraph');
   // Incrementing this on every editor transaction forces React to re-render the
   // toolbar so that active() calls (isActive checks) reflect the latest state.
@@ -564,6 +566,7 @@ export default function TemplateEditor({
       Color,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Placeholder,
+      PaginationPlugin,
       ...ComponentExtensions,
     ],
     content: initialContent ?? {
@@ -1049,7 +1052,7 @@ export default function TemplateEditor({
   const openPreview = useCallback(() => {
     if (!editor) return;
     try {
-      setPreviewHtml(generateHTML(editor.getJSON(), [
+      const rawHtml = generateHTML(editor.getJSON(), [
         StarterKit,
         Highlight.configure({ multicolor: true }),
         TextStyle,
@@ -1057,9 +1060,124 @@ export default function TemplateEditor({
         TextAlign.configure({ types: ['heading', 'paragraph'] }),
         Placeholder,
         ...ComponentExtensions,
-      ]));
+      ]);
+
+      // ── Strip near-white colors (dark-theme artifact) ──────────────────
+      const cleanHtml = rawHtml.replace(/style="([^"]*)"/g, (_match, styles: string) => {
+        const cleaned = styles.replace(
+          /color:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)/g,
+          (_m: string, r: string, g: string, b: string) => {
+            const brightness = (Number(r) + Number(g) + Number(b)) / 3;
+            return brightness > 200 ? '' : `color: rgb(${r}, ${g}, ${b})`;
+          }
+        );
+        const trimmed = cleaned.replace(/;\s*;/g, ';').replace(/^;|;$/g, '').trim();
+        return trimmed ? `style="${trimmed}"` : '';
+      });
+
+      // ── Extract header / footer (same logic as server-side) ───────────
+      let bodyHtml = cleanHtml;
+      let headerHtml = '';
+      let footerHtml = '';
+
+      const headerMatch = bodyHtml.match(/<header[^>]*data-component="header"[^>]*>[\s\S]*?<\/header>/);
+      if (headerMatch) {
+        headerHtml = headerMatch[0];
+        bodyHtml = bodyHtml.replace(headerMatch[0], '');
+      }
+      const footerMatch = bodyHtml.match(/<footer[^>]*data-component="footer"[^>]*>[\s\S]*?<\/footer>/);
+      if (footerMatch) {
+        footerHtml = footerMatch[0];
+        bodyHtml = bodyHtml.replace(footerMatch[0], '');
+      }
+
+      // ── Build full WYSIWYG HTML identical to the PDF source ───────────
+      const PREVIEW_CSS = `
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          background: #e8e8e8;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 13px;
+          line-height: 1.6;
+          color: #111;
+          padding: 24px 0;
+        }
+        .pg-page {
+          background: #ffffff;
+          width: 210mm;
+          min-height: 297mm;
+          margin: 0 auto 24px;
+          padding: 20mm 20mm 20mm 20mm;
+          box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+          position: relative;
+          display: flex;
+          flex-direction: column;
+        }
+        .pg-page-header {
+          border-bottom: 2px dashed rgba(100,180,255,0.5);
+          padding-bottom: 10px;
+          margin-bottom: 16px;
+          color: #333;
+          font-size: 11px;
+          background: rgba(100,180,255,0.04);
+          border-radius: 4px 4px 0 0;
+          padding: 8px 10px;
+        }
+        .pg-page-body {
+          flex: 1;
+        }
+        .pg-page-footer {
+          border-top: 2px dashed rgba(255,160,80,0.5);
+          padding-top: 10px;
+          margin-top: 16px;
+          color: #333;
+          font-size: 11px;
+          background: rgba(255,160,80,0.04);
+          border-radius: 0 0 4px 4px;
+          padding: 8px 10px;
+        }
+        h1 { font-size: 22px; margin-bottom: 10px; }
+        h2 { font-size: 18px; margin-bottom: 8px; }
+        h3 { font-size: 15px; margin-bottom: 6px; }
+        p { margin-bottom: 8px; }
+        ul, ol { margin: 0 0 8px 20px; }
+        li { margin-bottom: 4px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        th, td { border: 1px solid #ccc; padding: 5px 8px; text-align: left; }
+        th { background: #f5f5f5; font-weight: 600; }
+        div[data-component='page-break'] {
+          border-top: 2px dashed #aaa;
+          margin: 16px 0;
+          text-align: center;
+          font-size: 9px;
+          color: #999;
+          letter-spacing: .1em;
+          padding-top: 4px;
+        }
+        div[data-component='page-break']::after { content: '— PAGE BREAK —'; }
+        span[data-placeholder='true'] {
+          background: rgba(232,184,75,0.15);
+          color: #b8860b;
+          border: 1px solid rgba(232,184,75,0.4);
+          border-radius: 3px;
+          padding: 1px 5px;
+          font-weight: 600;
+        }
+      `;
+
+      const srcdoc = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+        <style>${PREVIEW_CSS}</style></head><body>
+        <div class="pg-page">
+          ${headerHtml ? `<div class="pg-page-header">${headerHtml.replace(/<\/?header[^>]*>/g, '')}</div>` : ''}
+          <div class="pg-page-body">${bodyHtml}</div>
+          ${footerHtml ? `<div class="pg-page-footer">${footerHtml.replace(/<\/?footer[^>]*>/g, '')}</div>` : ''}
+        </div>
+      </body></html>`;
+
+      setPreviewSrcdoc(srcdoc);
+      setPreviewHtml(cleanHtml); // keep for legacy usage
     } catch {
-      setPreviewHtml('<p>Unable to render preview.</p>');
+      setPreviewSrcdoc('<html><body style="color:red;padding:20px">Unable to render preview.</body></html>');
     }
     setIsPreviewOpen(true);
   }, [editor]);
@@ -1317,17 +1435,46 @@ export default function TemplateEditor({
   }, [editor, tableMode, tableHeaders, tableRows, tableCaption, tableColumnRowHeaders, tableColumnNames, tableColumnMatrix]);
 
   const insertPageBreak = useCallback(() => {
-    editor?.chain().focus().insertContent({ type: 'pageBreakComponent' }).run();
+    if (!editor) return;
+    const { state } = editor;
+    const { $from } = state.selection;
+    // Climb to the direct child of the document (depth 1) and insert after it.
+    // If we're already at depth 0 (empty doc), afterTopLevel will be the doc end.
+    const topDepth = Math.min($from.depth, 1);
+    const afterTopLevel = $from.after(topDepth > 0 ? topDepth : 0);
+    editor.chain()
+      .focus()
+      .insertContentAt(afterTopLevel, { type: 'pageBreakComponent' })
+      .run();
   }, [editor]);
 
   const insertHeaderComponent = useCallback(() => {
-    const node = createHeaderComponent({ components: [] });
-    editor?.chain().focus().insertContent(node as any).run();
+    if (!editor) return;
+    // Always place header at the very start of the document.
+    editor.chain()
+      .focus()
+      .insertContentAt(0, {
+        type: 'headerComponent',
+        content: [{ type: 'paragraph' }],
+      })
+      .setTextSelection(1) // Move cursor inside the just-inserted paragraph
+      .scrollIntoView()
+      .run();
   }, [editor]);
 
   const insertFooterComponent = useCallback(() => {
-    const node = createFooterComponent({ components: [] });
-    editor?.chain().focus().insertContent(node as any).run();
+    if (!editor) return;
+    // Always place footer at the end of the document.
+    const endPos = editor.state.doc.content.size;
+    editor.chain()
+      .focus()
+      .insertContentAt(endPos, {
+        type: 'footerComponent',
+        content: [{ type: 'paragraph' }],
+      })
+      .setTextSelection(endPos + 1) // Move cursor inside the just-inserted paragraph
+      .scrollIntoView()
+      .run();
   }, [editor]);
 
   // ── Color Swatch Picker sub-component ──────────────────────
@@ -2711,13 +2858,18 @@ export default function TemplateEditor({
 
       {isPreviewOpen && (
         <div className="pg-overlay" onClick={(e) => e.target === e.currentTarget && setIsPreviewOpen(false)}>
-          <div className="pg-modal pg-modal-xl" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
+          <div className="pg-modal pg-modal-xl pg-modal--preview" role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
             <div className="pg-modal-header">
               <h2 className="pg-modal-title" id="preview-modal-title">Document Preview</h2>
               <button className="pg-modal-close" onClick={() => setIsPreviewOpen(false)} aria-label="Close">✕</button>
             </div>
-            <div className="pg-modal-body">
-              <div className="pg-preview-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            <div className="pg-modal-body pg-modal-body--preview">
+              <iframe
+                srcDoc={previewSrcdoc}
+                title="Document Preview"
+                className="pg-preview-iframe"
+                sandbox="allow-same-origin"
+              />
             </div>
           </div>
         </div>
