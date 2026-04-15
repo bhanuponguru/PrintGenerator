@@ -10,7 +10,10 @@ export const PageBreakComponent = Node.create({
   },
 
   renderHTML() {
-    return ['div', { 'data-component': 'page-break', style: 'page-break-after: always;' }];
+    return ['div', {
+      'data-component': 'page-break',
+      style: 'display: block; page-break-after: always; break-after: page; height: 0; overflow: hidden;',
+    }];
   },
 
   addCommands() {

@@ -1038,6 +1038,73 @@ select.pg-input option {
   box-shadow: 0 0 0 2px var(--pg-accent-dim);
 }
 
+/* ─── Page Break Component (visible in editor) ──────────── */
+.pg-prosemirror div[data-component="page-break"] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: auto !important;
+  overflow: visible !important;
+  visibility: visible !important;
+  margin: 20px 0;
+  padding: 8px 0;
+  border: none;
+  cursor: default;
+  user-select: none;
+}
+
+.pg-prosemirror div[data-component="page-break"]::before {
+  content: '';
+  flex: 1;
+  height: 0;
+  border-top: 2px dashed rgba(232, 184, 75, 0.45);
+}
+
+.pg-prosemirror div[data-component="page-break"]::after {
+  content: 'PAGE BREAK';
+  font-size: 9px;
+  font-family: var(--pg-font-mono);
+  letter-spacing: 0.15em;
+  color: var(--pg-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pg-prosemirror div[data-component="page-break"].ProseMirror-selectednode {
+  outline: 2px solid var(--pg-accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* Page Break in preview modal */
+.pg-preview-body div[data-component="page-break"] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: auto !important;
+  overflow: visible !important;
+  visibility: visible !important;
+  margin: 24px 0;
+  padding: 6px 0;
+  border: none;
+}
+
+.pg-preview-body div[data-component="page-break"]::before {
+  content: '';
+  flex: 1;
+  border-top: 2px dashed #3a3529;
+}
+
+.pg-preview-body div[data-component="page-break"]::after {
+  content: '— PAGE BREAK —';
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--pg-text-muted);
+  white-space: nowrap;
+}
+
 /* ─── Editor footer (detected keys) ─────────────────────── */
 .pg-tiptap-footer {
   display: flex;

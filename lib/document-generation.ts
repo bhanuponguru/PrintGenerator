@@ -112,6 +112,17 @@ const DOCUMENT_CSS = `
   span[data-placeholder='true'] {
     font-weight: 600;
   }
+  div[data-component="page-break"] {
+    display: block;
+    page-break-after: always;
+    break-after: page;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    overflow: hidden;
+    visibility: hidden;
+  }
 `;
 
 /**
