@@ -1359,7 +1359,7 @@ select.pg-input option {
 
 .pg-editor-layout {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  grid-template-columns: 1fr;
   min-height: 360px;
 }
 

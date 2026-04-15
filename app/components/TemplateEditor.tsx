@@ -495,6 +495,9 @@ export default function TemplateEditor({
   const [previewHtml, setPreviewHtml] = useState('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [selectedBlockStyle, setSelectedBlockStyle] = useState<'paragraph' | 'h1' | 'h2' | 'h3'>('paragraph');
+  // Incrementing this on every editor transaction forces React to re-render the
+  // toolbar so that active() calls (isActive checks) reflect the latest state.
+  const [, setEditorTick] = useState(0);
 
   // ── Color picker state ──────────────────────────────────────
   const [colorPickerOpen, setColorPickerOpen] = useState<'text' | 'highlight' | 'bg' | null>(null);
@@ -574,17 +577,21 @@ export default function TemplateEditor({
       setValidationErrors(errors);
       onValidationChange?.({ isValid: errors.length === 0, errors });
     },
+    onTransaction({ editor: ed }) {
+      // Bump tick so any render-time isActive() calls see the fresh state.
+      setEditorTick((t) => t + 1);
+
+      if (ed.isActive('heading', { level: 1 })) setSelectedBlockStyle('h1');
+      else if (ed.isActive('heading', { level: 2 })) setSelectedBlockStyle('h2');
+      else if (ed.isActive('heading', { level: 3 })) setSelectedBlockStyle('h3');
+      else setSelectedBlockStyle('paragraph');
+    },
     onUpdate({ editor: ed }) {
       const json = ed.getJSON();
       onChange(json);
       const errors = collectValidationErrors(json as Record<string, any>);
       setValidationErrors(errors);
       onValidationChange?.({ isValid: errors.length === 0, errors });
-
-      if (ed.isActive('heading', { level: 1 })) setSelectedBlockStyle('h1');
-      else if (ed.isActive('heading', { level: 2 })) setSelectedBlockStyle('h2');
-      else if (ed.isActive('heading', { level: 3 })) setSelectedBlockStyle('h3');
-      else setSelectedBlockStyle('paragraph');
     },
     immediatelyRender: false,
     editorProps: {
@@ -1676,16 +1683,6 @@ export default function TemplateEditor({
             </div>
           </div>
 
-          {/* List style picker */}
-          <div className="pg-style-section">
-            <span className="pg-style-panel-label">List</span>
-            <button type="button" className={`pg-tb-btn${active('bulletList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleBulletList().run())} title="Bullet list">
-              <List size={14} /> Bullet
-            </button>
-            <button type="button" className={`pg-tb-btn${active('orderedList')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleOrderedList().run())} title="Numbered list">
-              <ListOrdered size={14} /> Number
-            </button>
-          </div>
 
           {/* Active background chip */}
           {containerBgColor && (
