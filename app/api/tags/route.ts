@@ -44,7 +44,15 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body: TagCreateInput = await request.json();
+    let body: TagCreateInput;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'Invalid JSON payload' },
+        { status: 400 }
+      );
+    }
 
     // Validate input
     if (!body.name || typeof body.name !== 'string' || body.name.trim() === '') {
@@ -93,7 +101,15 @@ export async function POST(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   try {
-    const body: TagUpdateInput = await request.json();
+    let body: TagUpdateInput;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'Invalid JSON payload' },
+        { status: 400 }
+      );
+    }
 
     if (!body.old_name || typeof body.old_name !== 'string' ||
         !body.new_name || typeof body.new_name !== 'string' || body.new_name.trim() === '') {

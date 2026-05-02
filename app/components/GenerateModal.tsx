@@ -174,12 +174,13 @@ function parseInputJson(text: string): { ok: true; value: Array<Record<string, u
   try {
     const parsed = JSON.parse(text);
     if (!Array.isArray(parsed)) {
-      return { ok: false, error: 'JSON must be an array of objects.' };
+      return { ok: false, error: 'The uploaded file does not contain a JSON array. Please ensure it is a properly formatted array of objects.' };
     }
     const points = parsed.map((entry) => (isRecord(entry) ? entry : {}));
     return { ok: true, value: points };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Invalid JSON' };
+    const details = error instanceof Error ? error.message : 'Syntax error';
+    return { ok: false, error: `The uploaded file is not valid JSON. Please check for syntax errors. Details: ${details}` };
   }
 }
 
@@ -821,7 +822,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
       const content = String(event.target?.result || '');
       const parsed = parseInputJson(content);
       if (!parsed.ok) {
-        onError(`Invalid JSON file: ${parsed.error}`);
+        onError(parsed.error);
       } else {
         setDataPoints(parsed.value);
         setDataPointsJson(prettyJson(parsed.value));
@@ -1196,12 +1197,6 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
         try {
           const data = await res.json();
           errMsg = data.error ?? errMsg;
-          if (data.data?.invalidDataPoints) {
-            const details = (data.data.invalidDataPoints as { index: number; missing: string[] }[])
-              .map((p) => `Row ${p.index + 1}: missing ${p.missing.join(', ')}`)
-              .join(' · ');
-            errMsg = `${errMsg} — ${details}`;
-          }
         } catch {
           // no-op
         }

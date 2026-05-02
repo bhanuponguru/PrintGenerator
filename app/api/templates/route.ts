@@ -101,7 +101,16 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body: TemplateInput = await request.json();
+    let body: TemplateInput;
+    try {
+      body = await request.json();
+    } catch {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Invalid JSON payload',
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
 
     // Validate required fields
     if (!body.name || typeof body.name !== 'string') {

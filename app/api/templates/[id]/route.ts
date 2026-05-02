@@ -167,7 +167,16 @@ export async function PUT(
       return NextResponse.json(response, { status: 400 });
     }
 
-    const body: TemplateUpdate = await request.json();
+    let body: TemplateUpdate;
+    try {
+      body = await request.json();
+    } catch {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Invalid JSON payload',
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
 
     // Build update object
     const updateFields: any = {

@@ -85,25 +85,20 @@ export async function POST(
 
     // Extract the JSON body payload containing the template variables
     // Safely support both "dataPoints" and "datapoints" object keys for legacy robustness
-    const body = (await request.json()) as GenerateDocumentsRequest;
+    let body: GenerateDocumentsRequest;
+    try {
+      body = (await request.json()) as GenerateDocumentsRequest;
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'Invalid JSON payload' },
+        { status: 400 }
+      );
+    }
     const dataPoints = body.dataPoints ?? body.datapoints;
 
     if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
       return NextResponse.json(
         { success: false, error: 'dataPoints is required and must be a non-empty array' },
-        { status: 400 }
-      );
-    }
-
-    // Iterate through every mapped object item ensuring they are properly formatted dictionaries
-    // We cannot render arrays or primitive strings/numbers at the top level
-    const hasInvalidDataPoint = dataPoints.some(
-      (dataPoint) => !dataPoint || typeof dataPoint !== 'object' || Array.isArray(dataPoint)
-    );
-
-    if (hasInvalidDataPoint) {
-      return NextResponse.json(
-        { success: false, error: 'Each data point must be a JSON object' },
         { status: 400 }
       );
     }
@@ -125,56 +120,56 @@ export async function POST(
       );
     }
 
+    const validDataPoints: Array<{ index: number; data: DataPoint }> = [];
+    let errorLog = '';
+
     // Gather placeholder type and template-level config contracts (mode/headers/type maps).
     const placeholderConfigMap = collectPlaceholderValidationConfigMap(templateDoc.template);
     
-    // Accumulator array tracking data array indexes that miss critical placeholders
-    const invalidDataPoints: Array<{ index: number; missing: string[]; invalid: string[] }> = [];
-    const normalizedDataPoints: DataPoint[] = [];
-
     for (let i = 0; i < dataPoints.length; i += 1) {
-      const validation = validateDataPointAgainstPlaceholderConfigMap(dataPoints[i], placeholderConfigMap);
-      if (validation.missing.length > 0 || validation.invalid.length > 0) {
-        invalidDataPoints.push({
-          index: i,
-          missing: validation.missing,
-          invalid: validation.invalid,
-        });
+      const dataPoint = dataPoints[i];
+      if (!dataPoint || typeof dataPoint !== 'object' || Array.isArray(dataPoint)) {
+        errorLog += `[Row ${i + 1}] Error: Data point must be a JSON object, but received ${typeof dataPoint}.\n`;
         continue;
       }
 
-      normalizedDataPoints.push(validation.normalizedDataPoint);
-    }
+      const validation = validateDataPointAgainstPlaceholderConfigMap(dataPoint, placeholderConfigMap);
+      if (validation.missing.length > 0 || validation.invalid.length > 0) {
+        errorLog += `[Row ${i + 1}] Validation Failed:\n`;
+        if (validation.missing.length > 0) {
+          errorLog += `  - Missing fields: ${validation.missing.join(', ')}\n`;
+        }
+        if (validation.invalid.length > 0) {
+          errorLog += `  - Invalid fields: ${validation.invalid.join(', ')}\n`;
+        }
+        continue;
+      }
 
-    // Fail early if any provided sequence item is missing required variables.
-    // This prevents partial ZIP generation failures or broken visual PDFs.
-    if (invalidDataPoints.length > 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Invalid placeholder values',
-          data: {
-            invalidDataPoints,
-          },
-        },
-        { status: 400 }
-      );
+      validDataPoints.push({ index: i, data: validation.normalizedDataPoint });
     }
 
     // Initialize the asynchronous ZIP archive wrapper
     const zip = new JSZip();
 
     // Primary Generation Loop: Iterate sequentially across the supplied variable combinations
-    for (let i = 0; i < normalizedDataPoints.length; i += 1) {
-      // 1. Swap placeholders in the JSON AST with the specific dictionary mappings
-      const filledDocument = applyTemplateDataPoint(templateDoc.template, normalizedDataPoints[i]);
-      // 2. Synthesize complete browser-ready HTML from the AST
-      const html = renderDocumentHtml(filledDocument);
-      // 3. Mount a headless Chrome instance to snapshot the DOM as an A4 formatted PDF
-      const pdfBytes = await createPdfFromDocumentHtml(html);
+    for (const validPoint of validDataPoints) {
+      try {
+        // 1. Swap placeholders in the JSON AST with the specific dictionary mappings
+        const filledDocument = applyTemplateDataPoint(templateDoc.template, validPoint.data);
+        // 2. Synthesize complete browser-ready HTML from the AST
+        const html = renderDocumentHtml(filledDocument);
+        // 3. Mount a headless Chrome instance to snapshot the DOM as an A4 formatted PDF
+        const pdfBytes = await createPdfFromDocumentHtml(html);
 
-      // Immediately buffer the completed file representation into the active ZIP directory
-      zip.file(`document-${i + 1}.pdf`, pdfBytes);
+        // Immediately buffer the completed file representation into the active ZIP directory
+        zip.file(`document-${validPoint.index + 1}.pdf`, pdfBytes);
+      } catch (err) {
+        errorLog += `[Row ${validPoint.index + 1}] Error generating PDF: ${err instanceof Error ? err.message : String(err)}\n`;
+      }
+    }
+
+    if (errorLog) {
+      zip.file('error.log', errorLog);
     }
 
     // Crunch the buffered files compiling a unified byte array via DEFLATE compression
