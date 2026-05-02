@@ -4,6 +4,12 @@ import Highlight from '@tiptap/extension-highlight';
 import { Color } from '@tiptap/extension-color';
 import { TextStyle } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
+import { Table as TableExtension } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { CustomTableCell as TableCell } from '@/lib/tiptap/custom-table';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { Image as ImageExtension } from '@tiptap/extension-image';
+import { Link as LinkExtension } from '@tiptap/extension-link';
 import puppeteer, { Browser } from 'puppeteer';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import {
@@ -1198,6 +1204,12 @@ export function renderDocumentHtml(documentJson: Record<string, unknown>): strin
     Color,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Placeholder,
+    ImageExtension,
+    LinkExtension.configure({ openOnClick: false, HTMLAttributes: { target: '_blank', rel: 'noopener noreferrer' } }),
+    TableExtension.configure({ resizable: true }),
+    TableRow,
+    TableHeader,
+    TableCell,
     ...ComponentExtensions,
   ]);
 }

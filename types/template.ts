@@ -3,6 +3,13 @@ import { ObjectId } from 'mongodb';
 /** Shared template and placeholder typing used across the app. */
 export type TableMode = 'row_data' | 'column_data';
 export type ListStyle = 'bulleted' | 'numbered' | 'plain';
+export type TextAlignStyle = 'left' | 'center' | 'right' | 'justify';
+
+export interface ColumnStyle {
+  align?: TextAlignStyle;
+  color?: string;
+  backgroundColor?: string;
+}
 
 /** Base schema discriminant for all placeholder value types. */
 export interface BaseTypeSchema {
@@ -150,6 +157,7 @@ export interface TableTypeSchema extends BaseTypeSchema {
   caption?: string; // static caption defined at template creation time
   dynamic_fields?: string[];
   static_values?: Record<string, unknown>;
+  column_styles?: Record<string, ColumnStyle>;
 }
 
 /** Union of every placeholder schema supported by the editor and backend. */

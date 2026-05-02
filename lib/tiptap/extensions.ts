@@ -1,9 +1,9 @@
 import { ContainerComponent, createContainerComponent, validateContainerAttrs } from '@/lib/tiptap/container';
-import { HyperlinkComponent, createHyperlinkComponent, validateHyperlinkAttrs } from '@/lib/tiptap/hyperlink';
-import { ImageComponent, createImageComponent, validateImageAttrs } from '@/lib/tiptap/image';
+import { HyperlinkComponent } from '@/lib/tiptap/hyperlink';
+import { ImageComponent } from '@/lib/tiptap/image';
+import { TableComponent } from '@/lib/tiptap/table';
 import { ListComponent, createListComponent, validateListAttrs } from '@/lib/tiptap/list';
 import { createPlaceholderNode, substitutePlaceholderValue, validatePlaceholderAttrs, deriveSchemaFromChildren } from '@/lib/tiptap/placeholder';
-import { TableComponent, createTableComponent, validateTableAttrs } from '@/lib/tiptap/table';
 import { PageComponent, createPageComponent, validatePageAttrs } from '@/lib/tiptap/page';
 import { HeaderComponent, createHeaderComponent, validateHeaderAttrs } from '@/lib/tiptap/header';
 import { FooterComponent, createFooterComponent, validateFooterAttrs } from '@/lib/tiptap/footer';
@@ -14,9 +14,9 @@ import { getComponentTypeExpectation } from '@/lib/tiptap/component-type';
 export const ComponentExtensions = [
   ImageComponent,
   HyperlinkComponent,
+  TableComponent,
   ListComponent,
   ContainerComponent,
-  TableComponent,
   PageComponent,
   HeaderComponent,
   FooterComponent,
@@ -24,22 +24,16 @@ export const ComponentExtensions = [
 ];
 
 export {
-  createImageComponent,
-  createHyperlinkComponent,
   createListComponent,
   createContainerComponent,
-  createTableComponent,
   createPageComponent,
   createHeaderComponent,
   createFooterComponent,
   createPlaceholderNode,
   substitutePlaceholderValue,
   getComponentTypeExpectation,
-  validateImageAttrs,
-  validateHyperlinkAttrs,
   validateListAttrs,
   validateContainerAttrs,
-  validateTableAttrs,
   validatePlaceholderAttrs,
   validatePageAttrs,
   validateHeaderAttrs,

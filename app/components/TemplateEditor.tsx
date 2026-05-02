@@ -7,6 +7,12 @@ import Highlight from '@tiptap/extension-highlight';
 import { Color } from '@tiptap/extension-color';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { generateHTML } from '@tiptap/html';
+import { Table as TableExtension } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { CustomTableCell as TableCell } from '@/lib/tiptap/custom-table';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { Image as ImageExtension } from '@tiptap/extension-image';
+import { Link as LinkExtension } from '@tiptap/extension-link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlignCenter,
@@ -38,24 +44,18 @@ import { Placeholder } from '@/lib/tiptap/placeholder';
 import { PaginationPlugin } from '@/lib/tiptap/pagination-plugin';
 import {
   ComponentExtensions,
-  createHyperlinkComponent,
   createHeaderComponent,
-  createImageComponent,
   createFooterComponent,
-  createTableComponent,
   deriveSchemaFromChildren,
   validateContainerAttrs,
   validateFooterAttrs,
   validateHeaderAttrs,
-  validateHyperlinkAttrs,
-  validateImageAttrs,
   validateListAttrs,
   validatePageAttrs,
   validatePlaceholderAttrs,
-  validateTableAttrs,
 } from '@/lib/tiptap/extensions';
 import { fileToDataUrl } from '@/lib/image-utils';
-import { ComponentTypeSchema, CustomPlaceholderItemSchema, ListStyle, TableMode } from '@/types/template';
+import { ComponentTypeSchema, ColumnStyle, CustomPlaceholderItemSchema, ListStyle, TableMode, TableTypeSchema } from '@/types/template';
 
 interface TemplateEditorProps {
   initialContent?: Record<string, unknown>;
@@ -440,24 +440,9 @@ function collectValidationErrors(documentJson: Record<string, any>): string[] {
       }
     }
 
-    if (node.type === 'imageComponent') {
-      const err = validateImageAttrs(attrs);
-      if (err) errors.push(`imageComponent: ${err}`);
-    }
-
-    if (node.type === 'hyperlinkComponent') {
-      const err = validateHyperlinkAttrs(attrs);
-      if (err) errors.push(`hyperlinkComponent: ${err}`);
-    }
-
     if (node.type === 'listComponent') {
       const err = validateListAttrs(attrs);
       if (err) errors.push(`listComponent: ${err}`);
-    }
-
-    if (node.type === 'tableComponent') {
-      const err = validateTableAttrs(attrs);
-      if (err) errors.push(`tableComponent: ${err}`);
     }
 
     if (node.type === 'containerComponent') {
@@ -502,7 +487,7 @@ export default function TemplateEditor({
   const [, setEditorTick] = useState(0);
 
   // ── Color picker state ──────────────────────────────────────
-  const [colorPickerOpen, setColorPickerOpen] = useState<'text' | 'highlight' | 'bg' | null>(null);
+  const [colorPickerOpen, setColorPickerOpen] = useState<'text' | 'highlight' | 'bg' | 'cellBg' | null>(null);
   const [activeTextColor, setActiveTextColor] = useState('#000000');
   const [activeHighlightColor, setActiveHighlightColor] = useState('#ffff00');
   const [containerBgColor, setContainerBgColor] = useState('');
@@ -541,6 +526,9 @@ export default function TemplateEditor({
   const [phTableColumnKinds, setPhTableColumnKinds] = useState<Record<string, PlaceholderKind>>({});
   const [phTableRowKinds, setPhTableRowKinds] = useState<Record<string, PlaceholderKind>>({});
   const [phTableCaptionText, setPhTableCaptionText] = useState('');
+  const [phTableColStyles, setPhTableColStyles] = useState<Record<string, ColumnStyle>>({});
+  const [phTableStriped, setPhTableStriped] = useState(false);
+  const [phTextColor, setPhTextColor] = useState('#000000');
   const [imageSrc, setImageSrc] = useState('https://example.com/logo.png');
   const [imageAlt, setImageAlt] = useState('Logo');
 
@@ -567,6 +555,12 @@ export default function TemplateEditor({
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       Placeholder,
       PaginationPlugin,
+      ImageExtension,
+      LinkExtension.configure({ openOnClick: false, HTMLAttributes: { target: '_blank', rel: 'noopener noreferrer' } }),
+      TableExtension.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
       ...ComponentExtensions,
     ],
     content: initialContent ?? {
@@ -706,20 +700,39 @@ export default function TemplateEditor({
   const applyTextColor = (color: string) => {
     setActiveTextColor(color);
     setColorPickerOpen(null);
+    let chain = editor?.chain().focus();
+    if (editor?.isActive('placeholder')) {
+      chain = chain?.updateAttributes('placeholder', { color: color === 'auto' ? null : color });
+    }
     if (color === 'auto') {
-      editor?.chain().focus().unsetColor().run();
+      chain?.unsetColor().run();
     } else {
-      editor?.chain().focus().setColor(color).run();
+      chain?.setColor(color).run();
     }
   };
 
   const applyHighlightColor = (color: string) => {
     setActiveHighlightColor(color);
     setColorPickerOpen(null);
+    let chain = editor?.chain().focus();
+    if (editor?.isActive('placeholder')) {
+      chain = chain?.updateAttributes('placeholder', { backgroundColor: color === 'auto' ? null : color });
+    }
     if (color === 'auto') {
-      editor?.chain().focus().unsetHighlight().run();
+      chain?.unsetHighlight().run();
     } else {
-      editor?.chain().focus().setHighlight({ color }).run();
+      chain?.setHighlight({ color }).run();
+    }
+  };
+
+  const applyCellBgColor = (color: string) => {
+    setColorPickerOpen(null);
+    if (color === 'transparent' || color === '') {
+      editor?.chain().focus().updateAttributes('tableCell', { backgroundColor: null }).run();
+      editor?.chain().focus().updateAttributes('tableHeader', { backgroundColor: null }).run();
+    } else {
+      editor?.chain().focus().updateAttributes('tableCell', { backgroundColor: color }).run();
+      editor?.chain().focus().updateAttributes('tableHeader', { backgroundColor: color }).run();
     }
   };
 
@@ -1059,6 +1072,12 @@ export default function TemplateEditor({
         Color,
         TextAlign.configure({ types: ['heading', 'paragraph'] }),
         Placeholder,
+        ImageExtension,
+        LinkExtension.configure({ openOnClick: false, HTMLAttributes: { target: '_blank', rel: 'noopener noreferrer' } }),
+        TableExtension.configure({ resizable: true }),
+        TableRow,
+        TableHeader,
+        TableCell,
         ...ComponentExtensions,
       ]);
 
@@ -1324,6 +1343,11 @@ export default function TemplateEditor({
     }
 
     attrs.schema = schema;
+    attrs.color = phTextColor === '#000000' ? null : phTextColor;
+    if (phKind === 'table') {
+      attrs.striped = phTableStriped;
+      (schema as TableTypeSchema).column_styles = phTableColStyles;
+    }
 
     const ok = editor
       .chain()
@@ -1347,12 +1371,11 @@ export default function TemplateEditor({
 
   const insertImageComponent = useCallback(() => {
     try {
-      const node = createImageComponent({ src: imageSrc.trim(), alt: imageAlt.trim() }, {});
-      editor?.chain().focus().insertContent(node as any).run();
+      editor?.chain().focus().setImage({ src: imageSrc.trim(), alt: imageAlt.trim() }).run();
       setInsertError('');
       setInsertPanel(null);
     } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid image component');
+      setInsertError(error instanceof Error ? error.message : 'Invalid image');
     }
   }, [editor, imageSrc, imageAlt]);
 
@@ -1369,12 +1392,13 @@ export default function TemplateEditor({
 
   const insertHyperlinkComponent = useCallback(() => {
     try {
-      const node = createHyperlinkComponent({ alias: linkAlias.trim(), url: linkUrl.trim() }, {});
-      editor?.chain().focus().insertContent(node as any).run();
+      const url = linkUrl.trim();
+      const alias = linkAlias.trim() || url;
+      editor?.chain().focus().insertContent(`<a href="${escapeHtml(url)}">${escapeHtml(alias)}</a>`).run();
       setInsertError('');
       setInsertPanel(null);
     } catch (error) {
-      setInsertError(error instanceof Error ? error.message : 'Invalid hyperlink component');
+      setInsertError(error instanceof Error ? error.message : 'Invalid hyperlink');
     }
   }, [editor, linkAlias, linkUrl]);
 
@@ -1395,11 +1419,22 @@ export default function TemplateEditor({
           return row;
         });
 
-        const node = createTableComponent(
-          { rows },
-          { headers, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) }
-        );
-        editor?.chain().focus().insertContent(node as any).run();
+        const tableHtml = `
+          <table>
+            ${tableCaption.trim() ? `<caption>${escapeHtml(tableCaption.trim())}</caption>` : ''}
+            <tbody>
+              <tr>
+                ${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
+              </tr>
+              ${rows.map(row => `
+                <tr>
+                  ${headers.map(h => `<td>${escapeHtml(String(row[h] ?? ''))}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+        editor?.chain().focus().insertContent(tableHtml).run();
       } else {
         const rowHeaders = tableColumnRowHeaders.map((header) => normalizeIdentifierDraft(header)).filter(Boolean);
         const colNames = tableColumnNames.map((name) => normalizeIdentifierDraft(name)).filter(Boolean);
@@ -1410,21 +1445,24 @@ export default function TemplateEditor({
           return;
         }
 
-        const columns = Object.fromEntries(
-          colNames.map((name, colIdx) => {
-            const columnData: Record<string, unknown> = {};
-            rowHeaders.forEach((rowHeader, rowIdx) => {
-              columnData[rowHeader] = matrix[rowIdx]?.[colIdx] ?? '';
-            });
-            return [name, columnData];
-          })
-        );
-
-        const node = createTableComponent(
-          { columns },
-          { headers: rowHeaders, ...(tableCaption.trim() ? { caption: tableCaption.trim() } : {}) }
-        );
-        editor?.chain().focus().insertContent(node as any).run();
+        const tableHtml = `
+          <table>
+            ${tableCaption.trim() ? `<caption>${escapeHtml(tableCaption.trim())}</caption>` : ''}
+            <tbody>
+              <tr>
+                <th></th>
+                ${colNames.map(name => `<th>${escapeHtml(name)}</th>`).join('')}
+              </tr>
+              ${rowHeaders.map((rowHeader, rowIdx) => `
+                <tr>
+                  <th>${escapeHtml(rowHeader)}</th>
+                  ${colNames.map((_, colIdx) => `<td>${escapeHtml(String(matrix[rowIdx]?.[colIdx] ?? ''))}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+        editor?.chain().focus().insertContent(tableHtml).run();
       }
 
       setInsertError('');
@@ -1551,16 +1589,44 @@ export default function TemplateEditor({
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button type="button" className={`pg-tb-btn${active('bold')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleBold().run())} title="Bold">
+        <button type="button" className={`pg-tb-btn${active('bold')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            const isBold = editor.getAttributes('placeholder').fontWeight === 'bold';
+            chain = chain?.updateAttributes('placeholder', { fontWeight: isBold ? null : 'bold' });
+          }
+          chain?.toggleBold().run();
+        })} title="Bold">
           <Bold size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${active('italic')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleItalic().run())} title="Italic">
+        <button type="button" className={`pg-tb-btn${active('italic')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            const isItalic = editor.getAttributes('placeholder').fontStyle === 'italic';
+            chain = chain?.updateAttributes('placeholder', { fontStyle: isItalic ? null : 'italic' });
+          }
+          chain?.toggleItalic().run();
+        })} title="Italic">
           <Italic size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${active('underline')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleUnderline().run())} title="Underline">
+        <button type="button" className={`pg-tb-btn${active('underline')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            const isUnderline = editor.getAttributes('placeholder').textDecoration === 'underline';
+            chain = chain?.updateAttributes('placeholder', { textDecoration: isUnderline ? null : 'underline' });
+          }
+          chain?.toggleUnderline().run();
+        })} title="Underline">
           <UnderlineIcon size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${active('strike')}`} onMouseDown={cmd(() => editor?.chain().focus().toggleStrike().run())} title="Strikethrough">
+        <button type="button" className={`pg-tb-btn${active('strike')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            const isStrike = editor.getAttributes('placeholder').textDecoration === 'line-through';
+            chain = chain?.updateAttributes('placeholder', { textDecoration: isStrike ? null : 'line-through' });
+          }
+          chain?.toggleStrike().run();
+        })} title="Strikethrough">
           <Strikethrough size={16} />
         </button>
 
@@ -1704,16 +1770,40 @@ export default function TemplateEditor({
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button type="button" className={`pg-tb-btn${activeAlign('left')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('left').run())} title="Align left">
+        <button type="button" className={`pg-tb-btn${activeAlign('left')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            chain = chain?.updateAttributes('placeholder', { textAlign: 'left' });
+          }
+          chain?.setTextAlign('left').run();
+        })} title="Align left">
           <AlignLeft size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${activeAlign('center')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('center').run())} title="Align center">
+        <button type="button" className={`pg-tb-btn${activeAlign('center')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            chain = chain?.updateAttributes('placeholder', { textAlign: 'center' });
+          }
+          chain?.setTextAlign('center').run();
+        })} title="Align center">
           <AlignCenter size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${activeAlign('right')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('right').run())} title="Align right">
+        <button type="button" className={`pg-tb-btn${activeAlign('right')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            chain = chain?.updateAttributes('placeholder', { textAlign: 'right' });
+          }
+          chain?.setTextAlign('right').run();
+        })} title="Align right">
           <AlignRight size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${activeAlign('justify')}`} onMouseDown={cmd(() => editor?.chain().focus().setTextAlign('justify').run())} title="Justify">
+        <button type="button" className={`pg-tb-btn${activeAlign('justify')}`} onMouseDown={cmd(() => {
+          let chain = editor?.chain().focus();
+          if (editor?.isActive('placeholder')) {
+            chain = chain?.updateAttributes('placeholder', { textAlign: 'justify' });
+          }
+          chain?.setTextAlign('justify').run();
+        })} title="Justify">
           <AlignJustify size={16} />
         </button>
 
@@ -1728,7 +1818,13 @@ export default function TemplateEditor({
 
         <span className="pg-tb-sep" aria-hidden="true" />
 
-        <button type="button" className={`pg-tb-btn pg-tb-btn--accent${insertPanel === 'placeholder' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'placeholder' ? null : 'placeholder'); }} title="Insert typed placeholder">
+        <button type="button" className={`pg-tb-btn pg-tb-btn--accent${insertPanel === 'placeholder' ? ' pg-tb-active' : ''}`} onClick={() => { 
+          setInsertError(''); 
+          setPhTableColStyles({});
+          setPhTextColor('#000000');
+          setPhTableStriped(false);
+          setInsertPanel(insertPanel === 'placeholder' ? null : 'placeholder'); 
+        }} title="Insert typed placeholder">
           <Braces size={16} />
         </button>
         <button type="button" className={`pg-tb-btn${insertPanel === 'image' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'image' ? null : 'image'); }} title="Insert image component">
@@ -1737,7 +1833,13 @@ export default function TemplateEditor({
         <button type="button" className={`pg-tb-btn${insertPanel === 'hyperlink' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'hyperlink' ? null : 'hyperlink'); }} title="Insert hyperlink component">
           <LinkIcon size={16} />
         </button>
-        <button type="button" className={`pg-tb-btn${insertPanel === 'table' ? ' pg-tb-active' : ''}`} onClick={() => { setInsertError(''); setInsertPanel(insertPanel === 'table' ? null : 'table'); }} title="Insert table component">
+        <button type="button" className={`pg-tb-btn${insertPanel === 'table' ? ' pg-tb-active' : ''}`} onClick={() => { 
+          setInsertError(''); 
+          setPhTableColStyles({});
+          setPhTextColor('#000000');
+          setPhTableStriped(false);
+          setInsertPanel(insertPanel === 'table' ? null : 'table'); 
+        }} title="Insert table component">
           <Table size={16} />
         </button>
 
@@ -1773,6 +1875,49 @@ export default function TemplateEditor({
           Preview
         </button>
       </div>
+
+      {/* ── Contextual Table Toolbar ── */}
+      {editor?.isActive('table') && (
+        <div className="pg-tiptap-toolbar" style={{ borderTop: 'none', borderBottom: '1px solid #222', background: 'transparent' }} role="toolbar" aria-label="Table controls">
+          <span className="pg-style-panel-label" style={{ marginRight: 8, marginLeft: 8 }}>Table:</span>
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().addRowBefore().run())}>Insert Row Above</button>
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().addRowAfter().run())}>Insert Row Below</button>
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().deleteRow().run())}>Delete Row</button>
+          <span className="pg-tb-sep" aria-hidden="true" />
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().addColumnBefore().run())}>Insert Col Left</button>
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().addColumnAfter().run())}>Insert Col Right</button>
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().deleteColumn().run())}>Delete Col</button>
+          <span className="pg-tb-sep" aria-hidden="true" />
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().mergeCells().run())} disabled={!editor?.can().mergeCells()}>Merge Cells</button>
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px' }} onMouseDown={cmd(() => editor?.chain().focus().splitCell().run())} disabled={!editor?.can().splitCell()}>Split Cell</button>
+          <span className="pg-tb-sep" aria-hidden="true" />
+          
+          <div className="pg-color-picker-host" ref={colorPickerOpen === 'cellBg' ? colorPickerHostRef : undefined}>
+            <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px', display: 'flex', alignItems: 'center', gap: 4 }} title="Cell Background Color" onClick={() => setColorPickerOpen(colorPickerOpen === 'cellBg' ? null : 'cellBg')}>
+              <span style={{ display: 'inline-block', width: 12, height: 12, border: '1px solid #777', background: '#ccc' }} /> Cell Color
+            </button>
+            {colorPickerOpen === 'cellBg' && (
+              <div className="pg-color-popover" onMouseDown={(e) => e.stopPropagation()} style={{ right: 0, left: 'auto' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, width: 160, padding: 8 }}>
+                  {QUICK_COLORS.map((c, idx) => (
+                    <button
+                      key={`cell-bg-${idx}`}
+                      type="button"
+                      className="pg-color-swatch"
+                      style={{ background: c === 'transparent' ? 'transparent' : c, border: c === 'transparent' ? '1px dashed #666' : '1px solid rgba(0,0,0,0.25)', width: 22, height: 22 }}
+                      title={c}
+                      onClick={() => applyCellBgColor(c)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <span className="pg-tb-sep" aria-hidden="true" />
+          <button type="button" className="pg-tb-btn" style={{ fontSize: '0.75rem', padding: '0 8px', color: '#ff6b6b' }} onMouseDown={cmd(() => editor?.chain().focus().deleteTable().run())}>Delete Table</button>
+        </div>
+      )}
 
       {/* ── Style Panel (component-specific settings) ── */}
       {isStylePanelOpen && (
@@ -1992,6 +2137,36 @@ export default function TemplateEditor({
                     </div>
                   )}
                 </>
+              )}
+
+              {phKind === 'table' && (
+                <div className="pg-insert-row" style={{ marginTop: 12 }}>
+                  <label className="pg-label">Table Styling</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={phTableStriped}
+                        onChange={(e) => setPhTableStriped(e.target.checked)}
+                      />
+                      <span className="pg-label" style={{ marginBottom: 0 }}>Striped Rows</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="pg-label" style={{ marginBottom: 0 }}>Text Color:</span>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {['#000000', '#1F497D', '#C00000', '#4F6228', '#7030A0'].map(c => (
+                          <button
+                            key={`ph-clr-${c}`}
+                            type="button"
+                            className={`pg-color-swatch ${phTextColor === c ? 'pg-swatch-active' : ''}`}
+                            style={{ background: c, width: 20, height: 20, cursor: 'pointer' }}
+                            onClick={() => setPhTextColor(c)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
 
               {phKind === 'custom' && (
@@ -2491,6 +2666,67 @@ export default function TemplateEditor({
                   </div>
 
                   {phTableHeaders.length > 0 && (
+                    <div className="pg-insert-row">
+                      <label className="pg-label">Column Styling</label>
+                      <div className="pg-style-panel" style={{ padding: '8px 0', border: 'none', background: 'transparent' }}>
+                        <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--pg-border)' }}>
+                              <th style={{ padding: '4px', fontWeight: '500' }}>Column</th>
+                              <th style={{ padding: '4px', fontWeight: '500' }}>Align</th>
+                              <th style={{ padding: '4px', fontWeight: '500' }}>Color</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {phTableHeaders.map(header => (
+                              <tr key={`col-style-${header}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                <td style={{ padding: '4px' }}>{header}</td>
+                                <td style={{ padding: '4px' }}>
+                                  <div style={{ display: 'flex', gap: '4px' }}>
+                                    {(['left', 'center', 'right'] as const).map(a => (
+                                      <button
+                                        key={`${header}-${a}`}
+                                        type="button"
+                                        className={`pg-tb-btn ${phTableColStyles[header]?.align === a ? 'pg-tb-active' : ''}`}
+                                        style={{ width: 22, height: 22, padding: 0 }}
+                                        onClick={() => {
+                                          const current = phTableColStyles[header] || {};
+                                          setPhTableColStyles({ ...phTableColStyles, [header]: { ...current, align: a } });
+                                        }}
+                                      >
+                                        {a === 'left' && <AlignLeft size={12} />}
+                                        {a === 'center' && <AlignCenter size={12} />}
+                                        {a === 'right' && <AlignRight size={12} />}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '4px' }}>
+                                  <div style={{ display: 'flex', gap: '4px' }}>
+                                    {['#000000', '#1F497D', '#C00000', '#4F6228', '#7030A0'].map(c => (
+                                      <button
+                                        key={`${header}-${c}`}
+                                        type="button"
+                                        className={`pg-color-swatch ${(phTableColStyles[header]?.color || '#000000') === c ? 'pg-swatch-active' : ''}`}
+                                        style={{ background: c, width: 16, height: 16 }}
+                                        onClick={() => {
+                                          const current = phTableColStyles[header] || {};
+                                          setPhTableColStyles({ ...phTableColStyles, [header]: { ...current, color: c } });
+                                        }}
+                                      />
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {phTableHeaders.length > 0 && (
+
                     <div className="pg-sheet-wrap">
                       <table className="pg-sheet-table">
                         <thead>

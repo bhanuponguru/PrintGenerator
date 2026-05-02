@@ -7,6 +7,24 @@ export interface PlaceholderNodeAttrs {
   schema: ComponentTypeSchema;
   value: unknown;
   optional?: boolean;
+  color?: string | null;
+  backgroundColor?: string | null;
+  textAlign?: string | null;
+  fontWeight?: string | null;
+  fontStyle?: string | null;
+  textDecoration?: string | null;
+  striped?: boolean;
+  column_styles?: Record<string, any>;
+}
+
+export interface PlaceholderStyles {
+  color?: string | null;
+  backgroundColor?: string | null;
+  textAlign?: string | null;
+  fontWeight?: string | null;
+  fontStyle?: string | null;
+  textDecoration?: string | null;
+  striped?: boolean;
 }
 
 type DOMSpec = [string, ...any[]];
@@ -261,6 +279,7 @@ function normalizeTypeSchema(rawSchema: unknown): ComponentTypeSchema {
           ? Object.fromEntries(Object.entries(tableSchema.row_types).map(([k, v]) => [k, normalizeTypeSchema(v)]))
           : undefined,
         caption: typeof tableSchema.caption === 'string' && tableSchema.caption.trim() !== '' ? tableSchema.caption.trim() : undefined,
+        column_styles: isRecord(tableSchema.column_styles) ? tableSchema.column_styles : undefined,
       };
     }
     default:
@@ -449,24 +468,39 @@ function renderTemplateBySchema(
   return segments.length > 0 ? segments : [''];
 }
 
-export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown): DOMSpec {
+function buildStyle(styles: PlaceholderStyles): Record<string, string> {
+  const style: Record<string, string> = {};
+  if (styles.color) style.color = styles.color;
+  if (styles.backgroundColor) style['background-color'] = styles.backgroundColor;
+  if (styles.textAlign) style['text-align'] = styles.textAlign;
+  if (styles.fontWeight) style['font-weight'] = styles.fontWeight;
+  if (styles.fontStyle) style['font-style'] = styles.fontStyle;
+  if (styles.textDecoration) style['text-decoration'] = styles.textDecoration;
+  
+  const styleString = Object.entries(style).map(([k, v]) => `${k}: ${v}`).join('; ');
+  return styleString ? { style: styleString } : {};
+}
+
+export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown, styles: PlaceholderStyles = {}): DOMSpec {
+  const baseStyle = buildStyle(styles);
+  
   switch (schema.kind) {
     case 'string':
     case 'integer':
-      return ['span', {}, value === undefined || value === null ? '' : String(value)];
+      return ['span', { ...baseStyle }, value === undefined || value === null ? '' : String(value)];
 
     case 'image': {
-      if (!isRecord(value)) return ['span', {}, '[invalid image value]'];
+      if (!isRecord(value)) return ['span', { ...baseStyle }, '[invalid image value]'];
       const src = typeof value.src === 'string' ? value.src : '';
       const alt = typeof value.alt === 'string' ? value.alt : '';
-      return ['figure', {}, ['img', { src, alt, style: 'max-width:100%;height:auto;' }]];
+      return ['figure', { ...baseStyle }, ['img', { src, alt, style: 'max-width:100%;height:auto;' }]];
     }
 
     case 'hyperlink': {
-      if (!isRecord(value)) return ['span', {}, '[invalid hyperlink value]'];
+      if (!isRecord(value)) return ['span', { ...baseStyle }, '[invalid hyperlink value]'];
       const href = typeof value.url === 'string' ? value.url : '';
       const alias = typeof value.alias === 'string' ? value.alias : '';
-      return ['a', { href, target: '_blank', rel: 'noopener noreferrer' }, alias];
+      return ['a', { ...baseStyle, href, target: '_blank', rel: 'noopener noreferrer' }, alias];
     }
 
     case 'repeat': {
@@ -476,12 +510,12 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
         const baseVariable = schema.base_variable || 'item';
         return [
           'div',
-          { 'data-repeat': 'true' },
+          { ...baseStyle, 'data-repeat': 'true' },
           ...items.map((item) => ['div', { 'data-repeat-item': 'true' }, renderTemplateString(schema.layout_template!, baseVariable, item)]),
         ];
       }
       const child = renderCollection(items, schema.item_type);
-      return ['div', { 'data-repeat': 'true' }, ...child];
+      return ['div', { ...baseStyle, 'data-repeat': 'true' }, ...child];
     }
 
     case 'custom': {
@@ -504,7 +538,7 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
 
         return [
           'div',
-          { 'data-custom': 'true', 'data-custom-items': 'true' },
+          { ...baseStyle, 'data-custom': 'true', 'data-custom-items': 'true' },
           ...renderCustomLayoutNodes(schema.layout_nodes, schema.items, items),
         ];
       }
@@ -517,13 +551,13 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
             : [];
         return [
           'div',
-          { 'data-custom': 'true', 'data-custom-repeat': 'true' },
+          { ...baseStyle, 'data-custom': 'true', 'data-custom-repeat': 'true' },
           ...items.map((item) => ['div', { 'data-custom-item': 'true' }, ...renderTemplateBySchema(layout, baseVariable, item, tokenSchemaMap)]),
         ];
       }
 
       const dataValue = isRecord(value) && 'data' in value ? value.data : value;
-      return ['div', { 'data-custom': 'true' }, ...renderTemplateBySchema(layout, baseVariable, dataValue, tokenSchemaMap)];
+      return ['div', { ...baseStyle, 'data-custom': 'true' }, ...renderTemplateBySchema(layout, baseVariable, dataValue, tokenSchemaMap)];
     }
 
     case 'list': {
@@ -533,11 +567,11 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
       const itemType = schema.item_type;
 
       if (style === 'plain') {
-        return ['div', { 'data-list-style': 'plain' }, ...items.map((item) => ['div', {}, renderValueBySchema(itemType, item)])];
+        return ['div', { ...baseStyle, 'data-list-style': 'plain' }, ...items.map((item) => ['div', {}, renderValueBySchema(itemType, item)])];
       }
 
       const listTag = style === 'numbered' ? 'ol' : 'ul';
-      return [listTag, { 'data-list-style': style }, ...items.map((item) => ['li', {}, renderValueBySchema(itemType, item)])];
+      return [listTag, { ...baseStyle, 'data-list-style': style }, ...items.map((item) => ['li', {}, renderValueBySchema(itemType, item)])];
     }
 
     case 'container': {
@@ -547,13 +581,13 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
 
       if (mode === 'repeat') {
         const itemType = schema.item_type || { kind: 'string' };
-        return ['div', { 'data-component': 'container', 'data-mode': 'repeat' }, ...renderCollection(components, itemType)];
+        return ['div', { ...baseStyle, 'data-component': 'container', 'data-mode': 'repeat' }, ...renderCollection(components, itemType)];
       }
 
       const componentTypes = Array.isArray(schema.component_types) ? schema.component_types : [];
       return [
         'div',
-        { 'data-component': 'container', 'data-mode': 'tuple' },
+        { ...baseStyle, 'data-component': 'container', 'data-mode': 'tuple' },
         ...components.map((component, index) => ['div', {}, renderValueBySchema(componentTypes[index] || { kind: 'string' }, component)]),
       ];
     }
@@ -563,6 +597,18 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
       const mode: TableMode = schema.mode || (Array.isArray(tableValue.rows) ? 'row_data' : 'column_data');
       const headers = schema.headers && schema.headers.length > 0 ? schema.headers : inferTableHeaders(tableValue, mode);
 
+      const colStyles = (schema as TableTypeSchema).column_styles || {};
+      const getColStyle = (name: string) => {
+        const s = colStyles[name];
+        if (!s) return {};
+        const pieces: Record<string, string> = {};
+        if (s.align) pieces['text-align'] = s.align;
+        if (s.color) pieces.color = s.color;
+        if (s.backgroundColor) pieces['background-color'] = s.backgroundColor;
+        const str = Object.entries(pieces).map(([k, v]) => `${k}:${v}`).join(';');
+        return str ? { style: str } : {};
+      };
+
       const captionNode = typeof schema.caption === 'string' && schema.caption.trim() !== ''
         ? ['caption', {}, schema.caption]
         : null;
@@ -571,12 +617,12 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
         const rows = Array.isArray(tableValue.rows) ? tableValue.rows : [];
         return [
           'table',
-          {},
+          { ...baseStyle, className: styles.striped ? 'pg-table-striped' : '' },
           ...(captionNode ? [captionNode] : []),
-          ['thead', {}, ['tr', {}, ...headers.map((h) => ['th', {}, h])]],
+          ['thead', {}, ['tr', {}, ...headers.map((h) => ['th', getColStyle(h), h])]],
           ['tbody', {}, ...rows.map((row) => {
             const rowObj = isRecord(row) ? row : {};
-            return ['tr', {}, ...headers.map((h) => ['td', {}, String(rowObj[h] ?? '')])];
+            return ['tr', {}, ...headers.map((h) => ['td', getColStyle(h), String(rowObj[h] ?? '')])];
           })],
         ];
       }
@@ -585,23 +631,23 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown)
       const columnNames = Object.keys(columns);
       return [
         'table',
-        {},
+        { ...baseStyle, className: styles.striped ? 'pg-table-striped' : '' },
         ...(captionNode ? [captionNode] : []),
-        ['thead', {}, ['tr', {}, ['th', {}, ''], ...columnNames.map((name) => ['th', {}, name])]],
+        ['thead', {}, ['tr', {}, ['th', {}, ''], ...columnNames.map((name) => ['th', getColStyle(name), name])]],
         ['tbody', {}, ...headers.map((rowHeader) => [
           'tr',
           {},
           ['th', {}, rowHeader],
           ...columnNames.map((name) => {
             const col = isRecord(columns[name]) ? columns[name] : {};
-            return ['td', {}, String(col[rowHeader] ?? '')];
+            return ['td', getColStyle(name), String(col[rowHeader] ?? '')];
           }),
         ])],
       ];
     }
 
     default:
-      return ['span', {}, value === undefined || value === null ? '' : String(value)];
+      return ['span', { ...baseStyle }, value === undefined || value === null ? '' : String(value)];
   }
 }
 
@@ -696,7 +742,8 @@ export function deriveSchemaFromChildren(kind: string, attrs: Record<string, unk
       dynamic_headers: !headers || headers.length === 0,
       ...(mode === 'row_data' ? { column_types: typeMap } : { row_types: typeMap }),
       ...(typeof attrs.caption === 'string' && attrs.caption.trim() !== '' ? { caption: attrs.caption.trim() } : {}),
-    };
+      ...(isRecord(attrs.column_styles) ? { column_styles: attrs.column_styles as any } : {}),
+    } as ComponentTypeSchema;
   }
 
   if (kind === 'page_break') {
@@ -971,6 +1018,54 @@ export const Placeholder = Node.create({
         parseHTML: (element) => element.getAttribute('data-optional') === 'true',
         renderHTML: (attributes) => attributes.optional ? { 'data-optional': 'true' } : {},
       },
+      color: {
+        default: null,
+        parseHTML: (element) => element.style.color || null,
+        renderHTML: (attributes) => attributes.color ? { style: `color: ${attributes.color}` } : {},
+      },
+      backgroundColor: {
+        default: null,
+        parseHTML: (element) => element.style.backgroundColor || null,
+        renderHTML: (attributes) => attributes.backgroundColor ? { style: `background-color: ${attributes.backgroundColor}` } : {},
+      },
+      textAlign: {
+        default: null,
+        parseHTML: (element) => element.style.textAlign || null,
+        renderHTML: (attributes) => attributes.textAlign ? { style: `text-align: ${attributes.textAlign}` } : {},
+      },
+      fontWeight: {
+        default: null,
+        parseHTML: (element) => element.style.fontWeight || null,
+        renderHTML: (attributes) => attributes.fontWeight ? { style: `font-weight: ${attributes.fontWeight}` } : {},
+      },
+      fontStyle: {
+        default: null,
+        parseHTML: (element) => element.style.fontStyle || null,
+        renderHTML: (attributes) => attributes.fontStyle ? { style: `font-style: ${attributes.fontStyle}` } : {},
+      },
+      textDecoration: {
+        default: null,
+        parseHTML: (element) => element.style.textDecoration || null,
+        renderHTML: (attributes) => attributes.textDecoration ? { style: `text-decoration: ${attributes.textDecoration}` } : {},
+      },
+      striped: {
+        default: false,
+        parseHTML: (element) => element.classList.contains('pg-table-striped'),
+        renderHTML: (attributes) => attributes.striped ? { class: 'pg-table-striped' } : {},
+      },
+      column_styles: {
+        default: null,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-column-styles');
+          if (!raw) return null;
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return null;
+          }
+        },
+        renderHTML: (attributes) => (attributes.column_styles ? { 'data-column-styles': JSON.stringify(attributes.column_styles) } : {}),
+      },
     };
   },
 
@@ -987,10 +1082,25 @@ export const Placeholder = Node.create({
 
     const schema = deriveSchemaFromChildren(typeof attrs.kind === 'string' ? attrs.kind : 'string', attrs, node.content);
 
-    if (schema.kind === 'string' || schema.kind === 'integer') {
-      return ['span', mergeAttributes(HTMLAttributes, { 'data-placeholder': 'true' }), 0];
+    const styles: PlaceholderStyles = {
+      color: attrs.color as string,
+      backgroundColor: attrs.backgroundColor as string,
+      textAlign: attrs.textAlign as string,
+      fontWeight: attrs.fontWeight as string,
+      fontStyle: attrs.fontStyle as string,
+      textDecoration: attrs.textDecoration as string,
+      striped: !!attrs.striped,
+    };
+
+    if (schema.kind === 'table' && attrs.column_styles) {
+      (schema as TableTypeSchema).column_styles = attrs.column_styles as any;
     }
 
-    return renderValueBySchema(schema, attrs.value);
+    if (schema.kind === 'string' || schema.kind === 'integer') {
+      const baseStyle = buildStyle(styles);
+      return ['span', mergeAttributes(HTMLAttributes, { 'data-placeholder': 'true', ...baseStyle }), 0];
+    }
+
+    return renderValueBySchema(schema, attrs.value, styles);
   },
 });

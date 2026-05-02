@@ -20,7 +20,7 @@ export const PageBreakComponent = Node.create({
 
   addCommands() {
     return {
-      setPageBreak: () => ({ state, chain }) => {
+      setPageBreak: () => ({ state, chain }: any) => {
         const { selection } = state;
         const { $from } = selection;
 

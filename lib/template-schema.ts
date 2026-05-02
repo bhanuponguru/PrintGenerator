@@ -1,11 +1,8 @@
 import { ComponentTypeSchema } from '@/types/template';
 import {
   validateContainerAttrs,
-  validateHyperlinkAttrs,
-  validateImageAttrs,
   validateListAttrs,
   validatePlaceholderAttrs,
-  validateTableAttrs,
   validatePageAttrs,
   validateHeaderAttrs,
   validateFooterAttrs,
@@ -430,14 +427,6 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
     if (typeof node.type === 'string') {
       const attrs = isRecord(node.attrs) ? node.attrs : {};
 
-      if (node.type === 'imageComponent') {
-        return validateImageAttrs(attrs);
-      }
-
-      if (node.type === 'hyperlinkComponent') {
-        return validateHyperlinkAttrs(attrs);
-      }
-
       if (node.type === 'listComponent') {
         return validateListAttrs(attrs);
       }
@@ -456,10 +445,6 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
 
       if (node.type === 'footerComponent') {
         return validateFooterAttrs(attrs);
-      }
-
-      if (node.type === 'tableComponent') {
-        return validateTableAttrs(attrs);
       }
     }
 
