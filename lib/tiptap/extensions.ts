@@ -1,7 +1,7 @@
 import { ContainerComponent, createContainerComponent, validateContainerAttrs } from '@/lib/tiptap/container';
-import { HyperlinkComponent } from '@/lib/tiptap/hyperlink';
-import { ImageComponent } from '@/lib/tiptap/image';
-import { TableComponent } from '@/lib/tiptap/table';
+import { HyperlinkComponent, createHyperlinkComponent } from '@/lib/tiptap/hyperlink';
+import { ImageComponent, createImageComponent } from '@/lib/tiptap/image';
+import { TableComponent, createTableComponent } from '@/lib/tiptap/table';
 import { ListComponent, createListComponent, validateListAttrs } from '@/lib/tiptap/list';
 import { createPlaceholderNode, substitutePlaceholderValue, validatePlaceholderAttrs, deriveSchemaFromChildren } from '@/lib/tiptap/placeholder';
 import { PageComponent, createPageComponent, validatePageAttrs } from '@/lib/tiptap/page';
@@ -24,6 +24,9 @@ export const ComponentExtensions = [
 ];
 
 export {
+  createImageComponent,
+  createHyperlinkComponent,
+  createTableComponent,
   createListComponent,
   createContainerComponent,
   createPageComponent,

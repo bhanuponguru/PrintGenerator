@@ -8,6 +8,9 @@ import {
   validateFooterAttrs,
   deriveSchemaFromChildren,
 } from '@/lib/tiptap/extensions';
+import { validateImageAttrs } from '@/lib/tiptap/image';
+import { validateHyperlinkAttrs } from '@/lib/tiptap/hyperlink';
+import { validateTableAttrs } from '@/lib/tiptap/table';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -445,6 +448,18 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
 
       if (node.type === 'footerComponent') {
         return validateFooterAttrs(attrs);
+      }
+
+      if (node.type === 'imageComponent') {
+        return validateImageAttrs(attrs);
+      }
+
+      if (node.type === 'hyperlinkComponent') {
+        return validateHyperlinkAttrs(attrs);
+      }
+
+      if (node.type === 'tableComponent') {
+        return validateTableAttrs(attrs);
       }
     }
 

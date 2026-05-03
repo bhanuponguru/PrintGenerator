@@ -53,6 +53,12 @@ npm test -- __tests__/ui/generate-modal.test.tsx
 # API generation route behavior
 npm test -- __tests__/api/templates/[id]/generate/route.test.ts
 
+# CSV parser unit tests
+npm test -- __tests__/lib/csv-parser.test.ts
+
+# CSV integration tests for generation route
+npm test -- __tests__/api/templates/[id]/generate.csv.test.ts
+
 # Runtime normalization and rendering behavior
 npm test -- __tests__/lib/document-generation.test.ts __tests__/lib/document-generation-template-fill.test.ts
 ```
@@ -126,6 +132,16 @@ The `__tests__/helpers/db-helpers.ts` provides utilities:
 ✅ Verify deletion from database
 ✅ Error handling
 
+### CSV parser and generation route
+✅ Parser rejects templates with more than one dynamic placeholder
+✅ Grouping by `id` for dynamic placeholders
+✅ Static value conflicts generate warnings and prefer first row
+✅ Dotted dynamic headers are accepted (`grades.course`)
+✅ Missing grouping `id` in dynamic mode returns 400
+✅ `text/csv` request body mode
+✅ `idField` query parameter override
+✅ ZIP output includes `csv-warnings.log` when warnings occur
+
 ## Manual Premium UX QA Checklist
 
 Run this checklist before sign-off on visual UX work:
@@ -152,3 +168,8 @@ Run this checklist before sign-off on visual UX work:
 1. Output validation
 2. Generate documents from at least two data points and verify output reflects all edited placeholder values.
 3. Re-run `npm run test:run` to ensure no regressions across API, UI, and runtime tests.
+
+1. CSV generation validation
+2. Use `POST /api/templates/{id}/generate` with `Content-Type: text/csv` and verify grouped records generate one PDF per group.
+3. Create a static field conflict in grouped rows and confirm `csv-warnings.log` appears in the ZIP.
+4. Send dynamic CSV without `id` (or custom `idField`) and confirm API returns 400 with parse error details.

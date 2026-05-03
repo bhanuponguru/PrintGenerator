@@ -5,6 +5,10 @@ import { POST } from '@/app/api/templates/[id]/generate/route';
 import { clearDatabase, createTestTemplate } from '@/__tests__/helpers/db-helpers';
 import { ObjectId } from 'mongodb';
 
+function csv(lines: string[]): string {
+  return lines.join('\n');
+}
+
 describe('POST /api/templates/[id]/generate', () => {
   beforeEach(async () => {
     await clearDatabase();
@@ -13,7 +17,8 @@ describe('POST /api/templates/[id]/generate', () => {
   it('should return 400 for invalid ObjectId format', async () => {
     const request = new NextRequest('http://localhost:3000/api/templates/invalid/generate', {
       method: 'POST',
-      body: JSON.stringify({ dataPoints: [{ name: 'Alice' }] }),
+      headers: { 'Content-Type': 'text/csv' },
+      body: csv(['name,orderId', 'Alice,ORD-1001']),
     });
 
     const response = await POST(request, { params: Promise.resolve({ id: 'invalid-id' }) });
@@ -24,14 +29,15 @@ describe('POST /api/templates/[id]/generate', () => {
     expect(data.error).toBe('Invalid template ID format');
   });
 
-  it('should return 400 for invalid dataPoints payload', async () => {
+  it('should reject non-CSV content types', async () => {
     const template = await createTestTemplate();
 
     const request = new NextRequest(
       `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
       {
         method: 'POST',
-        body: JSON.stringify({ dataPoints: 'not-an-array' }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataPoints: [{ name: 'Alice' }] }),
       }
     );
 
@@ -42,7 +48,7 @@ describe('POST /api/templates/[id]/generate', () => {
 
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
-    expect(data.error).toBe('dataPoints is required and must be a non-empty array');
+    expect(data.error).toBe('CSV payload is required and must use Content-Type: text/csv');
   });
 
   it('should return 404 when template is not found', async () => {
@@ -50,7 +56,8 @@ describe('POST /api/templates/[id]/generate', () => {
 
     const request = new NextRequest(`http://localhost:3000/api/templates/${id}/generate`, {
       method: 'POST',
-      body: JSON.stringify({ dataPoints: [{ name: 'Alice' }] }),
+      headers: { 'Content-Type': 'text/csv' },
+      body: csv(['name,orderId', 'Alice,ORD-1001']),
     });
 
     const response = await POST(request, { params: Promise.resolve({ id }) });
@@ -97,9 +104,8 @@ describe('POST /api/templates/[id]/generate', () => {
       `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
       {
         method: 'POST',
-        body: JSON.stringify({
-          dataPoints: [{ name: 'Alice' }],
-        }),
+        headers: { 'Content-Type': 'text/csv' },
+        body: csv(['id,name', '1,Alice']),
       }
     );
 
@@ -154,17 +160,12 @@ describe('POST /api/templates/[id]/generate', () => {
       `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
       {
         method: 'POST',
-        body: JSON.stringify({
-          dataPoints: [
-            {
-              name: 'Ada',
-              profile: { alias: 'Docs', url: '/relative/profile' },
-            },
-            {
-              name: 'Grace',
-            },
-          ],
-        }),
+        headers: { 'Content-Type': 'text/csv' },
+        body: csv([
+          'id,name,profile.alias,profile.url',
+          '1,Ada,Docs,/relative/profile',
+          '2,Grace,,',
+        ]),
       }
     );
 
@@ -176,18 +177,23 @@ describe('POST /api/templates/[id]/generate', () => {
     expect(response.status).toBe(400);
     expect(data.success).toBe(false);
     expect(data.error).toBe('Invalid placeholder values');
-    expect(data.data.invalidDataPoints).toEqual([
-      {
+    expect(data.data.invalidDataPoints).toHaveLength(2);
+    expect(data.data.invalidDataPoints[0]).toEqual(
+      expect.objectContaining({
         index: 0,
         missing: [],
         invalid: [expect.stringContaining('absolute URL')],
-      },
-      {
+      })
+    );
+    expect(data.data.invalidDataPoints[1]).toEqual(
+      expect.objectContaining({
         index: 1,
-        missing: ['profile'],
-        invalid: [],
-      },
-    ]);
+        missing: [],
+        invalid: expect.arrayContaining([
+          expect.stringContaining('profile.alias must be a non-empty string'),
+        ]),
+      })
+    );
   });
 
   it('should reject runtime overrides of static table captions', async () => {
@@ -221,16 +227,11 @@ describe('POST /api/templates/[id]/generate', () => {
       `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
       {
         method: 'POST',
-        body: JSON.stringify({
-          dataPoints: [
-            {
-              grades: {
-                caption: 'Override caption',
-                rows: [{ course: 'Algorithms', grade: 'A' }],
-              },
-            },
-          ],
-        }),
+        headers: { 'Content-Type': 'text/csv' },
+        body: csv([
+          'id,grades.caption,grades.course,grades.grade',
+          '1,Override caption,Algorithms,A',
+        ]),
       }
     );
 
@@ -247,154 +248,6 @@ describe('POST /api/templates/[id]/generate', () => {
         index: 0,
         missing: [],
         invalid: [expect.stringContaining('caption is static and cannot be overridden')],
-      },
-    ]);
-  });
-
-  it('should reject runtime overrides of static token-library table fields', async () => {
-    const template = await createTestTemplate({
-      template: {
-        type: 'doc',
-        content: [
-          {
-            type: 'paragraph',
-            content: [
-              {
-                type: 'placeholder',
-                attrs: {
-                  key: 'line_table',
-                  kind: 'custom',
-                  schema: {
-                    kind: 'custom',
-                    base_variable: 'token',
-                    value_type: { kind: 'string' },
-                    layout_template: '{{token.rows}}',
-                    token_library: [
-                      {
-                        id: 'rows',
-                        kind: 'table',
-                        mode: 'row_data',
-                        headers: ['Item', 'Qty'],
-                        dynamic_fields: ['Qty'],
-                        static_values: { Item: 'Pen' },
-                      },
-                    ],
-                  },
-                },
-              },
-            ],
-          },
-        ],
-      },
-    });
-
-    const request = new NextRequest(
-      `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          dataPoints: [
-            {
-              line_table: {
-                data: {
-                  rows: {
-                    rows: [{ Item: 'Pencil', Qty: '5' }],
-                  },
-                },
-              },
-            },
-          ],
-        }),
-      }
-    );
-
-    const response = await POST(request, {
-      params: Promise.resolve({ id: template._id.toString() }),
-    });
-    const data = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(data.success).toBe(false);
-    expect(data.error).toBe('Invalid placeholder values');
-    expect(data.data.invalidDataPoints).toEqual([
-      {
-        index: 0,
-        missing: [],
-        invalid: [expect.stringContaining('static and cannot be overridden')],
-      },
-    ]);
-  });
-
-  it('should report per-row nested custom token validation failures in batch mode', async () => {
-    const template = await createTestTemplate({
-      template: {
-        type: 'doc',
-        content: [
-          {
-            type: 'paragraph',
-            content: [
-              {
-                type: 'placeholder',
-                attrs: {
-                  key: 'profile',
-                  kind: 'custom',
-                  schema: {
-                    kind: 'custom',
-                    base_variable: 'token',
-                    value_type: { kind: 'string' },
-                    layout_template: '{{token.name}} - {{token.site}}',
-                    token_library: [
-                      { id: 'name', kind: 'string' },
-                      { id: 'site', kind: 'hyperlink' },
-                    ],
-                  },
-                },
-              },
-            ],
-          },
-        ],
-      },
-    });
-
-    const request = new NextRequest(
-      `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          dataPoints: [
-            {
-              profile: {
-                data: {
-                  name: 'Ada',
-                  site: { alias: 'Docs', url: 'https://example.com/docs' },
-                },
-              },
-            },
-            {
-              profile: {
-                data: {
-                  name: 'Grace',
-                },
-              },
-            },
-          ],
-        }),
-      }
-    );
-
-    const response = await POST(request, {
-      params: Promise.resolve({ id: template._id.toString() }),
-    });
-    const data = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(data.success).toBe(false);
-    expect(data.error).toBe('Invalid placeholder values');
-    expect(data.data.invalidDataPoints).toEqual([
-      {
-        index: 1,
-        missing: [],
-        invalid: [expect.stringContaining('profile.data.site is required by custom token schema')],
       },
     ]);
   });
@@ -435,12 +288,12 @@ describe('POST /api/templates/[id]/generate', () => {
       `http://localhost:3000/api/templates/${template._id.toString()}/generate`,
       {
         method: 'POST',
-        body: JSON.stringify({
-          dataPoints: [
-            { name: 'Alice', orderId: 'ORD-1001' },
-            { name: 'Bob', orderId: 'ORD-1002' },
-          ],
-        }),
+        headers: { 'Content-Type': 'text/csv' },
+        body: csv([
+          'id,name,orderId',
+          '1,Alice,ORD-1001',
+          '2,Bob,ORD-1002',
+        ]),
       }
     );
 

@@ -12,8 +12,20 @@ export interface HeaderComponentNode {
 }
 
 export function validateHeaderAttrs(attrs: Record<string, unknown>): string | null {
-  // Now functioning primarily as an editable block component.
-  // Validation is permissive unless explicitly bound to a strict component schema length.
+  if (!attrs.value || typeof attrs.value !== 'object' || Array.isArray(attrs.value)) {
+    return 'headerComponent.attrs.value must be an object';
+  }
+
+  const value = attrs.value as Record<string, unknown>;
+
+  if (!Array.isArray(value.components)) {
+    return 'headerComponent.attrs.value.components must be an array';
+  }
+
+  if ('component_types' in attrs && !Array.isArray(attrs.component_types)) {
+    return 'headerComponent.attrs.component_types must be an array when provided';
+  }
+
   return null;
 }
 
@@ -62,6 +74,21 @@ export const HeaderComponent = Node.create({
     if (err) {
       return ['span', { 'data-component-error': 'header', title: err }, '[invalid header component]'];
     }
+
+    const attrs = HTMLAttributes as Record<string, unknown>;
+    const value = attrs.value as Record<string, unknown>;
+    const componentTypes = Array.isArray(attrs.component_types) ? attrs.component_types : [];
+    const components = Array.isArray(value.components) ? value.components : [];
+
+    if (components.length > 0) {
+      const rendered = components.map((component, index) => [
+        'div',
+        {},
+        renderValueBySchema((componentTypes[index] as any) || { kind: 'string' }, component),
+      ]);
+      return ['header', { 'data-component': 'header' }, ...rendered];
+    }
+
     // '0' tells TipTap/ProseMirror to render the node's rich-text content here.
     return ['header', { 'data-component': 'header' }, 0];
   },

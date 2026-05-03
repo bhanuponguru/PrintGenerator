@@ -76,6 +76,48 @@ export const getApiDocs = () => {
             responses: { 200: { description: 'Succeeded fetching subset mapping layout definitions intelligently utilizing 2-way database maps natively.' } }
           }
         }
+        ,
+        '/api/templates/{id}/generate': {
+          post: {
+            summary: 'Generate filled documents as a ZIP from CSV',
+            tags: ['Templates'],
+            parameters: [{ in: 'path', name: 'id', type: 'string', required: true }],
+            requestBody: {
+              required: true,
+              content: {
+                'text/csv': {
+                  schema: { type: 'string', format: 'binary', description: 'Raw CSV body. Use `?idField=` to override the grouping id column name (default `id`).' }
+                }
+              }
+            },
+            responses: {
+              200: {
+                description: 'ZIP file generated successfully (application/zip)',
+                content: {
+                  'application/zip': {
+                    schema: { type: 'string', format: 'binary' }
+                  }
+                }
+              },
+              400: {
+                description: 'Invalid request payload, CSV parse error, or invalid placeholder values',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/ApiResponse' }
+                  }
+                }
+              },
+              404: {
+                description: 'Template not found',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/ApiResponse' }
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       components: {
         schemas: {
@@ -117,13 +159,45 @@ export const getApiDocs = () => {
               tag_ids: { type: 'array', items: { type: 'string' }, description: 'Array mapping definitions automatically orchestrating differential removal syncing internally via dual mapping' }
             },
           },
+          CsvParseResult: {
+            type: 'object',
+            required: ['dataPoints', 'warnings'],
+            properties: {
+              dataPoints: {
+                type: 'array',
+                items: { type: 'object' },
+              },
+              warnings: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+              error: {
+                type: 'string',
+                nullable: true,
+              },
+            },
+          },
           ComponentTypeSchema: {
             type: 'object',
             required: ['kind'],
             properties: {
               kind: {
                 type: 'string',
-                enum: ['string', 'integer', 'image', 'hyperlink', 'list', 'table', 'container'],
+                enum: [
+                  'string',
+                  'integer',
+                  'image',
+                  'hyperlink',
+                  'list',
+                  'table',
+                  'container',
+                  'repeat',
+                  'custom',
+                  'page',
+                  'header',
+                  'footer',
+                  'page_break',
+                ],
               },
               option: {
                 type: 'object',
@@ -148,6 +222,31 @@ export const getApiDocs = () => {
               component_types: {
                 type: 'array',
                 items: { $ref: '#/components/schemas/ComponentTypeSchema' },
+              },
+              token_library: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: true,
+                },
+              },
+              token_registry: {
+                type: 'object',
+                additionalProperties: { $ref: '#/components/schemas/ComponentTypeSchema' },
+              },
+              layout_template: {
+                type: 'string',
+              },
+              layout_nodes: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: true,
+                },
+              },
+              static_values: {
+                type: 'object',
+                additionalProperties: true,
               },
             },
           },

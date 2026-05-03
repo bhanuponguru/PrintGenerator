@@ -55,6 +55,45 @@ Navigate there, and you will see the interactive Template Layout Dashboard. You 
 
 ---
 
+## CSV Input for Batch Generation
+
+The generation endpoint accepts CSV input and converts it into the internal datapoint shape used by the renderer.
+
+### Supported request mode
+
+Raw CSV body:
+
+```bash
+curl -X POST "http://localhost:3000/api/templates/<templateId>/generate" \
+	-H "Content-Type: text/csv" \
+	--data-binary $'id,name,course,grade\n1,Ada,Math,A\n1,Ada,Physics,B'
+```
+
+### Custom grouping field name
+
+```bash
+curl -X POST "http://localhost:3000/api/templates/<templateId>/generate?idField=student_id" \
+	-H "Content-Type: text/csv" \
+	--data-binary $'student_id,name,course,grade\n1,Ada,Math,A\n1,Ada,Physics,B'
+```
+
+### CSV behavior rules
+
+- CSV parser supports templates with at most one dynamic placeholder (`list`, `table`, `repeat`, `custom`).
+- For dynamic placeholders, rows are grouped by `id` (or `idField` override).
+- Static placeholders in a group use the first row value.
+- If later rows conflict on static values, generation still proceeds and the ZIP includes `csv-warnings.log`.
+- If required grouping id is missing in dynamic mode, the API returns `400`.
+
+### Header naming
+
+For dynamic fields, both styles are accepted:
+
+- Plain headers: `course,grade`
+- Dotted headers: `grades.course,grades.grade`
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Chromium/Puppeteer Errors on Linux/WSL

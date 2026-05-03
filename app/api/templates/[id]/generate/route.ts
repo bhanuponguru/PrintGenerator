@@ -11,13 +11,9 @@ import {
   renderDocumentHtml,
   validateDataPointAgainstPlaceholderConfigMap,
 } from '@/lib/document-generation';
+import parseCsvToDataPoints from '@/lib/csv-parser';
 
 const COLLECTION_NAME = 'templates';
-
-interface GenerateDocumentsRequest {
-  dataPoints?: DataPoint[];
-  datapoints?: DataPoint[];
-}
 
 export const runtime = 'nodejs';
 
@@ -26,7 +22,7 @@ export const runtime = 'nodejs';
  * /api/templates/{id}/generate:
  *   post:
  *     summary: Generate filled documents as a ZIP of PDFs
- *     description: Fetches a template by ID, fills placeholder values for each datapoint, generates one PDF per datapoint, and returns a ZIP archive.
+ *     description: Fetches a template by ID, parses a CSV body into internal datapoints, generates one PDF per record, and returns a ZIP archive.
  *     tags: [Templates]
  *     parameters:
  *       - in: path
@@ -38,20 +34,11 @@ export const runtime = 'nodejs';
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         text/csv:
  *           schema:
- *             type: object
- *             required: [dataPoints]
- *             properties:
- *               dataPoints:
- *                 type: array
- *                 items:
- *                   type: object
- *                 example:
- *                   - name: Alice
- *                     orderId: ORD-1001
- *                   - name: Bob
- *                     orderId: ORD-1002
+ *             type: string
+ *             format: binary
+ *           description: Raw CSV body. Use ?idField= to override the grouping id column name (default id).
  *     responses:
  *       200:
  *         description: ZIP file generated successfully
@@ -61,7 +48,7 @@ export const runtime = 'nodejs';
  *               type: string
  *               format: binary
  *       400:
- *         description: Invalid request payload
+ *         description: Invalid request payload, CSV parse error, or invalid placeholder values
  *       404:
  *         description: Template not found
  *       500:
@@ -75,7 +62,6 @@ export async function POST(
     const { id } = await params;
 
     // Validate the incoming URL parameter to ensure it is a structurally valid BSON ObjectId
-    // Prevent malformed queries directly hitting the MongoDB driver
     if (!ObjectId.isValid(id)) {
       return NextResponse.json(
         { success: false, error: 'Invalid template ID format' },
@@ -83,27 +69,7 @@ export async function POST(
       );
     }
 
-    // Extract the JSON body payload containing the template variables
-    // Safely support both "dataPoints" and "datapoints" object keys for legacy robustness
-    let body: GenerateDocumentsRequest;
-    try {
-      body = (await request.json()) as GenerateDocumentsRequest;
-    } catch {
-      return NextResponse.json(
-        { success: false, error: 'Invalid JSON payload' },
-        { status: 400 }
-      );
-    }
-    const dataPoints = body.dataPoints ?? body.datapoints;
-
-    if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'dataPoints is required and must be a non-empty array' },
-        { status: 400 }
-      );
-    }
-
-    // Instantiate a connection and pull the master Template record defining our visual structure
+    // Fetch the template document first (needed for CSV parsing)
     const db = await getDb();
     const templateDoc = await db
       .collection<Template>(COLLECTION_NAME)
@@ -120,7 +86,36 @@ export async function POST(
       );
     }
 
+    // Parse the CSV body into the internal datapoint shape expected by generation.
+    let dataPoints: DataPoint[] | undefined;
+    let csvWarnings: string[] = [];
+
+    const contentType = (request.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('text/csv')) {
+      return NextResponse.json(
+        { success: false, error: 'CSV payload is required and must use Content-Type: text/csv' },
+        { status: 400 }
+      );
+    }
+
+    const csvText = await request.text();
+    const idField = request.nextUrl ? request.nextUrl.searchParams.get('idField') || 'id' : 'id';
+    const parsed = parseCsvToDataPoints(csvText, templateDoc.template, { idField });
+    if (parsed.error) {
+      return NextResponse.json({ success: false, error: parsed.error }, { status: 400 });
+    }
+    dataPoints = parsed.dataPoints;
+    csvWarnings = parsed.warnings || [];
+
+    if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'dataPoints is required and must be a non-empty array' },
+        { status: 400 }
+      );
+    }
+
     const validDataPoints: Array<{ index: number; data: DataPoint }> = [];
+    const invalidDataPoints: Array<{ index: number; missing: string[]; invalid: string[] }> = [];
     let errorLog = '';
 
     // Gather placeholder type and template-level config contracts (mode/headers/type maps).
@@ -130,6 +125,11 @@ export async function POST(
       const dataPoint = dataPoints[i];
       if (!dataPoint || typeof dataPoint !== 'object' || Array.isArray(dataPoint)) {
         errorLog += `[Row ${i + 1}] Error: Data point must be a JSON object, but received ${typeof dataPoint}.\n`;
+        invalidDataPoints.push({
+          index: i,
+          missing: [],
+          invalid: ['Data point must be a JSON object'],
+        });
         continue;
       }
 
@@ -142,10 +142,26 @@ export async function POST(
         if (validation.invalid.length > 0) {
           errorLog += `  - Invalid fields: ${validation.invalid.join(', ')}\n`;
         }
+        invalidDataPoints.push({
+          index: i,
+          missing: validation.missing,
+          invalid: validation.invalid,
+        });
         continue;
       }
 
       validDataPoints.push({ index: i, data: validation.normalizedDataPoint });
+    }
+
+    if (invalidDataPoints.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Invalid placeholder values',
+          data: { invalidDataPoints },
+        },
+        { status: 400 }
+      );
     }
 
     // Initialize the asynchronous ZIP archive wrapper
@@ -170,6 +186,11 @@ export async function POST(
 
     if (errorLog) {
       zip.file('error.log', errorLog);
+    }
+
+    // Include CSV warnings if present
+    if (csvWarnings && csvWarnings.length > 0) {
+      zip.file('csv-warnings.log', csvWarnings.join('\n'));
     }
 
     // Crunch the buffered files compiling a unified byte array via DEFLATE compression
