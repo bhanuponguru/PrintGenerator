@@ -996,6 +996,63 @@ select.pg-input option {
   color: #444444;
 }
 
+.pg-prosemirror table {
+  border-collapse: collapse !important;
+  width: 100%;
+  margin: 8px 0 12px;
+  table-layout: fixed;
+}
+
+.pg-prosemirror caption {
+  caption-side: top;
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #333;
+  font-size: 13px;
+}
+
+.pg-prosemirror th,
+.pg-prosemirror td {
+  border: 1px solid #b9b9b9 !important;
+  padding: 6px 8px;
+  vertical-align: top;
+  word-break: break-word;
+  position: relative;
+}
+
+.pg-prosemirror th {
+  background: #f2f2f2;
+  font-weight: 600;
+}
+
+.pg-prosemirror .tableWrapper {
+  overflow-x: auto;
+  margin: 8px 0 12px;
+}
+
+.pg-prosemirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: rgba(232, 184, 75, 0.5);
+  pointer-events: none;
+}
+
+.pg-prosemirror .selectedCell::after {
+  z-index: 2;
+  position: absolute;
+  content: "";
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(232, 184, 75, 0.12);
+  pointer-events: none;
+}
+
 .pg-prosemirror p.is-editor-empty:first-child::before,
 .pg-prosemirror header[data-component="header"] p.is-empty::before,
 .pg-prosemirror footer[data-component="footer"] p.is-empty::before {

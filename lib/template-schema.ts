@@ -426,6 +426,9 @@ export function validateTemplateStructure(template: Record<string, unknown>): { 
 }
 
 export function validateTemplatePlaceholderSchemas(template: Record<string, unknown>): { valid: true } | { valid: false; error: string } {
+  const DYNAMIC_KINDS = new Set(['list', 'table', 'repeat', 'custom']);
+  const dynamicKeys: string[] = [];
+
   const err = walk(template, (node) => {
     if (typeof node.type === 'string') {
       const attrs = isRecord(node.attrs) ? node.attrs : {};
@@ -485,6 +488,14 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
       ? attrs.kind
       : (isRecord(attrs.schema) && typeof attrs.schema.kind === 'string' ? String(attrs.schema.kind) : 'string');
 
+    // Track dynamic placeholder keys for the at-most-one rule
+    if (DYNAMIC_KINDS.has(kind)) {
+      const key = String(attrs.key);
+      if (!dynamicKeys.includes(key)) {
+        dynamicKeys.push(key);
+      }
+    }
+
     // Validate explicit schema payloads when provided; fall back to derived schema for legacy attrs.
     const explicitSchema = isRecord(attrs.schema) ? attrs.schema : null;
     const derivedSchema = deriveSchemaFromChildren(kind, attrs, node.content);
@@ -538,6 +549,14 @@ export function validateTemplatePlaceholderSchemas(template: Record<string, unkn
 
   if (err) {
     return { valid: false, error: err };
+  }
+
+  // Enforce single dynamic placeholder rule
+  if (dynamicKeys.length > 1) {
+    return {
+      valid: false,
+      error: `Template must have at most one dynamic placeholder (list, table, repeat, custom). Found ${dynamicKeys.length}: ${dynamicKeys.join(', ')}`,
+    };
   }
 
   return { valid: true };

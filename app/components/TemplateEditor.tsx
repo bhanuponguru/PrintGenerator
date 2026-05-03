@@ -388,9 +388,12 @@ function walkTiptapJson(node: Record<string, any>, visit: (n: Record<string, any
   }
 }
 
+const DYNAMIC_KINDS = new Set(['list', 'table', 'repeat', 'custom']);
+
 function collectValidationErrors(documentJson: Record<string, any>): string[] {
   const errors: string[] = [];
   const placeholderSchemaFingerprint = new Map<string, string>();
+  const dynamicPlaceholderKeys: string[] = [];
 
   walkTiptapJson(documentJson, (node) => {
     if (!node || typeof node !== 'object' || typeof node.type !== 'string') return;
@@ -411,6 +414,11 @@ function collectValidationErrors(documentJson: Record<string, any>): string[] {
         : (typeof attrs.schema === 'object' && attrs.schema && 'kind' in (attrs.schema as Record<string, unknown>)
           ? String((attrs.schema as Record<string, unknown>).kind)
           : 'string');
+
+      // Track dynamic placeholders for the at-most-one rule
+      if (DYNAMIC_KINDS.has(kind) && key && !dynamicPlaceholderKeys.includes(key)) {
+        dynamicPlaceholderKeys.push(key);
+      }
 
       const schema = deriveSchemaFromChildren(kind, attrs, node.content);
 
@@ -465,6 +473,13 @@ function collectValidationErrors(documentJson: Record<string, any>): string[] {
       if (err) errors.push(`footerComponent: ${err}`);
     }
   });
+
+  // Enforce single dynamic placeholder rule
+  if (dynamicPlaceholderKeys.length > 1) {
+    errors.push(
+      `Template has ${dynamicPlaceholderKeys.length} dynamic placeholders (${dynamicPlaceholderKeys.join(', ')}), but only 1 is allowed.`
+    );
+  }
 
   return unique(errors);
 }
@@ -762,6 +777,11 @@ export default function TemplateEditor({
 
     return result.sort((a, b) => a.key.localeCompare(b.key));
   }, [editor?.state]);
+
+  const hasDynamicPlaceholder = useMemo(
+    () => placeholderMeta.some((ph) => DYNAMIC_KINDS.has(ph.kind)),
+    [placeholderMeta]
+  );
 
   const metrics = useMemo(() => {
     if (!editor) return { words: 0, characters: 0 };
@@ -1210,6 +1230,12 @@ export default function TemplateEditor({
       return;
     }
 
+    // Enforce single dynamic placeholder rule
+    if (DYNAMIC_KINDS.has(phKind) && hasDynamicPlaceholder) {
+      setInsertError('Only one dynamic placeholder (list, table, repeat, custom) is allowed per template.');
+      return;
+    }
+
     const attrs: Record<string, unknown> = { key, kind: phKind, value: '' };
     let schema: ComponentTypeSchema = defaultSchemaForKind(phKind);
 
@@ -1367,7 +1393,7 @@ export default function TemplateEditor({
     setPhKey('');
     setInsertError('');
     setInsertPanel(null);
-  }, [editor, phKey, phKind, phListStyle, phListItemKind, phRepeatItemKind, phRepeatMinItems, phRepeatMaxItems, phRepeatBaseVariable, phRepeatLayoutTemplate, phCustomTemplate, phCustomRepeat, phCustomItems, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds, phTableCaptionText, tableCaption]);
+  }, [editor, phKey, phKind, phListStyle, phListItemKind, phRepeatItemKind, phRepeatMinItems, phRepeatMaxItems, phRepeatBaseVariable, phRepeatLayoutTemplate, phCustomTemplate, phCustomRepeat, phCustomItems, phTableHeaders, phTableMode, phTableColumnKinds, phTableRowKinds, phTableCaptionText, tableCaption, hasDynamicPlaceholder]);
 
   const insertImageComponent = useCallback(() => {
     try {
@@ -2010,11 +2036,16 @@ export default function TemplateEditor({
                   <option value="integer">integer</option>
                   <option value="image">image</option>
                   <option value="hyperlink">hyperlink</option>
-                  <option value="list">list</option>
-                  <option value="repeat">repeat</option>
-                  <option value="custom">custom</option>
-                  <option value="table">table</option>
+                  <option value="list" disabled={hasDynamicPlaceholder}>list{hasDynamicPlaceholder ? ' (limit reached)' : ''}</option>
+                  <option value="repeat" disabled={hasDynamicPlaceholder}>repeat{hasDynamicPlaceholder ? ' (limit reached)' : ''}</option>
+                  <option value="custom" disabled={hasDynamicPlaceholder}>custom{hasDynamicPlaceholder ? ' (limit reached)' : ''}</option>
+                  <option value="table" disabled={hasDynamicPlaceholder}>table{hasDynamicPlaceholder ? ' (limit reached)' : ''}</option>
                 </select>
+                {hasDynamicPlaceholder && (
+                  <p className="pg-insert-hint" style={{ color: '#b8860b', fontSize: '12px', marginTop: '4px' }}>
+                    ⚠ This template already contains a dynamic placeholder. Only static types (string, integer, image, hyperlink) can be added.
+                  </p>
+                )}
               </div>
 
               {phKind === 'list' && (
