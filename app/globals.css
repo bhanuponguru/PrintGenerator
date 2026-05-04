@@ -1711,6 +1711,93 @@ select.pg-input option {
   font-size: 12px;
 }
 
+/* ─── Data Entry Table (tabular data point input) ─────────── */
+.pg-data-entry-table-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.pg-data-entry-table {
+  border-collapse: collapse;
+}
+
+.pg-data-entry-table th {
+  background: var(--pg-surface-raise);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pg-text-muted);
+  white-space: nowrap;
+  padding: 8px 6px;
+}
+
+.pg-data-entry-table td {
+  vertical-align: top;
+  padding: 6px;
+}
+
+.pg-data-entry-table .pg-input {
+  width: 100%;
+  min-width: 80px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.pg-det-col-idx {
+  width: 36px;
+  text-align: center;
+  font-family: var(--pg-font-mono);
+  font-size: 11px;
+  color: var(--pg-text-muted);
+}
+
+.pg-det-col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.pg-det-col-dynamic {
+  background: rgba(232, 184, 75, 0.06);
+}
+
+/* Merged cells (static placeholders spanning dynamic sub-rows) */
+.pg-det-merged {
+  vertical-align: middle;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+/* Visual separator between data point groups */
+.pg-det-group-start td {
+  border-top: 2px solid var(--pg-accent-dim);
+}
+
+.pg-det-group-footer td {
+  border-bottom: none;
+  padding: 4px 6px;
+}
+
+/* First simple row also gets a group start border */
+.pg-data-entry-table tbody tr:first-child td {
+  border-top: 2px solid var(--pg-accent-dim);
+}
+
+.pg-data-entry-table tfoot td {
+  padding: 8px 6px;
+  border-top: 2px solid var(--pg-border);
+}
+
+.pg-data-entry-table .pg-layout-composer {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+
+.pg-data-entry-table .pg-layout-composer-actions {
+  gap: 4px;
+}
+
+
 .pg-validation-summary {
   border-top: 1px solid rgba(224, 84, 84, 0.3);
   background: rgba(224, 84, 84, 0.08);

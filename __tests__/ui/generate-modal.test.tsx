@@ -44,6 +44,20 @@ function buildTemplate() {
   };
 }
 
+/**
+ * Helper: find the <td> cell in the data-entry table that corresponds to a given
+ * placeholder key. The table header row has <th> elements with the key text;
+ * we find the column index from there and then grab the cell in the first data row.
+ */
+function findPlaceholderCell(key: string): HTMLElement {
+  const table = document.querySelector('.pg-data-entry-table') as HTMLTableElement;
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  const colIndex = headers.findIndex((th) => th.textContent === key);
+  // Find the first <tr> in tbody
+  const firstRow = table.querySelector('tbody tr') as HTMLTableRowElement;
+  return firstRow.cells[colIndex] as HTMLElement;
+}
+
 describe('GenerateModal premium visual/json workflow', () => {
   it('shows type guidance for standard placeholder values', () => {
     const template = {
@@ -304,18 +318,19 @@ describe('GenerateModal premium visual/json workflow', () => {
       />
     );
 
-    const skillsRow = screen.getAllByText('skills')[0].closest('.pg-insert-row');
-    expect(skillsRow).toBeTruthy();
-    const skillsScope = within(skillsRow as HTMLElement);
+    // In the tabular layout, each placeholder gets its own cell with renderSchemaEditor.
+    // Find the skills cell and scope queries to it.
+    const skillsCell = findPlaceholderCell('skills');
+    const skillsScope = within(skillsCell);
     await user.click(skillsScope.getByRole('button', { name: '+ Add Item' }));
 
     const skillInputs = skillsScope.getAllByRole('textbox');
     await user.clear(skillInputs[0]);
     await user.type(skillInputs[0], 'Mathematics');
 
-    const marksRow = screen.getAllByText('marks')[0].closest('.pg-insert-row');
-    expect(marksRow).toBeTruthy();
-    const marksScope = within(marksRow as HTMLElement);
+    // Find the marks cell
+    const marksCell = findPlaceholderCell('marks');
+    const marksScope = within(marksCell);
     const rowOneCells = marksScope.getAllByDisplayValue('Value 1');
     await user.clear(rowOneCells[0] as HTMLInputElement);
     await user.type(rowOneCells[0] as HTMLInputElement, 'Physics');
@@ -367,16 +382,16 @@ describe('GenerateModal premium visual/json workflow', () => {
       />
     );
 
-    const repeatRow = screen.getAllByText('line_items')[0].closest('.pg-insert-row');
-    expect(repeatRow).toBeTruthy();
-    const repeatScope = within(repeatRow as HTMLElement);
-
-    const initialInput = repeatScope.getByPlaceholderText('line_items item 1') as HTMLInputElement;
+    // In the tabular layout with a single dynamic (repeat), merged-row mode is active.
+    // The repeat items appear as sub-rows with a single "Value" column.
+    // There are 2 initial data points, each with an "Item 1" input.
+    const initialInput = screen.getAllByPlaceholderText('Item 1')[0] as HTMLInputElement;
     await user.clear(initialInput);
     await user.type(initialInput, 'Pen');
 
-    await user.click(repeatScope.getByRole('button', { name: '+ Add Item' }));
-    const secondInput = repeatScope.getByPlaceholderText('line_items item 2') as HTMLInputElement;
+    // Add a new item via the "+ Row" button (use first data point's button)
+    await user.click(screen.getAllByRole('button', { name: '+ Row' })[0]);
+    const secondInput = screen.getAllByPlaceholderText('Item 2')[0] as HTMLInputElement;
     await user.type(secondInput, 'Paper');
 
     await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
@@ -442,8 +457,9 @@ describe('GenerateModal premium visual/json workflow', () => {
       />
     );
 
-    const profileRow = screen.getAllByText('profile_link')[0].closest('.pg-insert-row') as HTMLElement;
-    const profileScope = within(profileRow);
+    // In tabular layout, find the profile_link cell
+    const profileCell = findPlaceholderCell('profile_link');
+    const profileScope = within(profileCell);
     expect(profileScope.getByDisplayValue('Profile')).toBeTruthy();
     const urlInput = profileScope.getByPlaceholderText('URL') as HTMLInputElement;
     await user.clear(urlInput);
@@ -504,8 +520,9 @@ describe('GenerateModal premium visual/json workflow', () => {
       />
     );
 
-    const tableRow = screen.getAllByText('line_table')[0].closest('.pg-insert-row') as HTMLElement;
-    const tableScope = within(tableRow);
+    // In tabular layout, find the line_table cell
+    const tableCell = findPlaceholderCell('line_table');
+    const tableScope = within(tableCell);
     const qtyInput = tableScope.getAllByRole('textbox').find((input) => !(input as HTMLInputElement).readOnly) as HTMLInputElement;
     expect(qtyInput).toBeTruthy();
     await user.clear(qtyInput);

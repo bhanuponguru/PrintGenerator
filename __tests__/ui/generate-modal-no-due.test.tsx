@@ -4,6 +4,18 @@ import userEvent from '@testing-library/user-event';
 import GenerateModal from '@/app/components/GenerateModal';
 import { buildNoDueFlowTemplate } from '@/__tests__/ui/ui-flow-fixtures';
 
+/**
+ * Helper: find the <td> cell in the data-entry table that corresponds to a given
+ * placeholder key by matching the column header text.
+ */
+function findPlaceholderCell(key: string): HTMLElement {
+  const table = document.querySelector('.pg-data-entry-table') as HTMLTableElement;
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  const colIndex = headers.findIndex((th) => th.textContent === key);
+  const firstRow = table.querySelector('tbody tr') as HTMLTableRowElement;
+  return firstRow.cells[colIndex] as HTMLElement;
+}
+
 describe('GenerateModal no-due workflow', () => {
   it('renders student details token fields for the no-due form', async () => {
     const user = userEvent.setup();
@@ -16,8 +28,9 @@ describe('GenerateModal no-due workflow', () => {
       />
     );
 
-    const detailsRow = screen.getAllByText('student_details')[0].closest('.pg-insert-row') as HTMLElement;
-    const detailsScope = within(detailsRow);
+    // In the tabular layout, find the student_details cell
+    const detailsCell = findPlaceholderCell('student_details');
+    const detailsScope = within(detailsCell);
 
     await user.clear(detailsScope.getByPlaceholderText('name'));
     await user.type(detailsScope.getByPlaceholderText('name'), 'Ada Lovelace');

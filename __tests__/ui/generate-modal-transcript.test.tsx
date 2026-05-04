@@ -16,18 +16,25 @@ describe('GenerateModal transcript workflow', () => {
       />
     );
 
-    const semestersRow = screen.getAllByText('semesters')[0].closest('.pg-insert-row') as HTMLElement;
-    const semestersScope = within(semestersRow);
+    // The transcript template has a single dynamic placeholder (semesters) with repeat: true.
+    // In the tabular layout, this uses merged sub-rows. Each item has tokens: semester_number, grades.
+    // There are 2 initial data points. Add a new row (repeat item) for the first data point.
+    await user.click(screen.getAllByRole('button', { name: '+ Row' })[0]);
 
-    await user.click(semestersScope.getByRole('button', { name: '+ Item' }));
-
-    const semesterInputs = semestersScope.getAllByPlaceholderText('semester_number') as HTMLInputElement[];
+    // There should now be 2 sub-rows. Each row has a semester_number input.
+    const semesterInputs = screen.getAllByPlaceholderText('semester_number') as HTMLInputElement[];
+    expect(semesterInputs.length).toBeGreaterThanOrEqual(2);
     await user.clear(semesterInputs[0]);
     await user.type(semesterInputs[0], '1');
     await user.clear(semesterInputs[1]);
     await user.type(semesterInputs[1], '2');
 
-    const gradeTableInputs = semestersScope.getAllByRole('textbox').filter((input) => (input as HTMLInputElement).placeholder !== 'semester_number') as HTMLInputElement[];
+    // The grades token is a table rendered via renderSchemaEditor. Find textbox inputs
+    // in grade columns that aren't semester_number inputs.
+    const allTextboxes = screen.getAllByRole('textbox') as HTMLInputElement[];
+    const gradeTableInputs = allTextboxes.filter(
+      (input) => input.placeholder !== 'semester_number' && input.placeholder !== 'Item 1' && input.placeholder !== 'Item 2'
+    );
     expect(gradeTableInputs.length).toBeGreaterThan(0);
     await user.clear(gradeTableInputs[0]);
     await user.type(gradeTableInputs[0], 'Programming 1');

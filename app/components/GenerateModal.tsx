@@ -785,6 +785,361 @@ function TableValueEditor({
   );
 }
 
+const DYNAMIC_KINDS = new Set(['list', 'table', 'repeat', 'custom']);
+
+/** Renders a compact inline editor for use inside table cells (no hints/wrappers for simple types). */
+function renderCellEditor(
+  schema: ComponentTypeSchema | null,
+  value: unknown,
+  onChange: (next: unknown) => void,
+  label: string,
+  renderFull: RenderSchemaEditor
+): React.JSX.Element {
+  if (!schema || schema.kind === 'string') {
+    return <input className="pg-input" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} placeholder={label} />;
+  }
+  if (schema.kind === 'integer') {
+    return <input className="pg-input" type="number" value={typeof value === 'number' ? value : 0} onChange={(e) => onChange(Number(e.target.value))} placeholder={label} />;
+  }
+  return renderFull(schema, value, onChange, label);
+}
+
+/** Get the dynamic sub-column headers for a dynamic placeholder schema. */
+function getDynamicSubColumns(schema: ComponentTypeSchema | null): string[] {
+  if (!schema) return [];
+  if (schema.kind === 'table' && (schema as any).mode !== 'column_data') {
+    const headers = (schema as any).headers;
+    return Array.isArray(headers) && headers.length > 0 ? headers : ['Column 1'];
+  }
+  if (schema.kind === 'list' || schema.kind === 'repeat') return ['Value'];
+  if (schema.kind === 'custom') {
+    const s = schema as any;
+    if (s.repeat) {
+      if (Array.isArray(s.token_library) && s.token_library.length > 0) {
+        return s.token_library.map((t: any) => t.label || t.id);
+      }
+      if (isRecord(s.token_registry)) {
+        return Object.keys(s.token_registry).map((k: string) => s.token_labels?.[k] || k);
+      }
+    }
+    // non-repeat custom: single column
+    return ['Value'];
+  }
+  return ['Value'];
+}
+
+/** Get the token IDs for a repeating custom placeholder (used for cell mapping). */
+function getDynamicTokenIds(schema: ComponentTypeSchema): string[] {
+  const s = schema as any;
+  if (Array.isArray(s.token_library) && s.token_library.length > 0) {
+    return s.token_library.map((t: any) => t.id);
+  }
+  if (isRecord(s.token_registry)) {
+    return Object.keys(s.token_registry);
+  }
+  return [];
+}
+
+/** Get the token schemas for a repeating custom placeholder. */
+function getDynamicTokenSchemas(schema: ComponentTypeSchema): Record<string, ComponentTypeSchema> {
+  const s = schema as any;
+  if (Array.isArray(s.token_library) && s.token_library.length > 0) {
+    return Object.fromEntries(s.token_library.map((t: any) => [t.id, { kind: t.kind, ...t } as ComponentTypeSchema]));
+  }
+  if (isRecord(s.token_registry)) {
+    return s.token_registry as Record<string, ComponentTypeSchema>;
+  }
+  return {};
+}
+
+/** Extract the repeating items array from a dynamic placeholder value. */
+function getDynamicItems(schema: ComponentTypeSchema, value: unknown): unknown[] {
+  if (schema.kind === 'table' && (schema as any).mode !== 'column_data') {
+    const table = isRecord(value) ? value : {};
+    return Array.isArray(table.rows) ? (table.rows as unknown[]) : [];
+  }
+  if (schema.kind === 'list' || schema.kind === 'repeat') {
+    const coll = isRecord(value) ? value : {};
+    const items = Array.isArray(value) ? value : Array.isArray(coll.items) ? coll.items : [];
+    return items;
+  }
+  if (schema.kind === 'custom') {
+    const s = schema as any;
+    if (s.repeat) {
+      const container = isRecord(value) ? value : {};
+      const data = isRecord(container.data) ? container.data : {};
+      return Array.isArray(data.items) ? (data.items as unknown[]) : [];
+    }
+  }
+  return [];
+}
+
+/** Build a new dynamic value after mutating items. */
+function buildDynamicValue(schema: ComponentTypeSchema, items: unknown[], oldValue: unknown): unknown {
+  if (schema.kind === 'table' && (schema as any).mode !== 'column_data') {
+    const old = isRecord(oldValue) ? oldValue : {};
+    return { ...old, rows: items };
+  }
+  if (schema.kind === 'list') {
+    const old = isRecord(oldValue) ? oldValue : {};
+    return { items, style: typeof (old as any).style === 'string' ? (old as any).style : ((schema as any).style || 'bulleted') };
+  }
+  if (schema.kind === 'repeat') {
+    return { items };
+  }
+  if (schema.kind === 'custom' && (schema as any).repeat) {
+    return { data: { items } };
+  }
+  return oldValue;
+}
+
+/** The tabular data entry component. */
+function DataEntryTable({
+  placeholders,
+  dataPoints,
+  addDataPoint,
+  removeDataPoint,
+  cloneDataPoint,
+  updateDataPointValue,
+  renderSchemaEditor,
+}: {
+  placeholders: PlaceholderInfo[];
+  dataPoints: Array<Record<string, unknown>>;
+  addDataPoint: () => void;
+  removeDataPoint: (index: number) => void;
+  cloneDataPoint: (index: number) => void;
+  updateDataPointValue: (index: number, key: string, value: unknown) => void;
+  renderSchemaEditor: RenderSchemaEditor;
+}) {
+  // Separate placeholders into "inline" (rendered as a single cell with renderSchemaEditor)
+  // and one optional "primary dynamic" that drives merged sub-rows.
+  const allDynamic = placeholders.filter((p) => p.schema && DYNAMIC_KINDS.has(p.schema.kind));
+  const primaryDynamicPh = allDynamic.length === 1 ? allDynamic[0] : null;
+
+  // Only use merged sub-rows when there is exactly one dynamic placeholder AND it is repeating.
+  const isDynamicRepeating = primaryDynamicPh && primaryDynamicPh.schema && (
+    primaryDynamicPh.schema.kind === 'list' || primaryDynamicPh.schema.kind === 'repeat' ||
+    (primaryDynamicPh.schema.kind === 'table' && (primaryDynamicPh.schema as any).mode !== 'column_data') ||
+    (primaryDynamicPh.schema.kind === 'custom' && (primaryDynamicPh.schema as any).repeat)
+  );
+
+  // "Inline" placeholders are rendered as columns with renderSchemaEditor (one cell per data point).
+  // When merged-row mode is active, the primary dynamic placeholder is excluded (it gets sub-columns).
+  const inlinePhs = isDynamicRepeating
+    ? placeholders.filter((p) => p.key !== primaryDynamicPh!.key)
+    : placeholders;
+
+  const dynamicSubCols = isDynamicRepeating ? getDynamicSubColumns(primaryDynamicPh!.schema) : [];
+
+  /** Render dynamic sub-row cells for one item. */
+  const renderDynamicCells = (
+    dpIdx: number,
+    itemIdx: number,
+    item: unknown,
+    items: unknown[]
+  ) => {
+    if (!primaryDynamicPh || !primaryDynamicPh.schema) return null;
+    const schema = primaryDynamicPh.schema;
+
+    if (schema.kind === 'table' && (schema as any).mode !== 'column_data') {
+      const headers = getDynamicSubColumns(schema);
+      const row = isRecord(item) ? item : {};
+      const dynamicFields = resolveDynamicFields(schema, headers);
+      const staticValues = resolveStaticValues(schema);
+      return (
+        <>
+          {headers.map((header) => (
+            <td key={`dyn-${dpIdx}-${itemIdx}-${header}`}>
+              {dynamicFields.has(header) ? (
+                <input
+                  className="pg-input"
+                  value={typeof row[header] === 'string' || typeof row[header] === 'number' ? String(row[header]) : ''}
+                  onChange={(e) => {
+                    const nextItems = [...items];
+                    nextItems[itemIdx] = { ...row, [header]: e.target.value };
+                    updateDataPointValue(dpIdx, primaryDynamicPh.key, buildDynamicValue(schema, nextItems, dataPoints[dpIdx][primaryDynamicPh.key]));
+                  }}
+                  placeholder={header}
+                />
+              ) : (
+                <span>{typeof staticValues[header] === 'string' || typeof staticValues[header] === 'number' ? String(staticValues[header]) : ''}</span>
+              )}
+            </td>
+          ))}
+        </>
+      );
+    }
+
+    if (schema.kind === 'list' || schema.kind === 'repeat') {
+      const itemType = (schema as any).item_type || { kind: 'string' as const };
+      return (
+        <td key={`dyn-${dpIdx}-${itemIdx}`}>
+          {renderCellEditor(itemType, item, (nextItem) => {
+            const nextItems = [...items];
+            nextItems[itemIdx] = nextItem;
+            updateDataPointValue(dpIdx, primaryDynamicPh.key, buildDynamicValue(schema, nextItems, dataPoints[dpIdx][primaryDynamicPh.key]));
+          }, `Item ${itemIdx + 1}`, renderSchemaEditor)}
+        </td>
+      );
+    }
+
+    if (schema.kind === 'custom' && (schema as any).repeat) {
+      const tokenIds = getDynamicTokenIds(schema);
+      const tokenSchemas = getDynamicTokenSchemas(schema);
+      const row = isRecord(item) ? item : {};
+      return (
+        <>
+          {tokenIds.map((tokenId) => (
+            <td key={`dyn-${dpIdx}-${itemIdx}-${tokenId}`}>
+              {renderCellEditor(tokenSchemas[tokenId] || null, row[tokenId], (nextVal) => {
+                const nextItems = [...items];
+                const current = isRecord(nextItems[itemIdx]) ? nextItems[itemIdx] : {};
+                nextItems[itemIdx] = { ...current, [tokenId]: nextVal };
+                updateDataPointValue(dpIdx, primaryDynamicPh.key, buildDynamicValue(schema, nextItems, dataPoints[dpIdx][primaryDynamicPh.key]));
+              }, tokenId, renderSchemaEditor)}
+            </td>
+          ))}
+        </>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <div className="pg-data-entry-table-wrap">
+      <div className="pg-sheet-wrap">
+        <table className="pg-sheet-table pg-data-entry-table">
+          <thead>
+            <tr>
+              <th className="pg-det-col-idx">#</th>
+              {inlinePhs.map((p) => (
+                <th key={`hdr-${p.key}`}>{p.key}</th>
+              ))}
+              {isDynamicRepeating && dynamicSubCols.map((col, i) => (
+                <th key={`dyn-hdr-${i}`} className="pg-det-col-dynamic">{col}</th>
+              ))}
+              <th className="pg-det-col-actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dataPoints.map((point, dpIdx) => {
+              if (!isDynamicRepeating) {
+                // Simple case: one row per data point. Each placeholder gets renderSchemaEditor.
+                return (
+                  <tr key={`dp-row-${dpIdx}`}>
+                    <td className="pg-det-col-idx">{dpIdx + 1}</td>
+                    {inlinePhs.map((p) => (
+                      <td key={`dp-${dpIdx}-${p.key}`}>
+                        {renderSchemaEditor(p.schema, point[p.key], (v) => updateDataPointValue(dpIdx, p.key, v), p.key)}
+                      </td>
+                    ))}
+                    <td className="pg-det-col-actions">
+                      <div className="pg-layout-composer-actions">
+                        <button type="button" className="pg-layout-pattern" onClick={() => cloneDataPoint(dpIdx)}>Clone</button>
+                        <button type="button" className="pg-layout-pattern" onClick={() => removeDataPoint(dpIdx)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }
+
+              // Dynamic repeating case: multiple sub-rows with merged inline cells
+              const dynamicItems = getDynamicItems(primaryDynamicPh!.schema!, point[primaryDynamicPh!.key]);
+              const subRowCount = Math.max(dynamicItems.length, 1);
+              const rowSpan = subRowCount + 1; // +1 for the add-item footer row
+
+              return (
+                <React.Fragment key={`dp-group-${dpIdx}`}>
+                  {dynamicItems.length > 0 ? dynamicItems.map((item, itemIdx) => (
+                    <tr key={`dp-${dpIdx}-item-${itemIdx}`} className={itemIdx === 0 ? 'pg-det-group-start' : ''}>
+                      {itemIdx === 0 && (
+                        <>
+                          <td className="pg-det-col-idx pg-det-merged" rowSpan={rowSpan}>{dpIdx + 1}</td>
+                          {inlinePhs.map((p) => (
+                            <td key={`dp-${dpIdx}-${p.key}`} className="pg-det-merged" rowSpan={rowSpan}>
+                              {renderSchemaEditor(p.schema, point[p.key], (v) => updateDataPointValue(dpIdx, p.key, v), p.key)}
+                            </td>
+                          ))}
+                        </>
+                      )}
+                      {renderDynamicCells(dpIdx, itemIdx, item, dynamicItems)}
+                      <td className="pg-det-col-actions">
+                        <button
+                          type="button"
+                          className="pg-layout-segment-btn"
+                          onClick={() => {
+                            const nextItems = dynamicItems.filter((_, i) => i !== itemIdx);
+                            updateDataPointValue(dpIdx, primaryDynamicPh!.key, buildDynamicValue(primaryDynamicPh!.schema!, nextItems.length > 0 ? nextItems : [{}], point[primaryDynamicPh!.key]));
+                          }}
+                          disabled={dynamicItems.length <= 1}
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr key={`dp-${dpIdx}-empty`} className="pg-det-group-start">
+                      <td className="pg-det-col-idx pg-det-merged" rowSpan={2}>{dpIdx + 1}</td>
+                      {inlinePhs.map((p) => (
+                        <td key={`dp-${dpIdx}-${p.key}`} className="pg-det-merged" rowSpan={2}>
+                          {renderSchemaEditor(p.schema, point[p.key], (v) => updateDataPointValue(dpIdx, p.key, v), p.key)}
+                        </td>
+                      ))}
+                      {dynamicSubCols.map((_, ci) => (
+                        <td key={`dp-${dpIdx}-empty-${ci}`}></td>
+                      ))}
+                      <td className="pg-det-col-actions"></td>
+                    </tr>
+                  )}
+                  {/* Footer row for add/clone/delete within the merged group */}
+                  <tr key={`dp-${dpIdx}-footer`} className="pg-det-group-footer">
+                    <td colSpan={dynamicSubCols.length}>
+                      <div className="pg-layout-composer-actions">
+                        <button
+                          type="button"
+                          className="pg-layout-pattern"
+                          onClick={() => {
+                            const newItem = primaryDynamicPh!.schema!.kind === 'table'
+                              ? Object.fromEntries(getDynamicSubColumns(primaryDynamicPh!.schema).map((h) => [h, '']))
+                              : primaryDynamicPh!.schema!.kind === 'custom'
+                                ? {}
+                                : generateExampleValue((primaryDynamicPh!.schema as any).item_type || { kind: 'string' });
+                            const nextItems = [...dynamicItems, newItem];
+                            updateDataPointValue(dpIdx, primaryDynamicPh!.key, buildDynamicValue(primaryDynamicPh!.schema!, nextItems, point[primaryDynamicPh!.key]));
+                          }}
+                        >
+                          + Row
+                        </button>
+                      </div>
+                    </td>
+                    <td className="pg-det-col-actions">
+                      <div className="pg-layout-composer-actions">
+                        <button type="button" className="pg-layout-pattern" onClick={() => cloneDataPoint(dpIdx)}>Clone</button>
+                        <button type="button" className="pg-layout-pattern" onClick={() => removeDataPoint(dpIdx)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={1 + inlinePhs.length + (isDynamicRepeating ? dynamicSubCols.length : 0) + 1}>
+                <div className="pg-layout-composer-actions">
+                  <button type="button" className="pg-layout-pattern" onClick={addDataPoint}>+ Add Data Point</button>
+                </div>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
 export default function GenerateModal({ template, onClose, onError }: GenerateModalProps) {
   const placeholders = useMemo(() => extractPlaceholders(template.template), [template.template]);
   const placeholderKeys = placeholders.map((p) => p.key);
@@ -1267,33 +1622,15 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
           </div>
 
           {entryMode === 'visual' ? (
-            <div className="pg-layout-composer">
-              {dataPoints.map((point, pointIndex) => (
-                <div key={`dp-${pointIndex}`} className="pg-layout-composer">
-                  <div className="pg-layout-composer-actions">
-                    <span className="pg-layout-token-assist-label">Data Point {pointIndex + 1}</span>
-                    <button type="button" className="pg-layout-pattern" onClick={() => cloneDataPoint(pointIndex)}>Clone</button>
-                    <button type="button" className="pg-layout-pattern" onClick={() => removeDataPoint(pointIndex)}>Delete</button>
-                  </div>
-
-                  {placeholders.map((placeholder) => (
-                    <div className="pg-insert-row" key={`dp-${pointIndex}-${placeholder.key}`}>
-                      <label className="pg-label">{placeholder.key}</label>
-                      {renderSchemaEditor(
-                        placeholder.schema,
-                        point[placeholder.key],
-                        (nextValue) => updateDataPointValue(pointIndex, placeholder.key, nextValue),
-                        placeholder.key
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ))}
-
-              <div className="pg-layout-composer-actions">
-                <button type="button" className="pg-layout-pattern" onClick={addDataPoint}>+ Add Data Point</button>
-              </div>
-            </div>
+            <DataEntryTable
+              placeholders={placeholders}
+              dataPoints={dataPoints}
+              addDataPoint={addDataPoint}
+              removeDataPoint={removeDataPoint}
+              cloneDataPoint={cloneDataPoint}
+              updateDataPointValue={updateDataPointValue}
+              renderSchemaEditor={renderSchemaEditor}
+            />
           ) : (
             <div className="pg-field">
               <label className="pg-label" htmlFor="g-dp-json">JSON Preview</label>

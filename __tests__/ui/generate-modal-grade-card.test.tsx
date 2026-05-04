@@ -4,6 +4,18 @@ import userEvent from '@testing-library/user-event';
 import GenerateModal from '@/app/components/GenerateModal';
 import { buildGradeCardFlowTemplate } from '@/__tests__/ui/ui-flow-fixtures';
 
+/**
+ * Helper: find the <td> cell in the data-entry table that corresponds to a given
+ * placeholder key by matching the column header text.
+ */
+function findPlaceholderCell(key: string): HTMLElement {
+  const table = document.querySelector('.pg-data-entry-table') as HTMLTableElement;
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  const colIndex = headers.findIndex((th) => th.textContent === key);
+  const firstRow = table.querySelector('tbody tr') as HTMLTableRowElement;
+  return firstRow.cells[colIndex] as HTMLElement;
+}
+
 describe('GenerateModal grade-card workflow', () => {
   it('renders student details and grades table inputs with a static caption', async () => {
     const user = userEvent.setup();
@@ -16,9 +28,9 @@ describe('GenerateModal grade-card workflow', () => {
       />
     );
 
-    const firstDataPoint = screen.getByText('Data Point 1').closest('.pg-layout-composer') as HTMLElement;
-    const studentDetailsRow = within(firstDataPoint).getByText('student_details').closest('.pg-insert-row') as HTMLElement;
-    const studentScope = within(studentDetailsRow);
+    // In the tabular layout, find the student_details cell
+    const studentDetailsCell = findPlaceholderCell('student_details');
+    const studentScope = within(studentDetailsCell);
 
     await user.clear(studentScope.getByPlaceholderText('name'));
     await user.type(studentScope.getByPlaceholderText('name'), 'Ada Lovelace');
@@ -27,8 +39,9 @@ describe('GenerateModal grade-card workflow', () => {
     await user.clear(studentScope.getByPlaceholderText('program'));
     await user.type(studentScope.getByPlaceholderText('program'), 'BSc CS');
 
-    const gradesRow = screen.getAllByText('grades')[0].closest('.pg-insert-row') as HTMLElement;
-    const gradesScope = within(gradesRow);
+    // Find the grades cell
+    const gradesCell = findPlaceholderCell('grades');
+    const gradesScope = within(gradesCell);
     expect(gradesScope.getByText('Semester 1 Courses')).toBeTruthy();
 
     const gradeInputs = gradesScope
