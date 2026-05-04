@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import TemplateEditor from './TemplateEditor';
-import type { Template } from '../page';
+import type { TemplateData } from '@/types/template';
 import { TagResponse } from '@/types/tag';
 
 interface EditTemplateModalProps {
-  template:  Template;
+  template:  TemplateData;
   tags:      TagResponse[];
   onTagCreated: () => void;
   onClose:   () => void;

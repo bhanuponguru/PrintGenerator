@@ -1,431 +1,177 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import DashboardLayout from './components/DashboardLayout';
+import type { TemplateData } from '@/types/template';
 import { TagResponse } from '@/types/tag';
-import TemplateCard from './components/TemplateCard';
-import CreateTemplateModal from './components/CreateTemplateModal';
-import EditTemplateModal from './components/EditTemplateModal';
-import GenerateModal from './components/GenerateModal';
-import TagManagementSection from './components/TagManagementSection';
-import CreateTagModal from './components/CreateTagModal';
-import EditTagModal from './components/EditTagModal';
-import DeleteConfirmModal from './components/DeleteConfirmModal';
-import TagTemplatesModal from './components/TagTemplatesModal';
-import { canGenerateFromTemplate } from '@/lib/template-summary';
-
-export interface Template {
-  _id: string;
-  name: string;
-  version: string;
-  template: Record<string, any>;
-  tag_ids?: string[];
-  created_on: string;
-  updated_on: string;
-}
-
-type ToastState = { message: string; type: 'success' | 'error' } | null;
 
 /**
- * Top-level primary dashboard entry point orchestrating the entire front-end user experience.
- * Manages the canonical collection of templates while facilitating triggers for creating,
- * editing, generating, and deleting entities via integrated nested module dialog views.
- * Controls centralized error handling loops and success messaging feedback toasts.
+ * Dashboard home page — provides a quick guide on how to use PrintGenerator,
+ * and quick-access links to Templates and Tags management screens.
  */
 export default function Home() {
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [templateCount, setTemplateCount] = useState<number | null>(null);
+  const [tagCount, setTagCount] = useState<number | null>(null);
+  const [recentTemplates, setRecentTemplates] = useState<TemplateData[]>([]);
 
-  const [tags, setTags] = useState<TagResponse[]>([]);
-  const [loadingTags, setLoadingTags] = useState(true);
-  const [activeTab, setActiveTab] = useState<'templates' | 'tags'>('templates');
-  const [selectedFilterTag, setSelectedFilterTag] = useState<string | null>(null);
-
-  // Modal states - Templates
-  const [showCreate, setShowCreate] = useState(false);
-  const [editTemplate, setEditTemplate] = useState<Template | null>(null);
-  const [generateTemplate, setGenerateTemplate] = useState<Template | null>(null);
-
-  // Modal states - Tags
-  const [showCreateTag, setShowCreateTag] = useState(false);
-  const [editTag, setEditTag] = useState<TagResponse | null>(null);
-  const [deleteTag, setDeleteTag] = useState<TagResponse | null>(null);
-  const [tagTemplates, setTagTemplates] = useState<TagResponse | null>(null);
-
-  // Toast
-  const [toast, setToast] = useState<ToastState>(null);
-
-  const showToast = (message: string, type: 'success' | 'error') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
-  };
-
-  const fetchTemplates = useCallback(async () => {
-    // Reset visual loading and error states preparing for data fetch
-    setLoading(true);
-    setFetchError(null);
-    
+  const fetchStats = useCallback(async () => {
     try {
-      // Execute the primary GET request querying the total templates collection
-      const res = await fetch('/api/templates');
-      const data = await res.json();
-      
-      // Unpack response gracefully bypassing null/undefined results
-      if (data.success) {
-        setTemplates(data.data ?? []);
-      } else {
-        setFetchError(data.error ?? 'Failed to load templates');
+      const [templatesRes, tagsRes] = await Promise.all([
+        fetch('/api/templates'),
+        fetch('/api/tags'),
+      ]);
+      const [templatesData, tagsData] = await Promise.all([
+        templatesRes.json(),
+        tagsRes.json(),
+      ]);
+      if (templatesData.success) {
+        const all = templatesData.data ?? [];
+        setTemplateCount(all.length);
+        // Show most recent 3 templates
+        const sorted = [...all].sort(
+          (a: TemplateData, b: TemplateData) =>
+            new Date(b.updated_on).getTime() - new Date(a.updated_on).getTime()
+        );
+        setRecentTemplates(sorted.slice(0, 3));
+      }
+      if (tagsData.success) {
+        setTagCount((tagsData.data ?? []).length);
       }
     } catch {
-      // Catch network-level systemic failures cleanly without crashing
-      setFetchError('Unable to connect to server');
-    } finally {
-      // Unconditionally terminate the loading state locking the view
-      setLoading(false);
+      // silent — stats are best-effort
     }
   }, []);
 
-  const fetchTags = useCallback(async () => {
-    setLoadingTags(true);
-    try {
-      const res = await fetch('/api/tags');
-      const data = await res.json();
-      if (data.success) {
-        setTags(data.data ?? []);
-      }
-    } catch {
-      showToast('Failed to load tags', 'error');
-    } finally {
-      setLoadingTags(false);
-    }
-  }, []);
-
-  // Guarantee UI sync with the database purely on initial mount phases
   useEffect(() => {
-    fetchTemplates();
-    fetchTags();
-  }, [fetchTemplates, fetchTags]);
+    fetchStats();
+  }, [fetchStats]);
 
-  const handleDelete = async (id: string) => {
-    try {
-      // Issue a hard DELETE destructive operation for the specific target
-      const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      
-      if (data.success) {
-        // Sequentially queue user feedback and independently trigger a visual refresh
-        showToast('Template deleted', 'success');
-        fetchTemplates();
-      } else {
-        // Expose underlying database constraints or deletion failures
-        showToast(data.error ?? 'Delete failed', 'error');
-      }
-    } catch {
-      // Gracefully capture disconnected environment failures
-      showToast('Network error', 'error');
-    }
-  };
-
-  const handleDeleteTag = async () => {
-    if (!deleteTag) return;
-    try {
-      const res = await fetch(`/api/tags/${encodeURIComponent(deleteTag.name)}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
-        showToast('Tag deleted', 'success');
-        fetchTags();
-        fetchTemplates(); // update templates as well
-      } else {
-        showToast(data.error ?? 'Delete failed', 'error');
-      }
-    } catch {
-      showToast('Network error', 'error');
-    } finally {
-      setDeleteTag(null);
-    }
-  };
-
-  const filteredTemplates = selectedFilterTag
-    ? templates.filter(t => t.tag_ids?.includes(selectedFilterTag))
-    : templates;
-
-  const handleGenerateTemplate = (template: Template) => {
-    if (!canGenerateFromTemplate(template.template)) {
-      showToast('This template has no placeholders yet. Add placeholders before generating.', 'error');
-      return;
-    }
-    setGenerateTemplate(template);
-  };
+  const steps = [
+    {
+      number: '01',
+      icon: '✦',
+      title: 'Create a Template',
+      description: 'Design your document layout using the rich text editor. Add headers, footers, tables, lists, and style your content just like a word processor.',
+      color: 'var(--pg-accent)',
+    },
+    {
+      number: '02',
+      icon: '⟐',
+      title: 'Insert Placeholders',
+      description: 'Mark dynamic areas with {{placeholders}} — these are slots where data will be injected during generation. Supports text, images, tables, lists, and custom components.',
+      color: '#88c0d0',
+    },
+    {
+      number: '03',
+      icon: '⬡',
+      title: 'Organize with Tags',
+      description: 'Group related templates using tags for easy filtering and management. Tags help you stay organized as your template library grows.',
+      color: '#a3be8c',
+    },
+    {
+      number: '04',
+      icon: '⤓',
+      title: 'Generate Documents',
+      description: 'Fill in placeholder values — manually or via JSON/CSV upload — and generate polished PDF documents in bulk. Download them all as a ZIP archive.',
+      color: '#b48ead',
+    },
+  ];
 
   return (
-    <div className="pg-root">
-      {/* ── Header ── */}
-      <header className="pg-header">
-        <div className="pg-header-inner">
-          <div className="pg-brand">
-            {/* Print-lines icon */}
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-              <rect width="28" height="28" rx="5" fill="var(--pg-accent)" opacity="0.13" />
-              <rect x="6"  y="7"  width="16" height="2" rx="1" fill="var(--pg-accent)" />
-              <rect x="6"  y="12" width="11" height="2" rx="1" fill="var(--pg-accent)" opacity="0.65" />
-              <rect x="6"  y="17" width="13" height="2" rx="1" fill="var(--pg-accent)" opacity="0.45" />
-              <rect x="6"  y="22" width="8"  height="2" rx="1" fill="var(--pg-accent)" opacity="0.28" />
-            </svg>
-            <div>
-              <h1 className="pg-title">PrintGenerator</h1>
-              <p className="pg-subtitle">Template Management</p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px' }}>
-            {activeTab === 'templates' ? (
-              <button className="pg-btn-primary" onClick={() => setShowCreate(true)}>
-                + New Template
-              </button>
-            ) : (
-              <button className="pg-btn-primary" onClick={() => setShowCreateTag(true)}>
-                + New Tag
-              </button>
-            )}
+    <DashboardLayout>
+      {/* ── Welcome Hero ── */}
+      <div className="pg-dashboard-hero">
+        <div className="pg-dashboard-hero-content">
+          <div className="pg-dashboard-hero-badge">Dashboard</div>
+          <h2 className="pg-dashboard-hero-title">
+            Welcome to <span className="pg-dashboard-hero-accent">PrintGenerator</span>
+          </h2>
+          <p className="pg-dashboard-hero-subtitle">
+            Design document templates, insert dynamic placeholders, and generate polished PDFs at scale.
+          </p>
+          <div className="pg-dashboard-hero-actions">
+            <Link href="/templates" className="pg-btn-primary pg-dashboard-hero-btn">
+              Go to Templates →
+            </Link>
+            <Link href="/tags" className="pg-btn-ghost pg-dashboard-hero-btn">
+              Manage Tags
+            </Link>
           </div>
         </div>
-        
-        {/* Navigation Tabs */}
-        <div style={{ display: 'flex', gap: '20px', padding: '0 40px', marginTop: '20px', borderBottom: '1px solid var(--pg-border)' }}>
-          <button 
-            onClick={() => setActiveTab('templates')}
-            style={{ 
-              background: 'none', border: 'none', padding: '10px 0', 
-              color: activeTab === 'templates' ? 'var(--pg-accent)' : 'var(--pg-text-muted)', 
-              borderBottom: activeTab === 'templates' ? '2px solid var(--pg-accent)' : '2px solid transparent',
-              cursor: 'pointer', fontWeight: 600, fontSize: '14px' 
-            }}
-          >
-            Templates
-          </button>
-          <button 
-            onClick={() => setActiveTab('tags')}
-            style={{ 
-              background: 'none', border: 'none', padding: '10px 0', 
-              color: activeTab === 'tags' ? 'var(--pg-accent)' : 'var(--pg-text-muted)', 
-              borderBottom: activeTab === 'tags' ? '2px solid var(--pg-accent)' : '2px solid transparent',
-              cursor: 'pointer', fontWeight: 600, fontSize: '14px' 
-            }}
-          >
-            Manage Tags
-          </button>
+
+        {/* Stats cards */}
+        <div className="pg-dashboard-stats">
+          <Link href="/templates" className="pg-stat-card">
+            <div className="pg-stat-value">{templateCount ?? '–'}</div>
+            <div className="pg-stat-label">Templates</div>
+            <div className="pg-stat-icon">◫</div>
+          </Link>
+          <Link href="/tags" className="pg-stat-card">
+            <div className="pg-stat-value">{tagCount ?? '–'}</div>
+            <div className="pg-stat-label">Tags</div>
+            <div className="pg-stat-icon">⬡</div>
+          </Link>
         </div>
-      </header>
+      </div>
 
-      {/* ── Main ── */}
-      <main className="pg-main">
-        {activeTab === 'templates' ? (
-          <>
-            <div className="pg-section-header">
-              <div>
-                <p className="pg-section-title">All Templates</p>
-                {!loading && !fetchError && (
-                  <p className="pg-section-count">
-                    {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''}
-                  </p>
-                )}
-              </div>
-              
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <select 
-                  className="pg-input" 
-                  style={{ width: 'auto', padding: '6px 12px', fontSize: '13px' }}
-                  value={selectedFilterTag || ''}
-                  onChange={(e) => setSelectedFilterTag(e.target.value || null)}
-                >
-                  <option value="">All Tags</option>
-                  {tags.map(t => (
-                    <option key={t._id} value={t._id}>{t.name}</option>
-                  ))}
-                </select>
+      {/* ── Quick Guide ── */}
+      <section className="pg-guide-section">
+        <div className="pg-guide-header">
+          <h3 className="pg-guide-title">Quick Guide</h3>
+          <p className="pg-guide-subtitle">Get started with PrintGenerator in four simple steps</p>
+        </div>
 
-                {!loading && !fetchError && templates.length > 0 && (
-                  <button className="pg-btn-ghost" onClick={fetchTemplates} style={{ fontSize: '11px' }}>
-                    ↻ Refresh
-                  </button>
-                )}
+        <div className="pg-guide-steps">
+          {steps.map((step) => (
+            <div key={step.number} className="pg-guide-step">
+              <div className="pg-guide-step-number" style={{ color: step.color }}>
+                {step.number}
               </div>
+              <div className="pg-guide-step-icon" style={{ color: step.color }}>
+                {step.icon}
+              </div>
+              <h4 className="pg-guide-step-title">{step.title}</h4>
+              <p className="pg-guide-step-desc">{step.description}</p>
             </div>
+          ))}
+        </div>
+      </section>
 
-            {loading ? (
-          <div className="pg-loading">
-            <span className="pg-spinner" />
-            Loading templates
-          </div>
-        ) : fetchError ? (
-          <div className="pg-error-banner">
-            <span>⚠ {fetchError}</span>
-            <button className="pg-btn-primary" onClick={fetchTemplates} style={{ padding: '6px 12px', fontSize: '11px' }}>Retry</button>
-          </div>
-        ) : filteredTemplates.length === 0 ? (
-          <div className="pg-empty">
-            <div className="pg-empty-icon">□</div>
-            <p style={{ color: 'var(--pg-text)', fontSize: '15px', fontFamily: 'var(--pg-font-serif)', fontStyle: 'italic' }}>
-              No templates found
-            </p>
-            {templates.length === 0 ? (
-              <>
-                <p style={{ color: 'var(--pg-text-muted)', fontSize: '12px', maxWidth: '260px', lineHeight: 1.7 }}>
-                  Create your first template to start generating filled PDF documents.
-                </p>
-                <button className="pg-btn-primary" onClick={() => setShowCreate(true)}>
-                  Create Template
-                </button>
-              </>
-            ) : (
-              <p style={{ color: 'var(--pg-text-muted)', fontSize: '12px', maxWidth: '260px', lineHeight: 1.7 }}>
-                Try changing your tag filter.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="pg-grid">
-            {filteredTemplates.map((t) => (
-              <TemplateCard
-                key={t._id}
-                template={t}
-                tags={tags}
-                onEdit={() => setEditTemplate(t)}
-                onDelete={() => handleDelete(t._id)}
-                onGenerate={() => handleGenerateTemplate(t)}
-              />
-            ))}
-          </div>
-        )}
-        </>
-      ) : (
-        <>
+      {/* ── Recent Templates ── */}
+      {recentTemplates.length > 0 && (
+        <section className="pg-recent-section">
           <div className="pg-section-header">
             <div>
-              <p className="pg-section-title">Manage Tags</p>
-              {!loadingTags && (
-                <p className="pg-section-count">
-                  {tags.length} tag{tags.length !== 1 ? 's' : ''}
-                </p>
-              )}
+              <p className="pg-section-title">Recently Updated</p>
+              <p className="pg-section-count">{recentTemplates.length} template{recentTemplates.length !== 1 ? 's' : ''}</p>
             </div>
-            {!loadingTags && tags.length > 0 && (
-              <button className="pg-btn-ghost" onClick={fetchTags} style={{ fontSize: '11px' }}>
-                ↻ Refresh
-              </button>
-            )}
+            <Link href="/templates" className="pg-btn-ghost" style={{ fontSize: '11px' }}>
+              View All →
+            </Link>
           </div>
-          {loadingTags ? (
-            <div className="pg-loading">
-              <span className="pg-spinner" />
-              Loading tags
-            </div>
-          ) : (
-            <TagManagementSection 
-              tags={tags} 
-              onEditClick={(tag) => setEditTag(tag)}
-              onDeleteClick={(tag) => setDeleteTag(tag)}
-              onViewTemplatesClick={(tag) => setTagTemplates(tag)}
-            />
-          )}
-        </>
-      )}
-      </main>
 
-      {/* ── Modals ── */}
-      {showCreate && (
-        <CreateTemplateModal
-          tags={tags}
-          onTagCreated={fetchTags}
-          onClose={() => setShowCreate(false)}
-          onSuccess={() => {
-            setShowCreate(false);
-            fetchTemplates();
-            showToast('Template created!', 'success');
-          }}
-          onError={(msg) => showToast(msg, 'error')}
-        />
+          <div className="pg-recent-grid">
+            {recentTemplates.map((t) => (
+              <Link
+                key={t._id}
+                href="/templates"
+                className="pg-recent-card"
+              >
+                <div className="pg-recent-card-header">
+                  <h4 className="pg-recent-card-name">{t.name}</h4>
+                  <span className="pg-version-badge">v{t.version}</span>
+                </div>
+                <p className="pg-recent-card-date">
+                  Updated {new Date(t.updated_on).toLocaleDateString('en-US', {
+                    month: 'short', day: 'numeric', year: 'numeric'
+                  })}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </section>
       )}
-
-      {editTemplate && (
-        <EditTemplateModal
-          template={editTemplate}
-          tags={tags}
-          onTagCreated={fetchTags}
-          onClose={() => setEditTemplate(null)}
-          onSuccess={() => {
-            setEditTemplate(null);
-            fetchTemplates();
-            showToast('Template updated!', 'success');
-          }}
-          onError={(msg) => showToast(msg, 'error')}
-        />
-      )}
-
-      {generateTemplate && (
-        <GenerateModal
-          template={generateTemplate}
-          onClose={() => setGenerateTemplate(null)}
-          onError={(msg) => showToast(msg, 'error')}
-        />
-      )}
-
-      {/* Tags Modals */}
-      {showCreateTag && (
-        <CreateTagModal 
-          onClose={() => setShowCreateTag(false)}
-          onSuccess={() => {
-            setShowCreateTag(false);
-            fetchTags();
-            showToast('Tag created!', 'success');
-          }}
-          onError={(msg) => showToast(msg, 'error')}
-        />
-      )}
-
-      {editTag && (
-        <EditTagModal 
-          tag={editTag}
-          onClose={() => setEditTag(null)}
-          onSuccess={() => {
-            setEditTag(null);
-            fetchTags();
-            showToast('Tag updated!', 'success');
-          }}
-          onError={(msg) => showToast(msg, 'error')}
-        />
-      )}
-
-      {deleteTag && (
-        <DeleteConfirmModal
-          title="Delete Tag"
-          message={`Are you sure you want to delete the tag "${deleteTag.name}"? Templates associated with this tag will not be deleted, but the tag will be removed from them.`}
-          onClose={() => setDeleteTag(null)}
-          onConfirm={handleDeleteTag}
-          loading={false}
-        />
-      )}
-
-      {tagTemplates && (
-        <TagTemplatesModal 
-          tag={tagTemplates}
-          templates={templates}
-          onClose={() => setTagTemplates(null)}
-          onEditTemplate={(t) => setEditTemplate(t)}
-          onDeleteTemplate={(id) => handleDelete(id)}
-          onGenerateTemplate={(t) => handleGenerateTemplate(t)}
-        />
-      )}
-
-      {/* ── Toast ── */}
-      {toast && (
-        <div
-          key={toast.message + Date.now()}
-          className={`pg-toast pg-toast--${toast.type}`}
-        >
-          {toast.message}
-        </div>
-      )}
-    </div>
+    </DashboardLayout>
   );
 }

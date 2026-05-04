@@ -1,13 +1,12 @@
 'use client';
 
 import React, { useMemo, useRef, useState } from 'react';
-import type { Template } from '../page';
-import type { ComponentTypeSchema } from '@/types/template';
+import type { TemplateData, ComponentTypeSchema } from '@/types/template';
 import { deriveSchemaFromChildren } from '@/lib/tiptap/extensions';
 import { fileToDataUrl } from '@/lib/image-utils';
 
 interface GenerateModalProps {
-  template: Template;
+  template: TemplateData;
   onClose: () => void;
   onError: (msg: string) => void;
 }

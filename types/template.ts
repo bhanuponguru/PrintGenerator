@@ -296,3 +296,17 @@ export interface ApiResponse<T = any> {
   data?: T;
   error?: string;
 }
+
+/**
+ * Frontend-friendly template shape returned by the API (serialized ObjectIds → strings).
+ * Used across all client-side pages and components.
+ */
+export interface TemplateData {
+  _id: string;
+  name: string;
+  version: string;
+  template: Record<string, any>;
+  tag_ids?: string[];
+  created_on: string;
+  updated_on: string;
+}

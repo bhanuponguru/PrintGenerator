@@ -1,16 +1,16 @@
 'use client';
 
-import { Template } from '@/app/page';
+import { TemplateData } from '@/types/template';
 import { TagResponse } from '@/types/tag';
 import TemplateCard from './TemplateCard';
 
 interface TagTemplatesModalProps {
   tag: TagResponse;
-  templates: Template[];
+  templates: TemplateData[];
   onClose: () => void;
-  onEditTemplate: (template: Template) => void;
+  onEditTemplate: (template: TemplateData) => void;
   onDeleteTemplate: (id: string) => void;
-  onGenerateTemplate: (template: Template) => void;
+  onGenerateTemplate: (template: TemplateData) => void;
 }
 
 /** Modal that shows every template associated with a selected tag. */

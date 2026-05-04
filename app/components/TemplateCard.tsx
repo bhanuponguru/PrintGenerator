@@ -6,12 +6,12 @@ import StarterKit from '@tiptap/starter-kit';
 import { Placeholder } from '@/lib/tiptap/placeholder';
 import { ComponentExtensions } from '@/lib/tiptap/extensions';
 import { countTemplatePlaceholders, escapePreviewHtml, summarizeTemplatePreview } from '@/lib/template-summary';
-import type { Template } from '../page';
+import type { TemplateData } from '@/types/template';
 
 import { TagResponse } from '@/types/tag';
 
 interface TemplateCardProps {
-  template: Template;
+  template: TemplateData;
   tags: TagResponse[];
   onEdit:     () => void;
   onDelete:   () => void;
@@ -41,17 +41,55 @@ export default function TemplateCard({ template, tags, onEdit, onDelete, onGener
   const placeholderCount = useMemo(() => countTemplatePlaceholders(template.template), [template.template]);
   const canGenerate = placeholderCount > 0;
 
-  /** Renders the preview area from TipTap JSON, with a fallback summary for older data. */
+  /**
+   * Strips structural wrapper nodes (page, header, footer, container) from
+   * TipTap JSON, flattening their content into the parent. This prevents
+   * generateHTML from failing on complex template structures that include
+   * components it can't render in a simple preview context.
+   */
   const previewHtml = useMemo(() => {
+    const stripStructural = (node: Record<string, any>): Record<string, any> => {
+      const structural = new Set([
+        'pageComponent', 'headerComponent', 'footerComponent',
+        'containerComponent', 'pageBreak',
+      ]);
+
+      if (!node || typeof node !== 'object') return node;
+
+      if (Array.isArray(node.content)) {
+        const flattened: Record<string, any>[] = [];
+        for (const child of node.content) {
+          if (structural.has(child?.type)) {
+            // Lift content of structural nodes into parent
+            if (Array.isArray(child.content)) {
+              for (const grandchild of child.content) {
+                flattened.push(stripStructural(grandchild));
+              }
+            }
+          } else {
+            flattened.push(stripStructural(child));
+          }
+        }
+        return { ...node, content: flattened };
+      }
+      return node;
+    };
+
     try {
       if (template.template?.type === 'doc') {
-        return generateHTML(template.template, [StarterKit, Placeholder, ...ComponentExtensions]);
+        const simplified = stripStructural(template.template);
+        return generateHTML(simplified, [StarterKit, Placeholder, ...ComponentExtensions]);
       }
       const summary = summarizeTemplatePreview(template.template);
       return `<p style="opacity:.5;font-style:italic">${escapePreviewHtml(summary)}</p>`;
     } catch {
-      const summary = summarizeTemplatePreview(template.template);
-      return `<p style="opacity:.5;font-style:italic">${escapePreviewHtml(summary)}</p>`;
+      // Final fallback: text-only summary when HTML generation fails entirely
+      try {
+        const summary = summarizeTemplatePreview(template.template);
+        return `<p style="opacity:.5;font-style:italic">${escapePreviewHtml(summary)}</p>`;
+      } catch {
+        return `<p style="opacity:.5;font-style:italic">Preview unavailable</p>`;
+      }
     }
   }, [template.template]);
 
