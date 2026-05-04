@@ -9,6 +9,7 @@ import TemplateCard from '../components/TemplateCard';
 import CreateTemplateModal from '../components/CreateTemplateModal';
 import EditTemplateModal from '../components/EditTemplateModal';
 import GenerateModal from '../components/GenerateModal';
+import PreviewModal from '../components/PreviewModal';
 import { useToast } from '../components/useToast';
 import { canGenerateFromTemplate } from '@/lib/template-summary';
 
@@ -31,6 +32,7 @@ function TemplatesContent() {
   const [showCreate, setShowCreate] = useState(false);
   const [editTemplate, setEditTemplate] = useState<TemplateData | null>(null);
   const [generateTemplate, setGenerateTemplate] = useState<TemplateData | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<TemplateData | null>(null);
 
   const { showToast, ToastComponent } = useToast();
 
@@ -199,6 +201,7 @@ function TemplatesContent() {
               onEdit={() => setEditTemplate(t)}
               onDelete={() => handleDelete(t._id)}
               onGenerate={() => handleGenerateTemplate(t)}
+              onPreview={() => setPreviewTemplate(t)}
             />
           ))}
         </div>
@@ -239,6 +242,13 @@ function TemplatesContent() {
           template={generateTemplate}
           onClose={() => setGenerateTemplate(null)}
           onError={(msg) => showToast(msg, 'error')}
+        />
+      )}
+
+      {previewTemplate && (
+        <PreviewModal
+          template={previewTemplate}
+          onClose={() => setPreviewTemplate(null)}
         />
       )}
 

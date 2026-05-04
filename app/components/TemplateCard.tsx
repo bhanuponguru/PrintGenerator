@@ -16,6 +16,7 @@ interface TemplateCardProps {
   onEdit:     () => void;
   onDelete:   () => void;
   onGenerate: () => void;
+  onPreview?: () => void;
 }
 
 /**
@@ -36,7 +37,7 @@ function formatDate(dateStr: string): string {
 /**
  * Card view for a template entry, combining metadata, preview, and actions.
  */
-export default function TemplateCard({ template, tags, onEdit, onDelete, onGenerate }: TemplateCardProps) {
+export default function TemplateCard({ template, tags, onEdit, onDelete, onGenerate, onPreview }: TemplateCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const placeholderCount = useMemo(() => countTemplatePlaceholders(template.template), [template.template]);
   const canGenerate = placeholderCount > 0;
@@ -164,6 +165,15 @@ export default function TemplateCard({ template, tags, onEdit, onDelete, onGener
           >
             Fill & Generate
           </button>
+          {onPreview && (
+            <button
+              className="pg-btn-ghost"
+              onClick={onPreview}
+              title="Preview template"
+            >
+              Preview
+            </button>
+          )}
           <button
             className="pg-btn-ghost"
             onClick={onEdit}
