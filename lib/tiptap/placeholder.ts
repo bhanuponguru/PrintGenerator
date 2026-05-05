@@ -493,7 +493,13 @@ export function renderValueBySchema(schema: ComponentTypeSchema, value: unknown,
       if (!isRecord(value)) return ['span', { ...baseStyle }, '[invalid image value]'];
       const src = typeof value.src === 'string' ? value.src : '';
       const alt = typeof value.alt === 'string' ? value.alt : '';
-      return ['figure', { ...baseStyle }, ['img', { src, alt, style: 'max-width:100%;height:auto;' }]];
+      const align = styles.textAlign || 'left';
+      let imgStyle = 'max-width:100%;height:auto;display:block;';
+      if (align === 'center') imgStyle += 'margin-left:auto;margin-right:auto;';
+      else if (align === 'right') imgStyle += 'margin-left:auto;margin-right:0;';
+      else imgStyle += 'margin-left:0;margin-right:auto;';
+
+      return ['figure', { ...baseStyle, style: `${baseStyle.style || ''};display:block;margin:0;` }, ['img', { src, alt, style: imgStyle }]];
     }
 
     case 'hyperlink': {

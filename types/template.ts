@@ -186,6 +186,7 @@ export interface ImageValue {
   source?: 'url' | 'file';
   mime_type?: string;
   file_name?: string;
+  align?: 'left' | 'center' | 'right';
 }
 
 /** Payload for hyperlink placeholders. */

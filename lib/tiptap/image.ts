@@ -9,6 +9,7 @@ export interface ImageComponentNode {
     value: ImageValue;
     width?: string | number;
     height?: string | number;
+    textAlign?: 'left' | 'center' | 'right';
     [key: string]: unknown;
   };
 }
@@ -64,6 +65,7 @@ export const ImageComponent = Node.create({
       value: { default: { src: '', alt: '' } },
       width: { default: undefined },
       height: { default: undefined },
+      textAlign: { default: 'left' },
     };
   },
 
@@ -81,6 +83,12 @@ export const ImageComponent = Node.create({
 
     const value = attrs.value as Record<string, unknown>;
 
+    const textAlign = attrs.textAlign as string;
+    let alignmentStyle = 'display:block;max-width:100%;height:auto;';
+    if (textAlign === 'center') alignmentStyle += 'margin-left:auto;margin-right:auto;';
+    else if (textAlign === 'right') alignmentStyle += 'margin-left:auto;margin-right:0;';
+    else alignmentStyle += 'margin-left:0;margin-right:auto;';
+
     return [
       'img',
       mergeAttributes(
@@ -88,7 +96,7 @@ export const ImageComponent = Node.create({
           'data-component': 'image',
           src: value.src,
           alt: value.alt,
-          style: 'max-width:100%;height:auto;',
+          style: alignmentStyle,
         },
         attrs
       ),

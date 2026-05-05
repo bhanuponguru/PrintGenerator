@@ -546,6 +546,7 @@ export default function TemplateEditor({
   const [phTextColor, setPhTextColor] = useState('#000000');
   const [imageSrc, setImageSrc] = useState('https://example.com/logo.png');
   const [imageAlt, setImageAlt] = useState('Logo');
+  const [imageAlign, setImageAlign] = useState<'left' | 'center' | 'right'>('left');
 
   const [linkAlias, setLinkAlias] = useState('Documentation');
   const [linkUrl, setLinkUrl] = useState('https://example.com/docs');
@@ -567,10 +568,28 @@ export default function TemplateEditor({
       Highlight.configure({ multicolor: true }),
       TextStyle,
       Color,
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      TextAlign.configure({ types: ['heading', 'paragraph', 'image', 'imageComponent'] }),
       Placeholder,
       PaginationPlugin,
-      ImageExtension,
+      ImageExtension.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            textAlign: {
+              default: 'left',
+              parseHTML: element => element.style.textAlign || 'left',
+              renderHTML: attributes => {
+                const textAlign = attributes.textAlign || 'left';
+                let style = 'display:block;max-width:100%;height:auto;';
+                if (textAlign === 'center') style += 'margin-left:auto;margin-right:auto;';
+                else if (textAlign === 'right') style += 'margin-left:auto;margin-right:0;';
+                else style += 'margin-left:0;margin-right:auto;';
+                return { style };
+              },
+            },
+          };
+        },
+      }),
       LinkExtension.configure({ openOnClick: false, HTMLAttributes: { target: '_blank', rel: 'noopener noreferrer' } }),
       TableExtension.configure({ resizable: true }),
       TableRow,
@@ -1397,13 +1416,18 @@ export default function TemplateEditor({
 
   const insertImageComponent = useCallback(() => {
     try {
-      editor?.chain().focus().setImage({ src: imageSrc.trim(), alt: imageAlt.trim() }).run();
+      editor?.chain().focus().setImage({ 
+        src: imageSrc.trim(), 
+        alt: imageAlt.trim(),
+        // @ts-ignore - custom attribute added in extension
+        textAlign: imageAlign 
+      }).run();
       setInsertError('');
       setInsertPanel(null);
     } catch (error) {
       setInsertError(error instanceof Error ? error.message : 'Invalid image');
     }
-  }, [editor, imageSrc, imageAlt]);
+  }, [editor, imageSrc, imageAlt, imageAlign]);
 
   const handleImageFileSelection = useCallback(async (file: File | undefined) => {
     if (!file) return;
@@ -1798,36 +1822,34 @@ export default function TemplateEditor({
 
         <button type="button" className={`pg-tb-btn${activeAlign('left')}`} onMouseDown={cmd(() => {
           let chain = editor?.chain().focus();
-          if (editor?.isActive('placeholder')) {
-            chain = chain?.updateAttributes('placeholder', { textAlign: 'left' });
-          }
+          if (editor?.isActive('placeholder')) chain = chain?.updateAttributes('placeholder', { textAlign: 'left' });
+          if (editor?.isActive('image')) chain = chain?.updateAttributes('image', { textAlign: 'left' });
+          if (editor?.isActive('imageComponent')) chain = chain?.updateAttributes('imageComponent', { textAlign: 'left' });
           chain?.setTextAlign('left').run();
         })} title="Align left">
           <AlignLeft size={16} />
         </button>
         <button type="button" className={`pg-tb-btn${activeAlign('center')}`} onMouseDown={cmd(() => {
           let chain = editor?.chain().focus();
-          if (editor?.isActive('placeholder')) {
-            chain = chain?.updateAttributes('placeholder', { textAlign: 'center' });
-          }
+          if (editor?.isActive('placeholder')) chain = chain?.updateAttributes('placeholder', { textAlign: 'center' });
+          if (editor?.isActive('image')) chain = chain?.updateAttributes('image', { textAlign: 'center' });
+          if (editor?.isActive('imageComponent')) chain = chain?.updateAttributes('imageComponent', { textAlign: 'center' });
           chain?.setTextAlign('center').run();
         })} title="Align center">
           <AlignCenter size={16} />
         </button>
         <button type="button" className={`pg-tb-btn${activeAlign('right')}`} onMouseDown={cmd(() => {
           let chain = editor?.chain().focus();
-          if (editor?.isActive('placeholder')) {
-            chain = chain?.updateAttributes('placeholder', { textAlign: 'right' });
-          }
+          if (editor?.isActive('placeholder')) chain = chain?.updateAttributes('placeholder', { textAlign: 'right' });
+          if (editor?.isActive('image')) chain = chain?.updateAttributes('image', { textAlign: 'right' });
+          if (editor?.isActive('imageComponent')) chain = chain?.updateAttributes('imageComponent', { textAlign: 'right' });
           chain?.setTextAlign('right').run();
         })} title="Align right">
           <AlignRight size={16} />
         </button>
         <button type="button" className={`pg-tb-btn${activeAlign('justify')}`} onMouseDown={cmd(() => {
           let chain = editor?.chain().focus();
-          if (editor?.isActive('placeholder')) {
-            chain = chain?.updateAttributes('placeholder', { textAlign: 'justify' });
-          }
+          if (editor?.isActive('placeholder')) chain = chain?.updateAttributes('placeholder', { textAlign: 'justify' });
           chain?.setTextAlign('justify').run();
         })} title="Justify">
           <AlignJustify size={16} />
@@ -2829,6 +2851,35 @@ export default function TemplateEditor({
               <div className="pg-insert-row">
                 <label className="pg-label">Alt text</label>
                 <input className="pg-input" value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} />
+              </div>
+              <div className="pg-insert-row">
+                <label className="pg-label">Alignment</label>
+                <div className="pg-tb-group">
+                  <button
+                    type="button"
+                    className={`pg-tb-btn${imageAlign === 'left' ? ' pg-tb-active' : ''}`}
+                    onClick={() => setImageAlign('left')}
+                    title="Align Left"
+                  >
+                    <AlignLeft size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`pg-tb-btn${imageAlign === 'center' ? ' pg-tb-active' : ''}`}
+                    onClick={() => setImageAlign('center')}
+                    title="Align Center"
+                  >
+                    <AlignCenter size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`pg-tb-btn${imageAlign === 'right' ? ' pg-tb-active' : ''}`}
+                    onClick={() => setImageAlign('right')}
+                    title="Align Right"
+                  >
+                    <AlignRight size={16} />
+                  </button>
+                </div>
               </div>
               <div className="pg-insert-actions">
                 <button type="button" className="pg-btn-ghost" onClick={() => setInsertPanel(null)}>Cancel</button>
