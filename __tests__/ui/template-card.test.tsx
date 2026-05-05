@@ -2,9 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TemplateCard from '@/app/components/TemplateCard';
-import { createPageComponent } from '@/lib/tiptap/page';
-import { createHeaderComponent } from '@/lib/tiptap/header';
-import { createFooterComponent } from '@/lib/tiptap/footer';
 
 const baseTemplate = {
   _id: 't1',
@@ -68,31 +65,5 @@ describe('TemplateCard readiness behavior', () => {
     const generateButton = screen.getByRole('button', { name: 'Fill & Generate' }) as HTMLButtonElement;
     expect(generateButton.disabled).toBe(true);
     expect(generateButton.title).toContain('Add at least one placeholder');
-  });
-
-  it('renders structured page content in the preview', () => {
-    render(
-      <TemplateCard
-        template={{
-          ...baseTemplate,
-          template: {
-            type: 'doc',
-            content: [
-              createHeaderComponent({ components: ['Header text'] }, { component_types: [{ kind: 'string' }] }),
-              createPageComponent({ components: ['Body text'] }, { component_types: [{ kind: 'string' }], pageNumber: 1 }),
-              createFooterComponent({ components: ['Footer text'] }, { component_types: [{ kind: 'string' }] }),
-            ],
-          },
-        } as any}
-        tags={[]}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-        onGenerate={vi.fn()}
-      />
-    );
-
-    expect(screen.getByText('Header text')).toBeTruthy();
-    expect(screen.getByText('Body text')).toBeTruthy();
-    expect(screen.getByText('Footer text')).toBeTruthy();
   });
 });

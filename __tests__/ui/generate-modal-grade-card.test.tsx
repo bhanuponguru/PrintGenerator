@@ -54,13 +54,13 @@ describe('GenerateModal grade-card workflow', () => {
     await user.clear(gradeInputs[2]);
     await user.type(gradeInputs[2], 'A');
 
-    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
-    const jsonPreview = screen.getByLabelText('JSON Preview');
+    await user.click(screen.getByRole('button', { name: 'CSV Preview' }));
+    const csvPreview = screen.getByLabelText('CSV Preview');
 
-    expect(jsonPreview.textContent).toContain('Ada Lovelace');
-    expect(jsonPreview.textContent).toContain('Algorithms');
-    expect(jsonPreview.textContent).toContain('CS401');
-    expect(jsonPreview.textContent).toContain('A');
-    expect(jsonPreview.textContent).not.toContain('Semester 1 Courses');
+    expect(csvPreview.textContent).toContain('Ada Lovelace');
+    expect(csvPreview.textContent).toContain('Algorithms');
+    expect(csvPreview.textContent).toContain('CS401');
+    expect(csvPreview.textContent).toContain('A');
+    expect(csvPreview.textContent).not.toContain('Semester 1 Courses');
   });
 });

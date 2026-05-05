@@ -4,6 +4,8 @@ import React, { useMemo, useRef, useState } from 'react';
 import type { TemplateData, ComponentTypeSchema } from '@/types/template';
 import { deriveSchemaFromChildren } from '@/lib/tiptap/extensions';
 import { fileToDataUrl } from '@/lib/image-utils';
+import parseCsvToDataPoints from '@/lib/csv-parser';
+import dataPointsToCsv from '@/lib/datapoint-to-csv';
 
 interface GenerateModalProps {
   template: TemplateData;
@@ -1145,9 +1147,9 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
 
   const initialDataPoints = useMemo(() => buildDefaultDataPoints(placeholders), [placeholders]);
 
-  const [entryMode, setEntryMode] = useState<'visual' | 'json'>('visual');
+  const [entryMode, setEntryMode] = useState<'visual' | 'csv'>('visual');
   const [dataPoints, setDataPoints] = useState<Array<Record<string, unknown>>>(initialDataPoints);
-  const [dataPointsJson, setDataPointsJson] = useState(prettyJson(initialDataPoints));
+  const [dataPointsCsv, setDataPointsCsv] = useState(() => dataPointsToCsv(initialDataPoints));
   const [jsonError, setJsonError] = useState('');
   const [loading, setLoading] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
@@ -1159,8 +1161,8 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
       const next = [...prev];
       const base = isRecord(next[index]) ? next[index] : {};
       next[index] = { ...base, [key]: value };
-      const nextJson = prettyJson(next);
-      setDataPointsJson(nextJson);
+      const nextCsv = dataPointsToCsv(next);
+      setDataPointsCsv(nextCsv);
       setJsonError('');
       setDownloaded(false);
       return next;
@@ -1174,14 +1176,19 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = String(event.target?.result || '');
-      const parsed = parseInputJson(content);
-      if (!parsed.ok) {
-        onError(parsed.error);
-      } else {
-        setDataPoints(parsed.value);
-        setDataPointsJson(prettyJson(parsed.value));
-        setJsonError('');
-        setDownloaded(false);
+      // Parse CSV into dataPoints using server-side-compatible parser
+      try {
+        const parsed = parseCsvToDataPoints(content, template.template);
+        if (parsed.error) {
+          onError(parsed.error);
+        } else {
+          setDataPoints(parsed.dataPoints);
+          setDataPointsCsv(dataPointsToCsv(parsed.dataPoints));
+          setJsonError('');
+          setDownloaded(false);
+        }
+      } catch (err) {
+        onError('Failed to parse CSV');
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
@@ -1189,12 +1196,13 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     reader.readAsText(file);
   };
 
-  const handleExportJson = () => {
-    const blob = new Blob([dataPointsJson], { type: 'application/json' });
+  const handleExportCsv = () => {
+    const csv = dataPointsToCsv(dataPoints);
+    const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${template.name.toLowerCase().replace(/\s+/g, '-')}-data-points.json`;
+    a.download = `${template.name.toLowerCase().replace(/\s+/g, '-')}-data-points.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1204,7 +1212,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
   const addDataPoint = () => {
     const next = [...dataPoints, {}];
     setDataPoints(next);
-    setDataPointsJson(prettyJson(next));
+    setDataPointsCsv(dataPointsToCsv(next));
     setDownloaded(false);
   };
 
@@ -1212,7 +1220,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     const next = dataPoints.filter((_, idx) => idx !== index);
     const normalized = next.length > 0 ? next : [{}];
     setDataPoints(normalized);
-    setDataPointsJson(prettyJson(normalized));
+    setDataPointsCsv(dataPointsToCsv(normalized));
     setDownloaded(false);
   };
 
@@ -1221,7 +1229,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     const next = [...dataPoints];
     next.splice(index + 1, 0, copy);
     setDataPoints(next);
-    setDataPointsJson(prettyJson(next));
+    setDataPointsCsv(dataPointsToCsv(next));
     setDownloaded(false);
   };
 
@@ -1532,7 +1540,7 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
 
   const handleGenerate = async () => {
     if (dataPoints.length === 0) {
-      setJsonError('Provide at least one data point object');
+      setJsonError('Provide at least one data point');
       return;
     }
 
@@ -1540,10 +1548,11 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
     setDownloaded(false);
 
     try {
+      const csvPayload = dataPointsToCsv(dataPoints);
       const res = await fetch(`/api/templates/${template._id}/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dataPoints }),
+        headers: { 'Content-Type': 'text/csv' },
+        body: csvPayload,
       });
 
       if (!res.ok) {
@@ -1612,11 +1621,11 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
           <div className="pg-field">
             <label className="pg-label">Input Mode</label>
             <div className="pg-layout-composer-actions">
-                  <button type="button" className={`pg-layout-pattern${entryMode === 'visual' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('visual')}>Visual Inserter</button>
-                  <button type="button" className={`pg-layout-pattern${entryMode === 'json' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('json')}>JSON Preview</button>
-              <button type="button" className="pg-layout-pattern" onClick={handleExportJson}>Export JSON</button>
-              <button type="button" className="pg-layout-pattern" onClick={() => fileInputRef.current?.click()}>Upload JSON</button>
-              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json,application/json" style={{ display: 'none' }} />
+                  <button type="button" className={`pg-layout-pattern${entryMode === 'visual' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('visual')}>Visual Editor</button>
+                  <button type="button" className={`pg-layout-pattern${entryMode === 'csv' ? ' pg-tb-active' : ''}`} onClick={() => setEntryMode('csv')}>CSV Preview</button>
+              <button type="button" className="pg-layout-pattern" onClick={handleExportCsv}>Export CSV</button>
+              <button type="button" className="pg-layout-pattern" onClick={() => fileInputRef.current?.click()}>Upload CSV</button>
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".csv,text/csv" style={{ display: 'none' }} />
             </div>
           </div>
 
@@ -1632,20 +1641,20 @@ export default function GenerateModal({ template, onClose, onError }: GenerateMo
             />
           ) : (
             <div className="pg-field">
-              <label className="pg-label" htmlFor="g-dp-json">JSON Preview</label>
+              <label className="pg-label" htmlFor="g-dp-csv">CSV Preview</label>
               <pre
-                id="g-dp-json"
+                id="g-dp-csv"
                 className="pg-layout-template-output"
                 aria-readonly="true"
-                aria-label="JSON Preview"
+                aria-label="CSV Preview"
                 style={{ maxHeight: '260px', overflow: 'auto', margin: 0 }}
               >
-                {dataPointsJson}
+                {dataPointsCsv}
               </pre>
               {jsonError ? (
                 <span className="pg-field-error">{jsonError}</span>
               ) : (
-                <span className="pg-field-hint">JSON is read-only in generation mode and mirrors the visual inputs.</span>
+                <span className="pg-field-hint">CSV is read-only in generation mode and mirrors the visual inputs.</span>
               )}
             </div>
           )}

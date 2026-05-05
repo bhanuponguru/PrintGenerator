@@ -39,11 +39,11 @@ describe('GenerateModal transcript workflow', () => {
     await user.clear(gradeTableInputs[0]);
     await user.type(gradeTableInputs[0], 'Programming 1');
 
-    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
-    const jsonPreview = screen.getByLabelText('JSON Preview');
+    await user.click(screen.getByRole('button', { name: 'CSV Preview' }));
+    const csvPreview = screen.getByLabelText('CSV Preview');
 
-    expect(jsonPreview.textContent).toContain('1');
-    expect(jsonPreview.textContent).toContain('2');
-    expect(jsonPreview.textContent).toContain('Programming 1');
+    expect(csvPreview.textContent).toContain('1');
+    expect(csvPreview.textContent).toContain('2');
+    expect(csvPreview.textContent).toContain('Programming 1');
   });
 });

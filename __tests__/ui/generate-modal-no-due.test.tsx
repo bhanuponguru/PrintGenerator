@@ -39,11 +39,11 @@ describe('GenerateModal no-due workflow', () => {
     await user.clear(detailsScope.getByPlaceholderText('department'));
     await user.type(detailsScope.getByPlaceholderText('department'), 'CSE');
 
-    await user.click(screen.getByRole('button', { name: 'JSON Preview' }));
+    await user.click(screen.getByRole('button', { name: 'CSV Preview' }));
 
-    const jsonPreview = screen.getByLabelText('JSON Preview');
-    expect(jsonPreview.textContent).toContain('Ada Lovelace');
-    expect(jsonPreview.textContent).toContain('2026-01');
-    expect(jsonPreview.textContent).toContain('CSE');
+    const csvPreview = screen.getByLabelText('CSV Preview');
+    expect(csvPreview.textContent).toContain('Ada Lovelace');
+    expect(csvPreview.textContent).toContain('2026-01');
+    expect(csvPreview.textContent).toContain('CSE');
   });
 });

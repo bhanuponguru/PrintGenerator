@@ -1,5 +1,13 @@
-import { collectPlaceholderValidationConfigMap } from './document-generation';
-import { DataPoint, PlaceholderValidationConfigMap } from './document-generation';
+import type { ComponentTypeSchema } from '@/types/template';
+import { deriveSchemaFromChildren } from './tiptap/extensions';
+
+type DataPoint = Record<string, unknown>;
+
+interface PlaceholderValidationConfig {
+  schema: ComponentTypeSchema;
+}
+
+type PlaceholderValidationConfigMap = Record<string, PlaceholderValidationConfig>;
 
 export interface CsvParseResult {
   dataPoints: DataPoint[];
@@ -9,6 +17,59 @@ export interface CsvParseResult {
 
 interface ParseOpts {
   idField?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function walkTemplate(node: unknown, visit: (typedNode: Record<string, unknown>) => void) {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      walkTemplate(child, visit);
+    }
+    return;
+  }
+
+  if (!isRecord(node)) {
+    return;
+  }
+
+  visit(node);
+
+  if (node.attrs) {
+    walkTemplate(node.attrs, visit);
+  }
+
+  if (node.content) {
+    walkTemplate(node.content, visit);
+  }
+}
+
+function collectPlaceholderValidationConfigMap(templateJson: Record<string, unknown>): PlaceholderValidationConfigMap {
+  const configMap: PlaceholderValidationConfigMap = {};
+
+  walkTemplate(templateJson, (typedNode) => {
+    if (typedNode.type !== 'placeholder') {
+      return;
+    }
+
+    const attrs = (typedNode.attrs as Record<string, unknown> | undefined) || {};
+    const rawKey = attrs.key;
+    const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+    if (!key) {
+      return;
+    }
+
+    const kind = typeof attrs.schema === 'object' && attrs.schema && typeof (attrs.schema as any).kind === 'string'
+      ? (attrs.schema as any).kind
+      : (typeof attrs.kind === 'string' ? attrs.kind : 'string');
+
+    const schema = deriveSchemaFromChildren(kind, attrs as Record<string, any>, typedNode.content as any);
+    configMap[key] = { schema };
+  });
+
+  return configMap;
 }
 
 /**
